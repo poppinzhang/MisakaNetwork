@@ -1,0 +1,10 @@
+{
+  "listen": "127.0.0.1:7443",
+  "cert": "tls/server.crt",
+  "key": "tls/server.key",
+  "ca": "tls/ca.crt",
+  "runtime": "runtime/misaka-bili-runtime",
+  "max_concurrency": 2,
+  "queue_capacity": 64,
+  "history_capacity": 1000
+}

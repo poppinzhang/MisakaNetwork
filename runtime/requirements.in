@@ -1,0 +1,8 @@
+# Only the upstream core engine is included; no web UI or updater is packaged.
+requests[socks]>=2.31,<3
+httpx[brotli,http2,socks,zstd]==0.28.1
+loguru==0.7.3
+tinydb==4.8.2
+ntplib==0.4.0
+qrcode[pil]>=7.4.2,<9
+cryptography>=43,<49

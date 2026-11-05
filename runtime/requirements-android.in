@@ -1,0 +1,7 @@
+# LastOrder account/catalog/config client only; purchases execute in Sisters.
+requests[socks]>=2.31,<3
+loguru==0.7.3
+ntplib==0.4.0
+tinydb==4.8.2
+qrcode==8.2
+pypng==0.20220715.0

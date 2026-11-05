@@ -1,0 +1,1 @@
+-keep class com.misakanetwork.last_order.EmbeddedBridge { *; }

@@ -1,0 +1,37 @@
+import requests
+
+from util.Constant import MEOW_API_BASE
+from util.notifer.Notifier import NotifierBase, DEFAULT_HTTP_TIMEOUT
+
+
+class MeoWNotifier(NotifierBase):
+    def __init__(
+        self,
+        nickname,
+        title,
+        content,
+        interval_seconds=10,
+        duration_minutes=10,
+        timeout=DEFAULT_HTTP_TIMEOUT,
+    ):
+        super().__init__(title, content, interval_seconds, duration_minutes, timeout)
+        self.nickname = str(nickname or "").strip().strip("/")
+
+    def send_message(self, title, message):
+        if not self.nickname:
+            raise ValueError("MeoW nickname is required")
+
+        response = requests.post(
+            f"{MEOW_API_BASE}/{self.nickname}",
+            json={"title": title, "msg": message},
+            timeout=self.timeout,
+        )
+        response.raise_for_status()
+
+        try:
+            data = response.json()
+        except ValueError as exc:
+            raise RuntimeError(f"MeoW response is not JSON: {response.text}") from exc
+
+        if data.get("status") != 200:
+            raise RuntimeError(f"MeoW push failed: {data}")

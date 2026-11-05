@@ -1,0 +1,8 @@
+MisakaNetwork includes biliTickerBuy 2.15.17.
+Source: https://github.com/mikumifa/biliTickerBuy
+License: PolyForm Noncommercial License 1.0.0
+Required Notice: Copyright (c) 2023 mikumifa
+
+The original license is included in vendor/biliTickerBuy/LICENSE and copied to
+distributed runtime bundles. See vendor/biliTickerBuy/MANIFEST.json for the
+allowlisted source snapshot and the documented embedded-runtime adaptations.

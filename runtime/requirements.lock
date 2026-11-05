@@ -1,0 +1,26 @@
+# Resolved core dependencies for biliTickerBuy 2.15.17; Python >=3.11.
+anyio==4.15.1
+brotli==1.2.1
+certifi==2026.10.23
+cffi==2.1.1
+charset-normalizer==3.5.2
+cryptography==48.0.1
+h11==0.16.0
+h2==4.4.1
+hpack==4.2.0
+httpcore==1.0.9
+httpx==0.28.1
+hyperframe==6.1.0
+idna==3.20
+loguru==0.7.3
+ntplib==0.4.0
+pillow==13.0.0
+pycparser==3.12
+pysocks==1.7.1
+qrcode==8.2
+requests==2.34.2
+socksio==1.0.0
+tinydb==4.8.2
+typing-extensions==4.16.0
+urllib3==2.8.0
+zstandard==0.25.0

@@ -1,0 +1,13 @@
+# Android embedded Python 3.11 client, pure-Python wheels only.
+# Requests dependencies mirror the desktop runtime lock.
+certifi==2026.10.23
+charset-normalizer==3.5.2
+idna==3.20
+loguru==0.7.3
+ntplib==0.4.0
+pypng==0.20220715.0
+pysocks==1.7.1
+qrcode==8.2
+requests==2.34.2
+tinydb==4.8.2
+urllib3==2.8.0

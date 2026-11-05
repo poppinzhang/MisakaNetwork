@@ -1,0 +1,9 @@
+FROM ubuntu:24.04
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-venv python3-dev build-essential binutils ca-certificates && rm -rf /var/lib/apt/lists/*
+WORKDIR /build
+COPY runtime/requirements*.lock /build/
+RUN python3 -m venv /opt/runtime-venv && /opt/runtime-venv/bin/pip install --no-cache-dir -r requirements-build.lock
+COPY runtime /build/runtime
+COPY scripts/release_config.py /build/scripts/release_config.py
+ENTRYPOINT ["/opt/runtime-venv/bin/python", "/build/runtime/build.py"]

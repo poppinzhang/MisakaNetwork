@@ -1,0 +1,223 @@
+name: Package offline release
+on:
+  workflow_dispatch:
+    inputs:
+      android_test_signing:
+        description: Use a debug key for test-only Android APKs
+        type: boolean
+        default: false
+permissions:
+  contents: read
+jobs:
+  bundles:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            target: linux-amd64
+          - runner: ubuntu-24.04-arm
+            target: linux-arm64
+          - runner: macos-15-intel
+            target: macos-amd64
+          - runner: macos-15
+            target: macos-arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: go test -race ./... && go vet ./...
+      - run: python -m pip install -r runtime/requirements-build.lock
+      - run: python -m unittest discover -s runtime/tests -v
+      - run: python -m unittest discover -s scripts -p 'test_*.py' -v
+      - run: python runtime/build.py --output .build/runtime/${{ matrix.target }}
+      - run: python runtime/check_bundle.py .build/runtime/${{ matrix.target }}/misaka-runtime/misaka-runtime
+      - run: python runtime/check_privacy.py .build/runtime/${{ matrix.target }}/misaka-runtime
+      - run: python scripts/build_bundles.py --targets ${{ matrix.target }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bundle-${{ matrix.target }}
+          path: .build/bundles/${{ matrix.target }}.tar.gz*
+          if-no-files-found: error
+  macos:
+    needs: bundles
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15-intel
+            arch: amd64
+          - runner: macos-15
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: bundle-*
+          path: .build/bundles
+          merge-multiple: true
+      - run: python scripts/index_bundles.py .build/bundles
+      - name: Install pinned Flutter
+        run: |
+          git clone --depth 1 --branch 3.47.6 https://github.com/flutter/flutter.git /tmp/misaka-flutter
+          echo /tmp/misaka-flutter/bin >> "$GITHUB_PATH"
+      - name: Test LastOrder
+        working-directory: LastOrder
+        run: flutter pub get --enforce-lockfile && flutter analyze && flutter test
+      - run: python scripts/build_macos.py
+      - name: Restore native local runtime
+        run: |
+          mkdir -p .build/unpack .build/runtime/macos-${{ matrix.arch }}
+          tar -xzf .build/bundles/macos-${{ matrix.arch }}.tar.gz -C .build/unpack
+          mv .build/unpack/runtime .build/runtime/macos-${{ matrix.arch }}/misaka-runtime
+      - run: python scripts/package_macos.py --app .build/LastOrder.app --arch ${{ matrix.arch }}
+      - run: python scripts/check_release.py dist/0.1.5 --target macos-${{ matrix.arch }} --forbid "$HOME" --forbid "$GITHUB_WORKSPACE"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LastOrder-macos-${{ matrix.arch }}
+          path: |
+            dist/0.1.5/*.zip
+            dist/0.1.5/*.sha256
+            dist/0.1.5/SHA256SUMS
+            dist/0.1.5/release.json
+          if-no-files-found: error
+  windows:
+    needs: bundles
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: go test ./internal/control ./cmd/misakactl
+      - run: go vet ./internal/control ./cmd/misakactl
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: bundle-*
+          path: .build/bundles
+          merge-multiple: true
+      - run: python scripts/index_bundles.py .build/bundles
+      - name: Install pinned Flutter
+        run: |
+          git clone --depth 1 --branch 3.47.6 https://github.com/flutter/flutter.git C:/misaka-flutter
+          Add-Content $env:GITHUB_PATH C:/misaka-flutter/bin
+      - name: Test LastOrder
+        working-directory: LastOrder
+        run: flutter pub get --enforce-lockfile && flutter analyze && flutter test
+      - run: python -m pip install -r runtime/requirements-build.lock
+      - run: python runtime/build.py --output .build/runtime/windows-amd64
+      - run: python runtime/check_bundle.py .build/runtime/windows-amd64/misaka-runtime/misaka-runtime.exe
+      - run: python runtime/check_privacy.py .build/runtime/windows-amd64/misaka-runtime
+      - run: python scripts/build_windows.py
+      - run: python scripts/package_windows.py
+      - run: python scripts/check_release.py dist/0.1.5 --target windows-amd64 --forbid "$env:USERPROFILE" --forbid "$env:GITHUB_WORKSPACE"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LastOrder-windows-amd64
+          path: |
+            dist/0.1.5/*.zip
+            dist/0.1.5/*.sha256
+            dist/0.1.5/SHA256SUMS
+            dist/0.1.5/release.json
+          if-no-files-found: error
+  android:
+    needs: bundles
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - run: sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;28.2.13676358"
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: bundle-*
+          path: .build/bundles
+          merge-multiple: true
+      - run: python scripts/index_bundles.py .build/bundles
+      - name: Install pinned Flutter
+        run: |
+          git clone --depth 1 --branch 3.47.6 https://github.com/flutter/flutter.git /tmp/misaka-flutter
+          echo /tmp/misaka-flutter/bin >> "$GITHUB_PATH"
+      - name: Restore release keystore
+        if: ${{ !inputs.android_test_signing }}
+        env:
+          MISAKA_ANDROID_KEYSTORE_BASE64: ${{ secrets.MISAKA_ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          python - <<'PY'
+          import base64, os
+          from pathlib import Path
+          value = os.environ.get('MISAKA_ANDROID_KEYSTORE_BASE64')
+          if not value:
+              raise SystemExit('Release signing secret is required; test signing must be selected explicitly')
+          path = Path(os.environ['RUNNER_TEMP']) / 'misaka-release.keystore'
+          path.write_bytes(base64.b64decode(value, validate=True))
+          path.chmod(0o600)
+          with open(os.environ['GITHUB_ENV'], 'a') as output:
+              output.write(f'MISAKA_ANDROID_KEYSTORE={path}\n')
+          PY
+      - name: Package Android
+        env:
+          MISAKA_ANDROID_STORE_PASSWORD: ${{ secrets.MISAKA_ANDROID_STORE_PASSWORD }}
+          MISAKA_ANDROID_KEY_ALIAS: ${{ secrets.MISAKA_ANDROID_KEY_ALIAS }}
+          MISAKA_ANDROID_KEY_PASSWORD: ${{ secrets.MISAKA_ANDROID_KEY_PASSWORD }}
+          MISAKA_ANDROID_TEST_SIGNING: ${{ inputs.android_test_signing }}
+        run: |
+          if [ "$MISAKA_ANDROID_TEST_SIGNING" = true ]; then
+            unset MISAKA_ANDROID_STORE_PASSWORD MISAKA_ANDROID_KEY_ALIAS MISAKA_ANDROID_KEY_PASSWORD
+            python scripts/package_android.py --allow-debug-signing
+          else
+            python scripts/package_android.py
+          fi
+      - run: python scripts/check_release.py dist/0.1.5 --target android-arm64 --target android-amd64 --forbid "$HOME" --forbid "$GITHUB_WORKSPACE"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LastOrder-android
+          path: |
+            dist/0.1.5/*.apk
+            dist/0.1.5/*.sha256
+            dist/0.1.5/SHA256SUMS
+            dist/0.1.5/release.json
+          if-no-files-found: error
+  complete-release:
+    needs: [macos, windows, android]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: LastOrder-*
+          path: .build/release-inputs
+      - run: python scripts/release_manifest.py .build/release-inputs/LastOrder-* --output dist/0.1.5
+      - run: python scripts/check_release.py dist/0.1.5
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LastOrder-0.1.5-complete
+          path: dist/0.1.5/*
+          if-no-files-found: error

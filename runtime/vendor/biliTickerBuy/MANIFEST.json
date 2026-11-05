@@ -1,0 +1,291 @@
+{
+  "name": "biliTickerBuy",
+  "version": "2.15.17",
+  "source": "https://github.com/mikumifa/biliTickerBuy",
+  "license": "PolyForm Noncommercial License 1.0.0",
+  "required_notice": "Copyright (c) 2023 mikumifa",
+  "files": [
+    {
+      "path": "LICENSE",
+      "upstream_sha256": "a033a88e2c3b88c2aa261c237fe3009380f0cf7dccf907c3f210c430e99eb970",
+      "sha256": "a033a88e2c3b88c2aa261c237fe3009380f0cf7dccf907c3f210c430e99eb970"
+    },
+    {
+      "path": "app_cmd/__init__.py",
+      "upstream_sha256": "5bb8ea3a391ec015a12b145fa435729830e011bd7cf2e6d33b3ec6bc287fa470",
+      "sha256": "5bb8ea3a391ec015a12b145fa435729830e011bd7cf2e6d33b3ec6bc287fa470"
+    },
+    {
+      "path": "app_cmd/config/BuyConfig.py",
+      "upstream_sha256": "17d7b9589d7365ead57f85d56b72fc18a908eb1596a4f1e32ac1b057a0ca8410",
+      "sha256": "17d7b9589d7365ead57f85d56b72fc18a908eb1596a4f1e32ac1b057a0ca8410"
+    },
+    {
+      "path": "app_cmd/config/ConfigBasic.py",
+      "upstream_sha256": "9c10d734623ba9da184c1033a798aecad6b994637364d50b0d06865f53c9fabf",
+      "sha256": "9c10d734623ba9da184c1033a798aecad6b994637364d50b0d06865f53c9fabf"
+    },
+    {
+      "path": "app_cmd/config/NotifierConfig.py",
+      "upstream_sha256": "a3f075089f53b1e179db8ac7bcf4d9859565ff86ecb0da4ca87847f1689c9889",
+      "sha256": "a3f075089f53b1e179db8ac7bcf4d9859565ff86ecb0da4ca87847f1689c9889"
+    },
+    {
+      "path": "app_version.py",
+      "upstream_sha256": "5145c14e8d3206a9f0e99f530193c1ccbb148b5ae113a623c748906bf2bb0f8d",
+      "sha256": "5145c14e8d3206a9f0e99f530193c1ccbb148b5ae113a623c748906bf2bb0f8d"
+    },
+    {
+      "path": "assets/fail_messages.json",
+      "upstream_sha256": "61c4cc335b15c7557608075d5e81fb896c09a9519e478c60674336ffdc49ba1c",
+      "sha256": "61c4cc335b15c7557608075d5e81fb896c09a9519e478c60674336ffdc49ba1c"
+    },
+    {
+      "path": "cptoken/__init__.py",
+      "upstream_sha256": "b454815f30ea4d4aac0242a8102616ddec72c6668fe8f945c8436dc7ad0a4d92",
+      "sha256": "b454815f30ea4d4aac0242a8102616ddec72c6668fe8f945c8436dc7ad0a4d92"
+    },
+    {
+      "path": "interface/__init__.py",
+      "upstream_sha256": "527a116a47d8d858b298cd523c69a819f38f8ba2a906a25d735b64b15586ec2a",
+      "sha256": "527a116a47d8d858b298cd523c69a819f38f8ba2a906a25d735b64b15586ec2a"
+    },
+    {
+      "path": "interface/auth.py",
+      "upstream_sha256": "a9bd8526b6fd55fb746c2b84fa442ca162fbb526c764a20db490c47e9546b2c1",
+      "sha256": "a9bd8526b6fd55fb746c2b84fa442ca162fbb526c764a20db490c47e9546b2c1"
+    },
+    {
+      "path": "interface/common.py",
+      "upstream_sha256": "43c0d857d9083a14bfeeb270870690dd966773715891e9b4772614c92d23bde9",
+      "patch": "Use in-memory cookie storage when embedded.",
+      "sha256": "dcf4e7d94a091c5ea1950640cc57840131f1ee70471ae4b2fc9e87c69d41c5e1"
+    },
+    {
+      "path": "interface/config.py",
+      "upstream_sha256": "514635e76acd5404c11fef425dfa49d67325b00478860da8dd592d466fa52630",
+      "sha256": "514635e76acd5404c11fef425dfa49d67325b00478860da8dd592d466fa52630"
+    },
+    {
+      "path": "interface/execution.py",
+      "upstream_sha256": "79535946cb5a1b4644b529a3fab4ce205d1036ba4d57987e4df03a8ab3657a86",
+      "sha256": "79535946cb5a1b4644b529a3fab4ce205d1036ba4d57987e4df03a8ab3657a86"
+    },
+    {
+      "path": "interface/managed_runner.py",
+      "upstream_sha256": "be4a5aaf2d739c741badae59ce13b14483e886010e4007c63bd79f86d31d99c9",
+      "sha256": "be4a5aaf2d739c741badae59ce13b14483e886010e4007c63bd79f86d31d99c9"
+    },
+    {
+      "path": "interface/project.py",
+      "upstream_sha256": "be02132cd5fbde74e7397ce7ab2121ac4fd757b3106c96550203266f858b97ea",
+      "sha256": "be02132cd5fbde74e7397ce7ab2121ac4fd757b3106c96550203266f858b97ea"
+    },
+    {
+      "path": "interface/search.py",
+      "upstream_sha256": "d7ddcced9fefa3ca5aebe1593966556bdb2458e55aaeced611f5d696b81138e8",
+      "sha256": "d7ddcced9fefa3ca5aebe1593966556bdb2458e55aaeced611f5d696b81138e8"
+    },
+    {
+      "path": "interface/types.py",
+      "upstream_sha256": "fc1765149607acbd3784d2d3ed7fffd6fa3e1e74158b37525a2f02eb897e3022",
+      "sha256": "fc1765149607acbd3784d2d3ed7fffd6fa3e1e74158b37525a2f02eb897e3022"
+    },
+    {
+      "path": "task/__init__.py",
+      "upstream_sha256": "946497f4b4f1ef332d1166dc8b8d590daf63d122d8e27a6e8914e478ab0dfbf7",
+      "sha256": "946497f4b4f1ef332d1166dc8b8d590daf63d122d8e27a6e8914e478ab0dfbf7"
+    },
+    {
+      "path": "task/buy.py",
+      "upstream_sha256": "bd6c259b73bc03814192e0c685c14583490b2c05cb94491824598686a02573f5",
+      "sha256": "bd6c259b73bc03814192e0c685c14583490b2c05cb94491824598686a02573f5"
+    },
+    {
+      "path": "task/buy_helpers.py",
+      "upstream_sha256": "0df9cc550176fc6efa71875bf6d35736d7dd232cfb4ebbbee8d962dab9a22a9a",
+      "sha256": "0df9cc550176fc6efa71875bf6d35736d7dd232cfb4ebbbee8d962dab9a22a9a"
+    },
+    {
+      "path": "task/buy_types.py",
+      "upstream_sha256": "31ccc6290db9f3df18508da791737ee61f8c3bb4ff6ad89e590157e2b5a2e543",
+      "sha256": "31ccc6290db9f3df18508da791737ee61f8c3bb4ff6ad89e590157e2b5a2e543"
+    },
+    {
+      "path": "task/page_gate.py",
+      "upstream_sha256": "ffff60657b26f36c605d589b1de60cf24ed75c5479f20b94f921f637175838ea",
+      "sha256": "ffff60657b26f36c605d589b1de60cf24ed75c5479f20b94f921f637175838ea"
+    },
+    {
+      "path": "util/Constant.py",
+      "upstream_sha256": "c157a0072f4141c9a87b14d8523764d4c72523db2d6737172daef0f1cb26958d",
+      "sha256": "c157a0072f4141c9a87b14d8523764d4c72523db2d6737172daef0f1cb26958d"
+    },
+    {
+      "path": "util/ErrorCodes.py",
+      "upstream_sha256": "ef0c733b96cecadf9fe8d4032e37e96cea0029a3299e530b976109c99392598f",
+      "sha256": "ef0c733b96cecadf9fe8d4032e37e96cea0029a3299e530b976109c99392598f"
+    },
+    {
+      "path": "util/Storage/CleanupUtil.py",
+      "upstream_sha256": "6e17dfdadfa04113b314ebdd20c2d4cf6819df55019f51e49f172d024e474e2d",
+      "sha256": "6e17dfdadfa04113b314ebdd20c2d4cf6819df55019f51e49f172d024e474e2d"
+    },
+    {
+      "path": "util/Storage/KVDatabase.py",
+      "upstream_sha256": "ce32a477a90665fe575093bd87873cb6c68163518842098fdfceebe00221af1b",
+      "sha256": "ce32a477a90665fe575093bd87873cb6c68163518842098fdfceebe00221af1b"
+    },
+    {
+      "path": "util/TimeUtil.py",
+      "upstream_sha256": "24c4375ed78da48328477899ac0b892b61b3e82c34c858948b8a9a0ea9a52a18",
+      "sha256": "24c4375ed78da48328477899ac0b892b61b3e82c34c858948b8a9a0ea9a52a18"
+    },
+    {
+      "path": "util/__init__.py",
+      "upstream_sha256": "eebc690e75957e8fd4d9623ce6fe7aa06ffea2d3d00b1b24c853c8890424e4b6",
+      "patch": "Use process-private state directory and disable raw upstream logging when embedded.",
+      "sha256": "b1c388e541d48796910f7f47ab51e3dbd3a4681ab4786728328281a49e1946e0"
+    },
+    {
+      "path": "util/h2client/abstract_h2_client.py",
+      "upstream_sha256": "beba41fe86ffcbcaacba6e756131b5517df416b0031ef6fb6cbcb4230995f8b2",
+      "sha256": "beba41fe86ffcbcaacba6e756131b5517df416b0031ef6fb6cbcb4230995f8b2"
+    },
+    {
+      "path": "util/h2client/client_ja.py",
+      "upstream_sha256": "0f552f2c55dce91c286616dd9c5f6b19dabc8cc3f75ca148a5734462b4773f86",
+      "sha256": "0f552f2c55dce91c286616dd9c5f6b19dabc8cc3f75ca148a5734462b4773f86"
+    },
+    {
+      "path": "util/h2client/constants.py",
+      "upstream_sha256": "2de04e1afdf7bde1bc5f2d304ff89832687f833ac69255a0b3085aa5e233bde3",
+      "sha256": "2de04e1afdf7bde1bc5f2d304ff89832687f833ac69255a0b3085aa5e233bde3"
+    },
+    {
+      "path": "util/h2client/h2connection.py",
+      "upstream_sha256": "16d22df14d67e41ca77eb12b388dc4dacdfb0b46a22258eb48c56143f4725cfa",
+      "sha256": "16d22df14d67e41ca77eb12b388dc4dacdfb0b46a22258eb48c56143f4725cfa"
+    },
+    {
+      "path": "util/h2client/ja_h2_client.py",
+      "upstream_sha256": "ba388c82aa0ef013bb3e275d94c20263c64c97617869caca2e93ea153ab39cb7",
+      "sha256": "ba388c82aa0ef013bb3e275d94c20263c64c97617869caca2e93ea153ab39cb7"
+    },
+    {
+      "path": "util/h2client/local_sources.py",
+      "upstream_sha256": "2178d77ae2df442584bd8b237799d7aa3b27a847daae85982ab36cb0f9d07bb0",
+      "sha256": "2178d77ae2df442584bd8b237799d7aa3b27a847daae85982ab36cb0f9d07bb0"
+    },
+    {
+      "path": "util/log/LogConfig.py",
+      "upstream_sha256": "7edf3e6373c1dc5cba6154ac0848396ef43c65ee2902836e5314ccda79a785b9",
+      "sha256": "7edf3e6373c1dc5cba6154ac0848396ef43c65ee2902836e5314ccda79a785b9"
+    },
+    {
+      "path": "util/notifer/AudioUtil.py",
+      "upstream_sha256": "ac4b896516c535243bc1bc4721218bcf3caf61aaf8f35a663d2a91c9fb3b5444",
+      "sha256": "ac4b896516c535243bc1bc4721218bcf3caf61aaf8f35a663d2a91c9fb3b5444"
+    },
+    {
+      "path": "util/notifer/BarkUtil.py",
+      "upstream_sha256": "616e6e5bae900493b8cc26c9f0447b3b970aab12225397b4a46cd59d51535c46",
+      "sha256": "616e6e5bae900493b8cc26c9f0447b3b970aab12225397b4a46cd59d51535c46"
+    },
+    {
+      "path": "util/notifer/MeoWUtil.py",
+      "upstream_sha256": "b9e1db0e9311e664452f9d3aba886f3db5081ef054abe90c603bbad9c7610585",
+      "sha256": "b9e1db0e9311e664452f9d3aba886f3db5081ef054abe90c603bbad9c7610585"
+    },
+    {
+      "path": "util/notifer/Notifier.py",
+      "upstream_sha256": "f33f09ca36ceb334756fd5c35726aef6c372829d48deb2911603ba8a384dfb12",
+      "sha256": "f33f09ca36ceb334756fd5c35726aef6c372829d48deb2911603ba8a384dfb12"
+    },
+    {
+      "path": "util/notifer/NtfyUtil.py",
+      "upstream_sha256": "bd835b2f6a6830e86f8eb2dd0a7c308f45a3c2f275731c3d64ddfc0406e8da46",
+      "sha256": "bd835b2f6a6830e86f8eb2dd0a7c308f45a3c2f275731c3d64ddfc0406e8da46"
+    },
+    {
+      "path": "util/notifer/RandomMessages.py",
+      "upstream_sha256": "842a1eff1d5151d7955817e691b41906c191597e81993d9cad44fee48db4e15f",
+      "sha256": "842a1eff1d5151d7955817e691b41906c191597e81993d9cad44fee48db4e15f"
+    },
+    {
+      "path": "util/notifer/ServerChanUtil.py",
+      "upstream_sha256": "471aaa882d71023679f360ffedc9a864b70581d0035858331bdffdc6e7ae8be9",
+      "sha256": "471aaa882d71023679f360ffedc9a864b70581d0035858331bdffdc6e7ae8be9"
+    },
+    {
+      "path": "util/notifer/TelegramUtil.py",
+      "upstream_sha256": "d5129272b0a6b3d082f62669b5795c179947451effca780e27efe57fdb37add8",
+      "sha256": "d5129272b0a6b3d082f62669b5795c179947451effca780e27efe57fdb37add8"
+    },
+    {
+      "path": "util/proxy/ProxyApiProvider.py",
+      "upstream_sha256": "e7bead38b03bd46c824863c20134d8b058ac37a10dfea1352c802ef93440dda7",
+      "sha256": "e7bead38b03bd46c824863c20134d8b058ac37a10dfea1352c802ef93440dda7"
+    },
+    {
+      "path": "util/proxy/ProxyBackoff.py",
+      "upstream_sha256": "43d34914e073bed592ab2c23e62fa6ed7ef9d38631990ef56bae633b04e4619f",
+      "sha256": "43d34914e073bed592ab2c23e62fa6ed7ef9d38631990ef56bae633b04e4619f"
+    },
+    {
+      "path": "util/proxy/ProxyManager.py",
+      "upstream_sha256": "6f1e3339622044654c6638ea31508b4d9538202d5e8eccc7c1ae3edb7e69287a",
+      "sha256": "6f1e3339622044654c6638ea31508b4d9538202d5e8eccc7c1ae3edb7e69287a"
+    },
+    {
+      "path": "util/proxy/ProxyState.py",
+      "upstream_sha256": "982ae8f25983ae0e2cd808f69d99e785de8fbd5b23a25086880d39b8a9e8be5f",
+      "sha256": "982ae8f25983ae0e2cd808f69d99e785de8fbd5b23a25086880d39b8a9e8be5f"
+    },
+    {
+      "path": "util/proxy/ProxyTester.py",
+      "upstream_sha256": "7a2958834a9d10a44657bb355fdd46279ef77252be18a3b773e92bd690a4c31f",
+      "sha256": "7a2958834a9d10a44657bb355fdd46279ef77252be18a3b773e92bd690a4c31f"
+    },
+    {
+      "path": "util/proxy/PushPlusUtil.py",
+      "upstream_sha256": "d592daefeefa1491bd37e9d36615bd6f7faa0cc8b4d67b7421b204eed5a9c59e",
+      "sha256": "d592daefeefa1491bd37e9d36615bd6f7faa0cc8b4d67b7421b204eed5a9c59e"
+    },
+    {
+      "path": "util/request/BiliRequest.py",
+      "upstream_sha256": "512e7975fc7f052913fcac31c72bc11630b5b3e79e371c87d6f5374820dd079d",
+      "sha256": "512e7975fc7f052913fcac31c72bc11630b5b3e79e371c87d6f5374820dd079d"
+    },
+    {
+      "path": "util/request/BrowerState.py",
+      "upstream_sha256": "b8237dc5c3d789960a39ba02298f44494edfbbdc3105b5fc4973741f233ce701",
+      "sha256": "b8237dc5c3d789960a39ba02298f44494edfbbdc3105b5fc4973741f233ce701"
+    },
+    {
+      "path": "util/request/CookieManager.py",
+      "upstream_sha256": "767b6b00b3f0f8f8793598315a5e0856ad3aa98db702e8414e3514580acd7294",
+      "sha256": "767b6b00b3f0f8f8793598315a5e0856ad3aa98db702e8414e3514580acd7294"
+    },
+    {
+      "path": "util/request/TokenUtil.py",
+      "upstream_sha256": "1850796eb78e3d9695bec585c1b4cb1129186515c581c0df117745da91e9b480",
+      "sha256": "1850796eb78e3d9695bec585c1b4cb1129186515c581c0df117745da91e9b480"
+    },
+    {
+      "path": "util/request/exceptions/__init__.py",
+      "upstream_sha256": "b615e6b57ef0a46fc40c40cb293ce1bfcf983319aed6c05460579f41b6f84b1f",
+      "sha256": "b615e6b57ef0a46fc40c40cb293ce1bfcf983319aed6c05460579f41b6f84b1f"
+    },
+    {
+      "path": "util/request/exceptions/connection.py",
+      "upstream_sha256": "84f870dd80ab76d00ffcac298b89770ae18d7ea6e2c9fa378d40a663255d6a4e",
+      "sha256": "84f870dd80ab76d00ffcac298b89770ae18d7ea6e2c9fa378d40a663255d6a4e"
+    },
+    {
+      "path": "util/request/exceptions/rate_limit.py",
+      "upstream_sha256": "b8ea407c2bf35ad8e9e9702c7c381739810124fe5e78aa4510efdda64c27c763",
+      "sha256": "b8ea407c2bf35ad8e9e9702c7c381739810124fe5e78aa4510efdda64c27c763"
+    }
+  ]
+}
