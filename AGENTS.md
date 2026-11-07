@@ -55,7 +55,7 @@ LastOrder 模块 在本地部署，可以完成 抢票 Agent 部署、抢票平�
 ### 工具链与依赖
 
 * 当前工具链：Flutter 3.47.6 / Dart 3.13.5、Go 1.26、Python 3.11+；macOS 打包需要 Xcode。
-* Windows 完整打包需要 Windows 10+ x64 与 Visual Studio 2022 C++ 工具链；Android 需要 JDK 17、SDK/build-tools 36、NDK 28.2.13676358 和 Python 3.11。平台与签名步骤见 `docs/打包与发布.md`。
+* Windows 完整打包需要 Windows 10+ x64 与 Visual Studio 2022 C++ 工具链（含 v143 ATL x86/x64 组件）；Android 需要 JDK 17、SDK/build-tools 36、NDK 28.2.13676358 和 Python 3.11。平台与签名步骤见 `docs/打包与发布.md`。
 * 协议重新生成需要 Protobuf 31+、`protoc-gen-go`、`protoc-gen-go-grpc` 和 Dart `protoc_plugin`。
 * 依赖锁定文件为 `go.sum`、`LastOrder/pubspec.lock` 和 `runtime/requirements*.lock`。调整依赖时同步维护对应锁定文件。
 

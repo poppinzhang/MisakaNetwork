@@ -16,8 +16,8 @@ import (
 	"time"
 )
 
-const Version = "0.1.5"
-const BiliVersion = "2.15.17"
+const Version = "0.1.6"
+const BiliVersion = "2.15.18"
 
 type Identity struct {
 	CACert     string `json:"ca_cert"`

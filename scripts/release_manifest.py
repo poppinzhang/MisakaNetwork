@@ -7,12 +7,12 @@ import json
 from pathlib import Path
 import shutil
 
-from release_config import APP_TARGETS, BILI_VERSION, BUILD, ROOT, VERSION, artifact_name
+from release_config import APP_TARGETS, BILI_VERSION, BUILD, RELEASE_DATE, ROOT, VERSION, artifact_name
 
 
 def metadata() -> dict:
     return dict(version=VERSION, build=BUILD, bili_version=BILI_VERSION,
-                date="2026-10-24", status="incomplete", missing_targets=list(APP_TARGETS), artifacts=[])
+                date=RELEASE_DATE, status="incomplete", missing_targets=list(APP_TARGETS), artifacts=[])
 
 
 def write_manifest(directory: Path, release: dict) -> None:

@@ -9,12 +9,25 @@ import tempfile
 import unittest
 import zipfile
 
-from check_release import APP_CONTENTS, TARGETS, verify_release
+from check_release import APP_CONTENTS, TARGETS, WINDOWS_CRT_DLLS, verify_release
+from package_windows import validate_app_crt
 from release_config import APP_TARGETS, BILI_VERSION, BUILD, VERSION, android_bundle_asset, artifact_name
 
 
+def crt_binary(*, machine=0x8664, dll=True):
+    data = bytearray(512)
+    data[:2] = b"MZ"
+    data[60:64] = (128).to_bytes(4, "little")
+    data[128:132] = b"PE\0\0"
+    data[132:134] = machine.to_bytes(2, "little")
+    data[150:152] = (0x2000 if dll else 0).to_bytes(2, "little")
+    data[152:154] = (0x20B).to_bytes(2, "little")
+    return bytes(data)
+
+
 def app_archive(*, target="macos-amd64", app_version=VERSION, build=str(BUILD), bundle_version=VERSION,
-                bundle_platform=None, nested_sidecar=True, private_marker=False, missing_native=False, min_sdk=36, android_legacy_gzip_assets=False):
+                bundle_platform=None, nested_sidecar=True, private_marker=False, missing_native=False,
+                min_sdk=36, android_legacy_gzip_assets=False, missing_crt=None, misplaced_crt=False, crt_data=None):
     result = io.BytesIO()
     index = {"version": VERSION, "bili_version": BILI_VERSION, "artifacts": []}
     with zipfile.ZipFile(result, "w", compression=zipfile.ZIP_DEFLATED) as archive:
@@ -30,6 +43,10 @@ def app_archive(*, target="macos-amd64", app_version=VERSION, build=str(BUILD), 
                          "resources/runtime/misaka-runtime.exe"):
                 if not missing_native:
                     archive.writestr("LastOrder/" + name, b"synthetic native binary")
+            for name in WINDOWS_CRT_DLLS:
+                if name != missing_crt:
+                    prefix = "LastOrder/resources/runtime/_internal/" if misplaced_crt else "LastOrder/"
+                    archive.writestr(prefix + name, crt_data if crt_data is not None else crt_binary())
             prefix = "LastOrder/resources/bundles/"
         else:
             code = {"arm64": 2, "amd64": 4}[arch] * 1000 + int(build)
@@ -117,6 +134,40 @@ class ReleaseTests(unittest.TestCase):
                 self.write_release(targets=(target,), missing_native=True)
                 with self.assertRaisesRegex(ValueError, "native component missing"):
                     verify_release(self.directory, [], expected_targets=(target,))
+
+    def test_windows_release_requires_each_crt_beside_the_executable(self):
+        for name in WINDOWS_CRT_DLLS:
+            with self.subTest(missing=name):
+                self.write_release(targets=("windows-amd64",), missing_crt=name)
+                with self.assertRaisesRegex(ValueError, "Windows CRT missing"):
+                    verify_release(self.directory, [], expected_targets=("windows-amd64",))
+        self.write_release(targets=("windows-amd64",), misplaced_crt=True)
+        with self.assertRaisesRegex(ValueError, "Windows CRT missing"):
+            verify_release(self.directory, [], expected_targets=("windows-amd64",))
+
+    def test_windows_release_rejects_incompatible_or_invalid_crt(self):
+        for data in (crt_binary(machine=0x14C), crt_binary(machine=0xAA64),
+                     crt_binary(dll=False), b"not a DLL", crt_binary()[:140]):
+            with self.subTest(data=data[:8]):
+                self.write_release(targets=("windows-amd64",), crt_data=data)
+                with self.assertRaisesRegex(ValueError, "x64 PE DLL"):
+                    verify_release(self.directory, [], expected_targets=("windows-amd64",))
+
+    def test_windows_packager_rejects_missing_and_incompatible_crt(self):
+        app = self.directory / "app"
+        app.mkdir()
+        for name in WINDOWS_CRT_DLLS:
+            (app / name).write_bytes(crt_binary())
+        validate_app_crt(app)
+        for name in WINDOWS_CRT_DLLS:
+            with self.subTest(missing=name):
+                (app / name).unlink()
+                with self.assertRaisesRegex(ValueError, "Windows CRT missing"):
+                    validate_app_crt(app)
+                (app / name).write_bytes(crt_binary(machine=0x14C))
+                with self.assertRaisesRegex(ValueError, "x64 PE DLL"):
+                    validate_app_crt(app)
+                (app / name).write_bytes(crt_binary())
 
     def test_android_legacy_gzip_asset_names_are_rejected(self):
         self.write_release(targets=("android-arm64",), android_legacy_gzip_assets=True)

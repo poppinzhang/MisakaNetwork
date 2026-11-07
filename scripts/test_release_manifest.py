@@ -6,7 +6,7 @@ import unittest
 
 from check_release import verify_release
 from package_android import SIGNING_KEYS, signing_mode, stage_bundles
-from release_config import APP_TARGETS, BUILD, artifact_name
+from release_config import APP_TARGETS, BUILD, RELEASE_DATE, artifact_name
 from release_manifest import merge_releases, record_artifact
 from test_check_release import app_archive
 import test_index_bundles
@@ -38,6 +38,7 @@ class ReleaseManifestTests(unittest.TestCase):
         self.assertEqual(len(release["artifacts"]), len(APP_TARGETS))
         self.assertEqual(release["status"], "built-not-business-validated")
         self.assertEqual(release["missing_targets"], [])
+        self.assertEqual(release["date"], RELEASE_DATE)
         self.assertEqual(verify_release(output, [])["build"], BUILD)
 
     def test_partial_build_records_missing_targets_and_incomplete_status(self):
@@ -45,6 +46,7 @@ class ReleaseManifestTests(unittest.TestCase):
         release = json.loads((directory / "release.json").read_text())
         self.assertEqual(release["status"], "incomplete")
         self.assertEqual(release["missing_targets"], list(APP_TARGETS[1:]))
+        self.assertEqual(release["date"], RELEASE_DATE)
 
     def test_incomplete_status_clears_only_after_last_supported_target(self):
         directory = self.root / "all"

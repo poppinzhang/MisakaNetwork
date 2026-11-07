@@ -29,11 +29,11 @@ import (
 )
 
 func TestRuntimeProbeRequiresActualSuccessfulProtocol(t *testing.T) {
-	valid := `{"type":"result","ok":true,"data":{"version":"` + Version + `","ready":true,"protocol":1,"bili_version":"2.15.17"}}`
+	valid := `{"type":"result","ok":true,"data":{"version":"` + Version + `","ready":true,"protocol":1,"bili_version":"2.15.18"}}`
 	if !validRuntimeProbe(valid) {
 		t.Fatal("valid probe rejected")
 	}
-	for _, bad := range []string{`{"ready":true}`, strings.Replace(valid, `"ok":true`, `"ok":false`, 1), strings.Replace(valid, `"protocol":1`, `"protocol":2`, 1), strings.Replace(valid, "2.15.17", "old", 1), strings.Replace(valid, Version, "0.1.0", 1), valid + valid, `{"type":"progress","message":"ready: true"}`} {
+	for _, bad := range []string{`{"ready":true}`, strings.Replace(valid, `"ok":true`, `"ok":false`, 1), strings.Replace(valid, `"protocol":1`, `"protocol":2`, 1), strings.Replace(valid, "2.15.18", "old", 1), strings.Replace(valid, Version, "0.1.0", 1), valid + valid, `{"type":"progress","message":"ready: true"}`} {
 		if validRuntimeProbe(bad) {
 			t.Fatalf("invalid probe accepted: %s", bad)
 		}

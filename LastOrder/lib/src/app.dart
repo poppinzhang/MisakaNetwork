@@ -314,7 +314,7 @@ class _ControlCenterState extends State<ControlCenter> {
                                   ),
                                   SizedBox(height: 10),
                                   Text(
-                                    'LASTORDER  /  0.1.5',
+                                    'LASTORDER  /  0.1.6',
                                     style: TextStyle(
                                       color: Color(0xff789199),
                                       fontSize: 10,

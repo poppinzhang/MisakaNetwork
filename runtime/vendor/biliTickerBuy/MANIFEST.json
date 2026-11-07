@@ -1,6 +1,9 @@
 {
   "name": "biliTickerBuy",
-  "version": "2.15.17",
+  "version": "2.15.18",
+  "tag": "v2.15.18",
+  "revision": "227ebf73f5af3eec0019984a7cbcb722977453e8",
+  "package_version": "2.15.17",
   "source": "https://github.com/mikumifa/biliTickerBuy",
   "license": "PolyForm Noncommercial License 1.0.0",
   "required_notice": "Copyright (c) 2023 mikumifa",

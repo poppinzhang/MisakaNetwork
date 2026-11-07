@@ -19,8 +19,8 @@ import tempfile
 from typing import Any, Callable
 from urllib.parse import urlsplit
 
-VERSION = "0.1.5"
-BILI_VERSION = "2.15.17"
+VERSION = "0.1.6"
+BILI_VERSION = "2.15.18"
 MAX_REQUEST_BYTES = 4 * 1024 * 1024
 OPERATIONS = frozenset({"ping", "qr_start", "qr_poll", "login_cookie", "login_state", "search", "purchase_context", "build_config", "validate", "run"})
 # Upstream stage labels mapped to the stable codes Sisters understands; any
@@ -247,6 +247,61 @@ def load_engine() -> Any:
     return engine
 
 
+def close_upstream_databases(initialization_error: BaseException | None) -> None:
+    """Release upstream JSONStorage handles before removing private state."""
+    databases: dict[int, Any] = {}
+
+    def remember(database: Any) -> None:
+        if database is not None:
+            databases[id(database)] = database
+
+    def remember_request(request: Any) -> None:
+        remember(getattr(getattr(request, "cookieManager", None), "db", None))
+
+    def remember_util(namespace: dict[str, Any]) -> None:
+        remember(namespace.get("ConfigDB"))
+        remember_request(namespace.get("main_request"))
+
+    module = sys.modules.get("util")
+    if module is not None:
+        remember_util(vars(module))
+    # A failed import removes util from sys.modules. Its traceback still owns
+    # the partially initialized namespace and any unfinished constructors.
+    pending = [initialization_error] if initialization_error is not None else []
+    visited: set[int] = set()
+    while pending:
+        error = pending.pop()
+        if id(error) in visited:
+            continue
+        visited.add(id(error))
+        for nested in (error.__cause__, error.__context__):
+            if nested is not None:
+                pending.append(nested)
+        traceback = error.__traceback__
+        while traceback is not None:
+            frame = traceback.tb_frame
+            name = frame.f_globals.get("__name__")
+            if name == "util":
+                remember_util(frame.f_globals)
+            elif name == "util.request.BiliRequest":
+                remember_request(frame.f_locals.get("self"))
+            elif name == "util.request.CookieManager":
+                remember(getattr(frame.f_locals.get("self"), "db", None))
+            elif name == "util.Storage.KVDatabase":
+                database = frame.f_locals.get("self")
+                if getattr(database, "db", None) is not None:
+                    remember(database)
+            traceback = traceback.tb_next
+    failed = False
+    for database in databases.values():
+        try:
+            database.close()
+        except Exception:
+            failed = True
+    if failed:
+        raise RuntimeError("upstream resource cleanup failed")
+
+
 def report_existing_orders(rules: dict[int, Any]) -> None:
     """Make upstream's existing-order stops end as duplicate_order, not completed."""
     for errno in EXISTING_ORDER_ERRNOS:
@@ -412,10 +467,14 @@ def read_request(stream: Any) -> Any:
 
 def main() -> int:
     output = sys.stdout.buffer
+    result_emitted = False
     def emit(event: dict) -> None:
+        nonlocal result_emitted
         # ASCII JSON does not depend on the pipe code page, which is ANSI on Windows.
         output.write(json.dumps(event, allow_nan=False).encode("ascii") + b"\n")
         output.flush()
+        if event.get("type") == "result":
+            result_emitted = True
     if sys.argv[1:] == ["--version"]:
         emit({"type": "result", "ok": True, "data": {"version": VERSION, "bili_version": BILI_VERSION, "protocol": 1}})
         return 0
@@ -432,21 +491,39 @@ def main() -> int:
         raise Cancelled()
     signal.signal(signal.SIGTERM, cancel)
     signal.signal(signal.SIGINT, cancel)
-    with tempfile.TemporaryDirectory(prefix="misaka-runtime-") as temporary:
-        # All paths are ephemeral, no machine-local path enters a result or log.
-        os.environ["MISAKA_RUNTIME_STATE_DIR"] = temporary
-        os.environ["BTB_CONFIG_PATH"] = str(Path(temporary) / "config.json")
-        os.environ["BTB_COOKIES_PATH"] = str(Path(temporary) / "cookies.json")
-        os.environ["BTB_LOG_DIR"] = str(Path(temporary) / "logs")
-        os.environ["BTB_SKIP_INITIAL_TIME_SYNC"] = "1"
-        logging.disable(logging.CRITICAL)
-        with open(os.devnull, "w") as sink, redirect_stdout(sink), redirect_stderr(sink):
-            try:
-                engine = load_engine()
-            except Exception:
-                emit({"type": "result", "ok": False, "error": {"code": "runtime_unavailable", "message": "内置 biliTickerBuy 运行时不完整，请重新安装此版本"}})
-                return 1
-            return process_request(request, engine, emit)
+    try:
+        with tempfile.TemporaryDirectory(prefix="misaka-runtime-") as temporary:
+            # All paths are ephemeral, no machine-local path enters a result or log.
+            os.environ["MISAKA_RUNTIME_STATE_DIR"] = temporary
+            os.environ["BTB_CONFIG_PATH"] = str(Path(temporary) / "config.json")
+            os.environ["BTB_COOKIES_PATH"] = str(Path(temporary) / "cookies.json")
+            os.environ["BTB_LOG_DIR"] = str(Path(temporary) / "logs")
+            os.environ["BTB_SKIP_INITIAL_TIME_SYNC"] = "1"
+            logging.disable(logging.CRITICAL)
+            with open(os.devnull, "w") as sink, redirect_stdout(sink), redirect_stderr(sink):
+                initialization_error = None
+                try:
+                    try:
+                        engine = load_engine()
+                    except BaseException as exc:
+                        initialization_error = exc
+                        if not isinstance(exc, Exception):
+                            raise
+                        emit({"type": "result", "ok": False, "error": {"code": "runtime_unavailable", "message": "内置 biliTickerBuy 运行时不完整，请重新安装此版本"}})
+                        return 1
+                    return process_request(request, engine, emit)
+                finally:
+                    close_upstream_databases(initialization_error)
+    except Cancelled:
+        if not result_emitted:
+            emit({"type": "result", "ok": False, "data": {"status": "cancelled"}, "error": {"code": "cancelled", "message": "任务已取消"}})
+        return 130
+    except Exception:
+        # Cleanup failure must fail the process, without leaking paths or
+        # publishing a second result that overwrites an already confirmed order.
+        if not result_emitted:
+            emit({"type": "result", "ok": False, "error": {"code": "runtime_unavailable", "message": "内置运行时无法准备或清理私有状态，请重新启动后重试"}})
+        return 1
 
 
 if __name__ == "__main__":

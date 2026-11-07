@@ -27,6 +27,8 @@ abstract class StateStore {
 }
 
 class LocalStore implements StateStore {
+  LocalStore({this.protect = restrictPermissions});
+  final Future<void> Function(String path, String mode) protect;
   static const stateFilename = 'state-v2.json';
   static const secretNamespace = 'v2.';
   // Preserve credentials on storage errors; do not silently reset Android keys.
@@ -41,7 +43,7 @@ class LocalStore implements StateStore {
       p.join((await getApplicationSupportDirectory()).path, 'MisakaNetwork'),
     );
     await d.create(recursive: true);
-    await restrictPermissions(d.path, '700');
+    await protect(d.path, '700');
     return d.path;
   }
 
@@ -60,7 +62,7 @@ class LocalStore implements StateStore {
   Future<void> save(SavedState state) async {
     final target = p.join(await directory(), stateFilename);
     await File('$target.tmp').writeAsString(state.encode(), flush: true);
-    await restrictPermissions('$target.tmp', '600');
+    await protect('$target.tmp', '600');
     await File('$target.tmp').rename(target);
   }
 

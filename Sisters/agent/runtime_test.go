@@ -95,12 +95,12 @@ func TestRuntimeProbeChecksDependencyReadiness(t *testing.T) {
 		body  string
 		ready bool
 	}{
-		{`echo '{"type":"result","ok":true,"data":{"version":"` + Version + `","protocol":1,"ready":true,"bili_version":"2.15.17"}}'`, true},
-		{`echo '{"type":"result","ok":true,"data":{"version":"` + Version + `","protocol":2,"ready":true,"bili_version":"2.15.17"}}'`, false},
-		{`echo '{"type":"result","ok":true,"data":{"version":"` + Version + `","protocol":1,"ready":false,"bili_version":"2.15.17"}}'`, false},
+		{`echo '{"type":"result","ok":true,"data":{"version":"` + Version + `","protocol":1,"ready":true,"bili_version":"2.15.18"}}'`, true},
+		{`echo '{"type":"result","ok":true,"data":{"version":"` + Version + `","protocol":2,"ready":true,"bili_version":"2.15.18"}}'`, false},
+		{`echo '{"type":"result","ok":true,"data":{"version":"` + Version + `","protocol":1,"ready":false,"bili_version":"2.15.18"}}'`, false},
 		{`echo '{"type":"result","ok":true,"data":{"version":"` + Version + `","protocol":1,"ready":true,"bili_version":"private account"}}'`, false},
-		{`echo '{"type":"result","ok":true,"data":{"version":"0.1.0","protocol":1,"ready":true,"bili_version":"2.15.17"}}'`, false},
-		{`echo '{"type":"result","ok":true,"data":{"protocol":1,"ready":true,"bili_version":"2.15.17"}}'`, false},
+		{`echo '{"type":"result","ok":true,"data":{"version":"0.1.0","protocol":1,"ready":true,"bili_version":"2.15.18"}}'`, false},
+		{`echo '{"type":"result","ok":true,"data":{"protocol":1,"ready":true,"bili_version":"2.15.18"}}'`, false},
 		{"exit 0", false},
 	} {
 		r := executableRunner{path: script(t, tc.body)}

@@ -1,7 +1,7 @@
 name: last_order
 description: MisakaNetwork 分布式抢票管理平台
 publish_to: none
-version: 0.1.5+5
+version: 0.1.6+6
 environment:
   sdk: ^3.13.5
 dependencies:

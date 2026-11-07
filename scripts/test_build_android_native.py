@@ -41,8 +41,17 @@ class AndroidSourceStagingTests(unittest.TestCase):
         self.assertFalse(self.target.with_name("python.pending").exists())
 
     def test_verified_upstream_and_locked_dependencies_are_staged(self):
+        nested = self.vendor / "interface/nested.py"
+        nested.parent.mkdir()
+        nested.write_bytes(b"# nested synthetic source\n")
+        self.manifest["files"].append({
+            "path": "interface/nested.py",
+            "sha256": hashlib.sha256(nested.read_bytes()).hexdigest(),
+        })
+        self.write_manifest()
         build_android_native.stage_python(self.project)
         self.assertEqual((self.target / "interface.py").read_bytes(), self.source.read_bytes())
+        self.assertEqual((self.target / "interface/nested.py").read_bytes(), nested.read_bytes())
         self.assertEqual((self.target / "requirements-android.lock").read_text(), "synthetic requirements-android.lock")
         self.assertFalse((self.target / "previous.py").exists())
 
@@ -52,11 +61,43 @@ class AndroidSourceStagingTests(unittest.TestCase):
 
     def test_upstream_symlink_is_rejected(self):
         self.source.unlink()
-        self.source.symlink_to(self.runtime / "bridge.py")
+        try:
+            self.source.symlink_to(self.runtime / "bridge.py")
+        except OSError:
+            self.skipTest("Creating symbolic links is unavailable")
+        self.assert_rejected_preserving_existing("unsafe upstream manifest path")
+
+    def test_upstream_internal_symlink_is_rejected(self):
+        internal = self.vendor / "other.py"
+        self.source.rename(internal)
+        try:
+            self.source.symlink_to(internal)
+        except OSError:
+            self.skipTest("Creating symbolic links is unavailable")
         self.assert_rejected_preserving_existing("hash mismatch")
 
+    def test_parent_symlink_cannot_escape_vendor_even_with_valid_hash(self):
+        outside = self.root / "outside"
+        outside.mkdir()
+        (outside / "interface.py").write_bytes(self.source.read_bytes())
+        try:
+            (self.vendor / "alias").symlink_to(outside, target_is_directory=True)
+        except OSError:
+            self.skipTest("Creating symbolic links is unavailable")
+        self.manifest["files"][0]["path"] = "alias/interface.py"
+        self.write_manifest()
+        self.assert_rejected_preserving_existing("unsafe upstream manifest path")
+
     def test_manifest_path_traversal_is_rejected(self):
-        for path in ("../outside.py", "/outside.py", "interface/../../outside.py"):
+        for path in (
+            "../outside.py", "/outside.py", "interface/../../outside.py",
+            "", ".", "./interface.py", "interface/./outside.py",
+            "interface//outside.py", "interface/", "//server/share/outside.py",
+            "C:/outside.py", "C:outside.py", "interface/C:outside.py",
+            "\\outside.py", "C:\\outside.py", "\\\\server\\share\\outside.py",
+            "interface\\..\\outside.py", "interface.py:stream", "interface.py\0",
+            None, 7, ["interface.py"],
+        ):
             with self.subTest(path=path):
                 self.manifest["files"][0]["path"] = path
                 self.write_manifest()

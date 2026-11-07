@@ -17,6 +17,7 @@ from unittest.mock import Mock, patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import bridge
+import vendor_bili
 
 
 def validation(ok=True, normalized=None):
@@ -61,8 +62,8 @@ class BridgeTests(unittest.TestCase):
     def test_ping_has_real_version(self):
         code, events = self.invoke({"op": "ping"})
         self.assertEqual(code, 0)
-        self.assertEqual(events[-1]["data"]["version"], "0.1.5")
-        self.assertEqual(events[-1]["data"]["bili_version"], "2.15.17")
+        self.assertEqual(events[-1]["data"]["version"], "0.1.6")
+        self.assertEqual(events[-1]["data"]["bili_version"], "2.15.18")
 
     def test_cookie_formats(self):
         expected = [{"name": "session", "value": "synthetic"}]
@@ -434,11 +435,52 @@ class BridgeTests(unittest.TestCase):
 
 
 class SourceIntegrityTests(unittest.TestCase):
+    def test_project_release_identity_matches_native_and_flutter_consumers(self):
+        project = ROOT.parent
+        release = ast.parse((project / "scripts" / "release_config.py").read_text())
+        values = {
+            target.id: ast.literal_eval(node.value)
+            for node in release.body if isinstance(node, ast.Assign)
+            for target in node.targets
+            if isinstance(target, ast.Name) and target.id in {"VERSION", "BUILD"}
+        }
+        version, build = values["VERSION"], values["BUILD"]
+        self.assertEqual(bridge.VERSION, version)
+        for relative in ("Sisters/agent/config.go", "internal/control/pki.go"):
+            with self.subTest(source=relative):
+                source = (project / relative).read_text()
+                self.assertEqual(re.search(r'const Version = "([^"]+)"', source).group(1), version)
+        pubspec = (project / "LastOrder/pubspec.yaml").read_text()
+        self.assertEqual(re.search(r"^version: (.+)$", pubspec, re.MULTILINE).group(1), f"{version}+{build}")
+        windows = (project / "LastOrder/windows/runner/Runner.rc").read_text()
+        self.assertIn(f'#define VERSION_AS_STRING "{version}+{build}"', windows)
+        self.assertIn(f'#define VERSION_AS_NUMBER {version.replace(".", ",")},{build}', windows)
+
+    def test_upstream_release_identity_matches_every_runtime_consumer(self):
+        manifest = json.loads((ROOT / "vendor" / "biliTickerBuy" / "MANIFEST.json").read_text())
+        self.assertEqual(manifest["version"], vendor_bili.UPSTREAM_VERSION)
+        self.assertEqual(manifest["tag"], vendor_bili.UPSTREAM_TAG)
+        self.assertEqual(manifest["revision"], vendor_bili.UPSTREAM_REVISION)
+        self.assertEqual(manifest["package_version"], vendor_bili.UPSTREAM_PACKAGE_VERSION)
+        self.assertEqual(manifest["tag"], "v" + manifest["version"])
+        self.assertEqual(manifest["version"], bridge.BILI_VERSION)
+        release = ast.parse((ROOT.parent / "scripts" / "release_config.py").read_text())
+        release_version = next(
+            ast.literal_eval(node.value) for node in release.body
+            if isinstance(node, ast.Assign) and any(
+                isinstance(target, ast.Name) and target.id == "BILI_VERSION" for target in node.targets
+            )
+        )
+        self.assertEqual(manifest["version"], release_version)
+        go_source = (ROOT.parent / "internal" / "control" / "pki.go").read_text()
+        go_version = re.search(r'const BiliVersion = "([^"]+)"', go_source).group(1)
+        self.assertEqual(manifest["version"], go_version)
+
     def test_vendor_manifest_and_no_private_runtime_data(self):
         root = ROOT / "vendor" / "biliTickerBuy"
         manifest = json.loads((root / "MANIFEST.json").read_text())
         expected = {item["path"] for item in manifest["files"]} | {"MANIFEST.json"}
-        actual = {str(path.relative_to(root)) for path in root.rglob("*") if path.is_file() and "__pycache__" not in path.parts}
+        actual = {path.relative_to(root).as_posix() for path in root.rglob("*") if path.is_file() and "__pycache__" not in path.parts}
         self.assertEqual(expected, actual)
         for item in manifest["files"]:
             self.assertEqual(hashlib.sha256((root / item["path"]).read_bytes()).hexdigest(), item["sha256"])

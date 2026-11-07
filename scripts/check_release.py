@@ -13,11 +13,24 @@ import zipfile
 from android_manifest import attributes as android_attributes
 from release_config import APP_TARGETS, TARGETS, android_bundle_asset, artifact_name
 APP_CONTENTS = "LastOrder.app/Contents/"
+WINDOWS_CRT_DLLS = ("msvcp140.dll", "vcruntime140.dll", "vcruntime140_1.dll")
 
 
 def require(condition: bool, message: str) -> None:
     if not condition:
         raise ValueError(message)
+
+
+def verify_windows_crt_binary(data: bytes, name: str) -> None:
+    """Check the target architecture without a host-specific PE dependency."""
+    message = "Windows CRT must be an x64 PE DLL: " + name
+    require(len(data) >= 64 and data[:2] == b"MZ", message)
+    offset = int.from_bytes(data[60:64], "little")
+    require(offset >= 64 and offset + 26 <= len(data), message)
+    require(data[offset:offset + 4] == b"PE\0\0" and
+            int.from_bytes(data[offset + 4:offset + 6], "little") == 0x8664 and
+            int.from_bytes(data[offset + 22:offset + 24], "little") & 0x2000 and
+            int.from_bytes(data[offset + 24:offset + 26], "little") == 0x20B, message)
 
 
 def verify_app(data: bytes, release: dict, target: str = "macos-amd64") -> None:
@@ -38,6 +51,9 @@ def verify_app(data: bytes, release: dict, target: str = "macos-amd64") -> None:
             for name in ("LastOrder.exe", "flutter_windows.dll", "resources/misakactl.exe",
                          "resources/runtime/misaka-runtime.exe"):
                 require("LastOrder/" + name in names, "Windows native component missing: " + name)
+            for name in WINDOWS_CRT_DLLS:
+                require("LastOrder/" + name in names, "Windows CRT missing beside LastOrder.exe: " + name)
+                verify_windows_crt_binary(archive.read("LastOrder/" + name), name)
             prefix = "LastOrder/resources/bundles/"
         else:
             manifest = android_attributes(archive.read("AndroidManifest.xml"))

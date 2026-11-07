@@ -5,9 +5,18 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:last_order/src/models.dart';
 import 'package:last_order/src/services.dart';
+import 'package:path/path.dart' as p;
+
+Future<void> protectTestPath(String path, String mode) async {
+  // Windows ACL enforcement is covered by native helper tests. Unit tests must
+  // not depend on a packaged helper beside the Flutter test runner.
+  if (Platform.isMacOS || Platform.isLinux) {
+    await restrictPermissions(path, mode);
+  }
+}
 
 class TestLocalStore extends LocalStore {
-  TestLocalStore(this.path);
+  TestLocalStore(this.path, {super.protect = protectTestPath});
   final String path;
   @override
   Future<String> directory() async => path;
@@ -98,11 +107,28 @@ void main() {
   test('schema 2 saves atomically without replacing previous data', () async {
     final previous = File('${temporary.path}/state.json');
     await previous.writeAsString('previous-data');
+    final current = File('${temporary.path}/state-v2.json');
+    final original = SavedState(
+      accounts: [Account(id: 'old', name: 'previous account', uid: '456')],
+    ).encode();
+    await current.writeAsString(original);
     final value = SavedState(
       accounts: [Account(id: 'a', name: '账号', uid: '123')],
     );
+    var protected = false;
+    store = TestLocalStore(
+      temporary.path,
+      protect: (path, mode) async {
+        expect(p.equals(path, '${current.path}.tmp'), isTrue);
+        expect(mode, '600');
+        expect(await File(path).readAsString(), value.encode());
+        expect(await current.readAsString(), original);
+        await protectTestPath(path, mode);
+        protected = true;
+      },
+    );
     await store.save(value);
-    final current = File('${temporary.path}/state-v2.json');
+    expect(protected, isTrue);
     expect(jsonDecode(await current.readAsString())['schema'], 2);
     expect((await store.load()).encode(), value.encode());
     expect(await previous.readAsString(), 'previous-data');
@@ -110,6 +136,41 @@ void main() {
     if (Platform.isMacOS || Platform.isLinux) {
       expect((await current.stat()).mode & 0x1ff, 0x180);
     }
+  });
+
+  test('permission failure cannot replace the saved state', () async {
+    final current = File('${temporary.path}/state-v2.json');
+    final original = SavedState(
+      accounts: [Account(id: 'old', name: 'previous account', uid: '456')],
+    ).encode();
+    await current.writeAsString(original);
+    final next = SavedState(
+      accounts: [Account(id: 'new', name: 'next account', uid: '789')],
+    );
+    var attempted = false;
+    store = TestLocalStore(
+      temporary.path,
+      protect: (path, mode) async {
+        expect(p.equals(path, '${current.path}.tmp'), isTrue);
+        expect(mode, '600');
+        expect(await File(path).readAsString(), next.encode());
+        attempted = true;
+        throw const UserError('synthetic permission failure');
+      },
+    );
+    await expectLater(
+      store.save(next),
+      throwsA(
+        isA<UserError>().having(
+          (error) => error.message,
+          'message',
+          'synthetic permission failure',
+        ),
+      ),
+    );
+    expect(attempted, isTrue);
+    expect(await current.readAsString(), original);
+    expect((await store.load()).encode(), original);
   });
 
   test(

@@ -6,7 +6,7 @@ import argparse
 import hashlib
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import platform
 import shutil
 import subprocess
@@ -16,8 +16,23 @@ ABIS = {"arm64-v8a": ("arm64", "aarch64-linux-android"), "x86_64": ("amd64", "x8
 API = 36
 
 
+def manifest_relative_path(value: object) -> PurePosixPath:
+    # Manifest paths use POSIX separators on every host. Native Windows Path
+    # treats /name as rooted without a drive, not as an absolute path, and
+    # normalizes dot components before callers can validate them.
+    if (not isinstance(value, str) or not value or
+            any(character in value for character in ("\\", ":", "\0")) or
+            any(part in {"", ".", ".."} for part in value.split("/"))):
+        raise ValueError("unsafe upstream manifest path")
+    relative = PurePosixPath(value)
+    if relative.is_absolute():
+        raise ValueError("unsafe upstream manifest path")
+    return relative
+
+
 def stage_python(project: Path) -> None:
     vendor = ROOT / "runtime/vendor/biliTickerBuy"
+    vendor_root = vendor.resolve()
     manifest = json.loads((vendor / "MANIFEST.json").read_text())
     target = project / "android/app/src/main/python"
     temporary = target.with_name("python.pending")
@@ -26,13 +41,13 @@ def stage_python(project: Path) -> None:
     temporary.mkdir(parents=True)
     try:
         for record in manifest["files"]:
-            relative = Path(record["path"])
-            if relative.is_absolute() or ".." in relative.parts:
+            relative = manifest_relative_path(record["path"])
+            source = vendor.joinpath(*relative.parts)
+            if not source.resolve().is_relative_to(vendor_root):
                 raise ValueError("unsafe upstream manifest path")
-            source = vendor / relative
             if source.is_symlink() or hashlib.sha256(source.read_bytes()).hexdigest() != record["sha256"]:
                 raise ValueError("upstream manifest hash mismatch")
-            destination = temporary / relative
+            destination = temporary.joinpath(*relative.parts)
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source, destination)
         for name in ("bridge.py", "android_bridge.py", "requirements-android.lock", "NOTICE.txt"):

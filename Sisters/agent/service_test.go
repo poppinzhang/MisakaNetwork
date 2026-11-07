@@ -29,7 +29,7 @@ func (r *fakeRunner) probe(context.Context) (string, error) {
 	if r.notReady {
 		return "", errors.New("unavailable")
 	}
-	return "2.15.17", nil
+	return "2.15.18", nil
 }
 func (r *fakeRunner) run(ctx context.Context, input []byte, emit func(progress)) (result, error) {
 	r.mu.Lock()
@@ -263,7 +263,7 @@ func TestTimeStartIsValidatedAndBoundToPayload(t *testing.T) {
 
 type scriptedRunner struct{ updates []progress }
 
-func (r scriptedRunner) probe(context.Context) (string, error) { return "2.15.17", nil }
+func (r scriptedRunner) probe(context.Context) (string, error) { return "2.15.18", nil }
 func (r scriptedRunner) run(_ context.Context, _ []byte, emit func(progress)) (result, error) {
 	for _, p := range r.updates {
 		emit(p)

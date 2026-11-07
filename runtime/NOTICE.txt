@@ -1,5 +1,8 @@
-MisakaNetwork includes biliTickerBuy 2.15.17.
+MisakaNetwork includes biliTickerBuy 2.15.18.
 Source: https://github.com/mikumifa/biliTickerBuy
+Release: v2.15.18
+Commit: 227ebf73f5af3eec0019984a7cbcb722977453e8
+Upstream Python package metadata still declares version 2.15.17.
 License: PolyForm Noncommercial License 1.0.0
 Required Notice: Copyright (c) 2023 mikumifa
 

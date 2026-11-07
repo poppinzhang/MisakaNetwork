@@ -10,10 +10,19 @@ import subprocess
 import tempfile
 import zipfile
 
+from check_release import WINDOWS_CRT_DLLS, verify_windows_crt_binary
 from index_bundles import index_bundles
 from release_config import BILI_VERSION, BUILD, ROOT, VERSION, artifact_name
 from release_manifest import record_artifact
 from runtime_manifest import validate_runtime
+
+
+def validate_app_crt(app: Path) -> None:
+    for name in WINDOWS_CRT_DLLS:
+        path = app / name
+        if path.is_symlink() or not path.is_file():
+            raise ValueError("Windows CRT missing beside LastOrder.exe: " + name)
+        verify_windows_crt_binary(path.read_bytes(), name)
 
 
 def main() -> None:
@@ -38,6 +47,7 @@ def main() -> None:
         text=True, capture_output=True, check=True)
     if result.stdout.strip() != f"{VERSION}+{BUILD}":
         raise SystemExit("Windows executable version/build number does not match this release")
+    validate_app_crt(args.app)
     args.output.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="misaka-package-") as temporary:
         app = Path(temporary) / "LastOrder"
