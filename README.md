@@ -6,9 +6,11 @@
 
 MisakaNetwork 基于 biliTickerBuy，安装包内置抢票程序与运行环境，远程机器无需另装 Python 或 Go。
 
+默认通信端口 `20001` 致敬 Last Order（最后之作）——第 20001 号。这个数字让项目的名字与机器之间的连接，也有了一点共同的纪念意义。
+
 [快速开始](#快速开始) · [支持的平台](#支持的平台) · [功能](#功能) · [文档](#文档) · [版本记录](CHANGELOG.md)
 
-目前处于早期研发阶段。[0.1.6](docs/releases/0.1.6.md) 已提供 macOS、Windows、Android 共五份完整测试包，并完成全平台统一核验。真实账号登录和下单仍待业务验收；请按版本记录确认安装与验证范围。
+目前处于早期研发阶段。[0.2.0](docs/releases/0.2.0.md) 已提供 macOS、Windows、Android 共五份完整测试包，并完成全平台统一核验。真实账号登录和下单仍待业务验收；请按版本记录确认安装与验证范围。
 
 ## MisakaNetwork 适合你吗？
 
@@ -18,17 +20,19 @@ MisakaNetwork 基于 biliTickerBuy，安装包内置抢票程序与运行环境�
 - **灵活分发**：一个任务可以交给多台机器，一台机器也可以接收多个任务。
 - **统一查看**：在管理台查看各台机器的在线状态、任务进度和执行结果，按需停止任务。
 
-LastOrder 提供 macOS、Windows 与 Android 管理台，执行任务的 Sisters 支持 macOS 和 Linux。实际安装包与已知限制见 [0.1.6 交付记录](docs/releases/0.1.6.md)。
+LastOrder 提供 macOS、Windows 与 Android 管理台，执行任务的 Sisters 支持 macOS 和 Linux。实际安装包与已知限制见 [0.2.0 交付记录](docs/releases/0.2.0.md)。
 
 ## 快速开始
 
 **1 · 安装 LastOrder。** 按系统与架构选择安装包。macOS 的 Apple 芯片使用 `arm64`，Intel 芯片使用 `amd64`（x64），解压后运行 `LastOrder.app`。Windows x64 完整解压 ZIP 后运行 `LastOrder/LastOrder.exe`，不要只复制 EXE。Android 通常选择 arm64 APK，通过系统安装器安装。
 
-目前提供本地构建产物，尚无公开下载页。三端 0.1.6 测试包见 [交付记录与安装说明](docs/releases/0.1.6.md#本地交付产物)，自行构建见[打包与发布](docs/打包与发布.md)。Android 必须为 Android 16 或更新版本，通常选择 arm64 APK，通过系统安装器安装；APK 使用测试签名。Windows 包未作 Authenticode 签名。当前安装包尚未进行 Developer ID 签名与 Apple 公证，macOS 可能需要你在系统安全设置中确认应用来源。
+目前提供本地构建产物，尚无公开下载页。三端 0.2.0 测试包见 [交付记录与安装说明](docs/releases/0.2.0.md#本地交付产物)，自行构建见[打包与发布](docs/打包与发布.md)。Android 必须为 Android 16 或更新版本，通常选择 arm64 APK，通过系统安装器安装；APK 使用测试签名。Windows 包未作 Authenticode 签名。当前安装包尚未进行 Developer ID 签名与 Apple 公证，macOS 可能需要你在系统安全设置中确认应用来源。
 
 **2 · 部署 Sisters。** 打开「机器管理」，添加远程机器的 SSH 地址、用户名和密码或私钥。核对首次连接显示的主机指纹，然后部署。LastOrder 会自动选择匹配系统与架构的完整部署包。
 
-远程机器需要开启 SSH、具备运行用户服务的条件，并允许 LastOrder 访问 gRPC 端口，默认 `17443`；部署完成后会从本机直连检查一次，端口不通会提示放行防火墙。Linux 账号还需开启 linger（管理员执行 `sudo loginctl enable-linger <用户名>`），否则 SSH 断开后服务会被系统停止；部署时会检查，未开启会停止部署并提示。详细要求见[部署说明](docs/架构与通信.md#部署)。
+远程机器需要开启 SSH、具备运行用户服务的条件，并允许 LastOrder 访问 gRPC 端口，新建机器默认使用 `20001`；部署完成后会从本机直连检查一次，端口不通会提示放行防火墙。Linux 账号还需开启 linger（管理员执行 `sudo loginctl enable-linger <用户名>`），否则 SSH 断开后服务会被系统停止；部署时会检查，未开启会停止部署并提示。详细要求见[部署说明](docs/架构与通信.md#部署)。
+
+0.2.0 起新建机器默认使用 `20001`。已保存的机器连接继续使用原端口；若要切换，请在「重新部署」中修改 gRPC 端口并完成部署，同时放行新的 TCP 端口。
 
 **3 · 登录并创建任务。** 在「账号与任务」用哔哩哔哩手机客户端扫码登录，或导入 JSON Cookie 数组。输入演出 ID 或会员购链接，选择场次、票档、购票人和收货地址，填写联系人与电话。开售时间（北京时间）默认取所选票档的起售时间，可以修改，留空则分发后立即开始。购票人和地址需要先在哔哩哔哩账号中配置；当前电子票也需要选择收货地址。
 
@@ -44,7 +48,7 @@ LastOrder 提供 macOS、Windows 与 Android 管理台，执行任务的 Sisters
 | Sisters 任务服务 | macOS Sequoia 15.0 及以上 | arm64、x64 |
 | Sisters 任务服务 | Ubuntu 24.04 LTS 同代 Linux，glibc 2.39+ | arm64、x64 |
 
-0.1.6 的全部 LastOrder 包均携带 Linux/macOS、arm64/x64 四种 Sisters 部署包。Windows Sisters 暂未实现；完整交付与验证范围见 [0.1.6 记录](docs/releases/0.1.6.md)。
+0.2.0 的全部 LastOrder 包均携带 Linux/macOS、arm64/x64 四种 Sisters 部署包。Windows Sisters 暂未实现；完整交付与验证范围见 [0.2.0 记录](docs/releases/0.2.0.md)。
 
 ## 整体结构
 
@@ -68,7 +72,7 @@ LastOrder 负责账号登录、场次选择、机器部署和任务管理；Sist
 
 支持扫码登录和 Cookie 导入，按演出读取场次、票档、购票人及收货地址，设置开售时间，再保存为可分发的任务。账号 Cookie 和含购票人信息的任务配置保存在各平台的系统安全存储中。
 
-支持登录失效检测和原账号重新登录：平台明确判定失效后清除旧 Cookie，网络异常时保留凭据并暂停新任务分发。0.1.0 数据不迁移，需要重新配置。升级 0.1.6 后应重新部署 Sisters，并先核对旧任务和订单；使用过旧 Android 包导入私钥的设备还应清除应用缓存。具体操作见 [升级说明](docs/releases/0.1.6.md#升级影响与边界)。
+支持登录失效检测和原账号重新登录：平台明确判定失效后清除旧 Cookie，网络异常时保留凭据并暂停新任务分发。0.1.0 数据不迁移，需要重新配置。升级 0.2.0 后应重新部署 Sisters，并先核对旧任务和订单；使用过旧 Android 包导入私钥的设备还应清除应用缓存。具体操作见 [升级说明](docs/releases/0.2.0.md#升级影响与边界)。
 
 ### 多台机器，多项任务
 

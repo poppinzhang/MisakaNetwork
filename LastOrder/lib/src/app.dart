@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:ui' show AppExitResponse;
 
+import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:animations/animations.dart';
 import 'package:flutter_animate/flutter_animate.dart';
@@ -10,12 +11,12 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:uuid/uuid.dart';
 
 import '../generated/misaka/v1/sisters.pbgrpc.dart';
+import 'about_dialog.dart';
+import 'app_info.dart';
 import 'controller.dart';
 import 'models.dart';
 import 'services.dart';
-
-const accent = Color(0xff087f75);
-const ink = Color(0xff162b33);
+import 'theme.dart';
 
 class LastOrderApp extends StatefulWidget {
   const LastOrderApp({super.key, required this.controller});
@@ -27,6 +28,8 @@ class LastOrderApp extends StatefulWidget {
 class _LastOrderAppState extends State<LastOrderApp> {
   late final AppLifecycleListener _lifecycle;
   final _navigator = GlobalKey<NavigatorState>();
+  final _lightTheme = buildAppTheme(Brightness.light);
+  final _darkTheme = buildAppTheme(Brightness.dark);
   @override
   void initState() {
     super.initState();
@@ -78,26 +81,21 @@ class _LastOrderAppState extends State<LastOrderApp> {
   }
 
   @override
-  Widget build(BuildContext context) => MaterialApp(
-    navigatorKey: _navigator,
-    title: 'LastOrder · MisakaNetwork',
-    debugShowCheckedModeBanner: false,
-    theme: ThemeData(
-      useMaterial3: true,
-      colorScheme: ColorScheme.fromSeed(seedColor: accent),
-      scaffoldBackgroundColor: const Color(0xfff4f7f8),
-      inputDecorationTheme: const InputDecorationTheme(
-        border: OutlineInputBorder(),
-        filled: true,
-        fillColor: Colors.white,
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: widget.controller,
+    builder: (context, _) => MaterialApp(
+      navigatorKey: _navigator,
+      title: 'LastOrder · MisakaNetwork',
+      debugShowCheckedModeBanner: false,
+      theme: _lightTheme,
+      darkTheme: _darkTheme,
+      themeMode: materialThemeMode(widget.controller.state.themeMode),
+      builder: (context, child) => AnnotatedRegion<SystemUiOverlayStyle>(
+        value: systemUiStyleFor(Theme.of(context)),
+        child: child!,
       ),
-      cardTheme: const CardThemeData(
-        color: Colors.white,
-        elevation: 0,
-        margin: EdgeInsets.zero,
-      ),
+      home: ControlCenter(controller: widget.controller),
     ),
-    home: ControlCenter(controller: widget.controller),
   );
 }
 
@@ -110,6 +108,8 @@ class ControlCenter extends StatefulWidget {
 
 class _ControlCenterState extends State<ControlCenter> {
   AppController get c => widget.controller;
+  ColorScheme get colors => Theme.of(context).colorScheme;
+  bool savingTheme = false;
   int page = 0;
   bool busy = false;
   static const titles = ['网络概览', '机器管理', '账号与任务', '任务监控'];
@@ -135,12 +135,76 @@ class _ControlCenterState extends State<ControlCenter> {
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(text),
-          backgroundColor: error ? const Color(0xffa63434) : ink,
+          content: Text(
+            text,
+            style: TextStyle(
+              color: error ? colors.onError : colors.onInverseSurface,
+            ),
+          ),
+          backgroundColor: error ? colors.error : colors.inverseSurface,
           duration: const Duration(seconds: 6),
         ),
       );
     }
+  }
+
+  Future<void> showProjectAbout() => showDialog<void>(
+    context: context,
+    builder: (context) => const ProjectAboutDialog(),
+  );
+
+  Future<void> changeTheme(AppThemeMode mode) async {
+    if (savingTheme || mode == c.state.themeMode) return;
+    setState(() => savingTheme = true);
+    try {
+      await c.setThemeMode(mode);
+    } catch (e) {
+      message('无法保存外观设置：${readableError(e)}', error: true);
+    } finally {
+      if (mounted) setState(() => savingTheme = false);
+    }
+  }
+
+  Widget themeButton() => PopupMenuButton<AppThemeMode>(
+    key: const ValueKey('theme-mode-button'),
+    tooltip: '外观主题',
+    enabled: c.initialized && !savingTheme,
+    initialValue: c.state.themeMode,
+    icon: Icon(
+      switch (c.state.themeMode) {
+        AppThemeMode.system => LucideIcons.monitor,
+        AppThemeMode.light => LucideIcons.sun,
+        AppThemeMode.dark => LucideIcons.moon,
+      },
+      size: 19,
+      semanticLabel: '外观主题：${themeModeLabel(c.state.themeMode)}',
+    ),
+    onSelected: changeTheme,
+    itemBuilder: (context) => [
+      for (final mode in AppThemeMode.values)
+        CheckedPopupMenuItem(
+          value: mode,
+          checked: c.state.themeMode == mode,
+          child: Text(themeModeLabel(mode)),
+        ),
+    ],
+  );
+
+  Widget aboutButton({bool compact = false}) {
+    if (compact) {
+      return IconButton(
+        key: const ValueKey('about-button'),
+        tooltip: '关于',
+        onPressed: showProjectAbout,
+        icon: const Icon(LucideIcons.info, size: 18),
+      );
+    }
+    return TextButton.icon(
+      key: const ValueKey('about-button'),
+      onPressed: showProjectAbout,
+      icon: const Icon(LucideIcons.info, size: 16),
+      label: const Text('关于'),
+    );
   }
 
   Future<bool> confirm(String title, String body) async =>
@@ -167,12 +231,26 @@ class _ControlCenterState extends State<ControlCenter> {
     listenable: c,
     builder: (context, _) => Scaffold(
       bottomNavigationBar: MediaQuery.sizeOf(context).width < 600
-          ? NavigationBar(
-              selectedIndex: page,
-              onDestinationSelected: (index) => setState(() => page = index),
-              destinations: [
-                for (var i = 0; i < titles.length; i++)
-                  NavigationDestination(icon: Icon(icons[i]), label: titles[i]),
+          ? Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.only(left: 8),
+                  child: aboutButton(),
+                ),
+                NavigationBar(
+                  selectedIndex: page,
+                  onDestinationSelected: (index) =>
+                      setState(() => page = index),
+                  destinations: [
+                    for (var i = 0; i < titles.length; i++)
+                      NavigationDestination(
+                        icon: Icon(icons[i]),
+                        label: titles[i],
+                      ),
+                  ],
+                ),
               ],
             )
           : null,
@@ -186,144 +264,165 @@ class _ControlCenterState extends State<ControlCenter> {
                   SizedBox(
                     width: wide ? 222 : 78,
                     child: ColoredBox(
-                      color: ink,
+                      color: colors.surfaceContainerLow,
                       child: Column(
                         children: [
-                          Padding(
-                            padding: EdgeInsets.fromLTRB(
-                              wide ? 24 : 18,
-                              34,
-                              12,
-                              34,
-                            ),
-                            child: Row(
-                              children: [
-                                const Icon(
-                                  LucideIcons.network,
-                                  color: Color(0xff8ee5cb),
-                                  size: 30,
-                                ),
-                                if (wide) ...[
-                                  const SizedBox(width: 12),
-                                  const Flexible(
-                                    child: FittedBox(
-                                      fit: BoxFit.scaleDown,
-                                      alignment: Alignment.centerLeft,
-                                      child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                          Text(
-                                            'LastOrder',
-                                            style: TextStyle(
-                                              color: Colors.white,
-                                              fontSize: 23,
-                                              fontWeight: FontWeight.w700,
-                                            ),
-                                          ),
-                                          Text(
-                                            'MISAKA NETWORK',
-                                            style: TextStyle(
-                                              color: Color(0xff98abb2),
-                                              fontSize: 10,
-                                              letterSpacing: 1.4,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
+                          Expanded(
+                            child: SingleChildScrollView(
+                              child: Column(
+                                children: [
+                                  Padding(
+                                    padding: EdgeInsets.fromLTRB(
+                                      wide ? 24 : 18,
+                                      34,
+                                      12,
+                                      34,
                                     ),
-                                  ),
-                                ],
-                              ],
-                            ),
-                          ),
-                          for (var i = 0; i < titles.length; i++)
-                            Padding(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 12,
-                                vertical: 4,
-                              ),
-                              child: Tooltip(
-                                message: titles[i],
-                                child: Material(
-                                  color: page == i
-                                      ? const Color(0xff29474f)
-                                      : Colors.transparent,
-                                  borderRadius: BorderRadius.circular(12),
-                                  child: InkWell(
-                                    borderRadius: BorderRadius.circular(12),
-                                    onTap: () => setState(() => page = i),
-                                    child: Padding(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 14,
-                                        vertical: 16,
-                                      ),
-                                      child: Row(
-                                        children: [
-                                          Icon(
-                                            icons[i],
-                                            size: 21,
-                                            color: page == i
-                                                ? const Color(0xff8ee5cb)
-                                                : const Color(0xffa3b7bd),
-                                          ),
-                                          if (wide) ...[
-                                            const SizedBox(width: 14),
-                                            Text(
-                                              titles[i],
-                                              style: TextStyle(
-                                                color: page == i
-                                                    ? Colors.white
-                                                    : const Color(0xffb4c3c8),
-                                                fontWeight: page == i
-                                                    ? FontWeight.w600
-                                                    : FontWeight.w400,
+                                    child: Row(
+                                      children: [
+                                        Icon(
+                                          LucideIcons.network,
+                                          color: colors.primary,
+                                          size: 30,
+                                        ),
+                                        if (wide) ...[
+                                          const SizedBox(width: 12),
+                                          Flexible(
+                                            child: FittedBox(
+                                              fit: BoxFit.scaleDown,
+                                              alignment: Alignment.centerLeft,
+                                              child: Column(
+                                                crossAxisAlignment:
+                                                    CrossAxisAlignment.start,
+                                                children: [
+                                                  Text(
+                                                    'LastOrder',
+                                                    style: TextStyle(
+                                                      color: colors.onSurface,
+                                                      fontSize: 23,
+                                                      fontWeight:
+                                                          FontWeight.w700,
+                                                    ),
+                                                  ),
+                                                  Text(
+                                                    'MISAKA NETWORK',
+                                                    style: TextStyle(
+                                                      color: colors
+                                                          .onSurfaceVariant,
+                                                      fontSize: 10,
+                                                      letterSpacing: 1.4,
+                                                    ),
+                                                  ),
+                                                ],
                                               ),
                                             ),
-                                          ],
+                                          ),
                                         ],
-                                      ),
+                                      ],
                                     ),
                                   ),
-                                ),
+                                  for (var i = 0; i < titles.length; i++)
+                                    Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 12,
+                                        vertical: 4,
+                                      ),
+                                      child: Tooltip(
+                                        message: titles[i],
+                                        child: Material(
+                                          color: page == i
+                                              ? colors.secondaryContainer
+                                              : Colors.transparent,
+                                          borderRadius: BorderRadius.circular(
+                                            12,
+                                          ),
+                                          child: InkWell(
+                                            borderRadius: BorderRadius.circular(
+                                              12,
+                                            ),
+                                            onTap: () =>
+                                                setState(() => page = i),
+                                            child: Padding(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                    horizontal: 14,
+                                                    vertical: 16,
+                                                  ),
+                                              child: Row(
+                                                children: [
+                                                  Icon(
+                                                    icons[i],
+                                                    size: 21,
+                                                    color: page == i
+                                                        ? colors.primary
+                                                        : colors
+                                                              .onSurfaceVariant,
+                                                  ),
+                                                  if (wide) ...[
+                                                    const SizedBox(width: 14),
+                                                    Text(
+                                                      titles[i],
+                                                      style: TextStyle(
+                                                        color: page == i
+                                                            ? colors
+                                                                  .onSecondaryContainer
+                                                            : colors
+                                                                  .onSurfaceVariant,
+                                                        fontWeight: page == i
+                                                            ? FontWeight.w600
+                                                            : FontWeight.w400,
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ],
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                ],
                               ),
                             ),
-                          const Spacer(),
-                          if (wide)
-                            const Padding(
-                              padding: EdgeInsets.all(24),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
+                          ),
+                          Padding(
+                            padding: EdgeInsets.all(wide ? 24 : 12),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                if (wide) ...[
                                   Row(
                                     children: [
                                       Icon(
                                         LucideIcons.shieldCheck,
-                                        color: Color(0xff8ee5cb),
+                                        color: colors.primary,
                                         size: 15,
                                       ),
                                       SizedBox(width: 8),
                                       Text(
                                         'mTLS 安全通信',
                                         style: TextStyle(
-                                          color: Color(0xffb4c3c8),
+                                          color: colors.onSurfaceVariant,
                                           fontSize: 12,
                                         ),
                                       ),
                                     ],
                                   ),
-                                  SizedBox(height: 10),
+                                  const SizedBox(height: 10),
                                   Text(
-                                    'LASTORDER  /  0.1.6',
+                                    'LASTORDER  /  $appVersion',
                                     style: TextStyle(
-                                      color: Color(0xff789199),
+                                      color: colors.onSurfaceVariant,
                                       fontSize: 10,
                                       letterSpacing: 1.5,
                                     ),
                                   ),
+                                  const SizedBox(height: 12),
                                 ],
-                              ),
+                                aboutButton(compact: !wide),
+                              ],
                             ),
+                          ),
                         ],
                       ),
                     ),
@@ -336,32 +435,33 @@ class _ControlCenterState extends State<ControlCenter> {
                         padding: EdgeInsets.symmetric(
                           horizontal: constraints.maxWidth < 600 ? 16 : 32,
                         ),
-                        decoration: const BoxDecoration(
-                          color: Colors.white,
+                        decoration: BoxDecoration(
+                          color: colors.surfaceContainerLowest,
                           border: Border(
-                            bottom: BorderSide(color: Color(0xffe4ebed)),
+                            bottom: BorderSide(color: colors.outlineVariant),
                           ),
                         ),
                         child: Row(
                           children: [
                             Text(
                               titles[page],
-                              style: const TextStyle(
-                                color: ink,
+                              style: TextStyle(
+                                color: colors.onSurface,
                                 fontSize: 20,
                                 fontWeight: FontWeight.w700,
                               ),
                             ),
                             const Spacer(),
                             if (constraints.maxWidth > 700)
-                              const Text(
+                              Text(
                                 'Sisters 每 5 秒同步',
                                 style: TextStyle(
-                                  color: Color(0xff74888f),
+                                  color: colors.onSurfaceVariant,
                                   fontSize: 12,
                                 ),
                               ),
                             const SizedBox(width: 14),
+                            themeButton(),
                             IconButton(
                               tooltip: '立即同步',
                               onPressed: c.polling ? null : () => c.refresh(),
@@ -397,7 +497,7 @@ class _ControlCenterState extends State<ControlCenter> {
                                         ),
                                 child: ColoredBox(
                                   key: ValueKey(page),
-                                  color: const Color(0xfff4f7f8),
+                                  color: colors.surface,
                                   child: SingleChildScrollView(
                                     padding: EdgeInsets.all(wide ? 32 : 16),
                                     child: Align(
@@ -446,8 +546,8 @@ class _ControlCenterState extends State<ControlCenter> {
           children: [
             Text(
               eyebrow,
-              style: const TextStyle(
-                color: accent,
+              style: TextStyle(
+                color: colors.primary,
                 fontSize: 11,
                 fontWeight: FontWeight.w700,
                 letterSpacing: 1.6,
@@ -456,8 +556,8 @@ class _ControlCenterState extends State<ControlCenter> {
             const SizedBox(height: 8),
             Text(
               title,
-              style: const TextStyle(
-                color: ink,
+              style: TextStyle(
+                color: colors.onSurface,
                 fontSize: 30,
                 fontWeight: FontWeight.w700,
               ),
@@ -465,7 +565,7 @@ class _ControlCenterState extends State<ControlCenter> {
             const SizedBox(height: 8),
             Text(
               subtitle,
-              style: const TextStyle(color: Color(0xff687e87), fontSize: 13),
+              style: TextStyle(color: colors.onSurfaceVariant, fontSize: 13),
             ),
           ],
         ),
@@ -476,7 +576,7 @@ class _ControlCenterState extends State<ControlCenter> {
   Widget panel(Widget child) => Card(
     shape: RoundedRectangleBorder(
       borderRadius: BorderRadius.circular(18),
-      side: const BorderSide(color: Color(0xffe0e8ea)),
+      side: BorderSide(color: colors.outlineVariant),
     ),
     child: Padding(padding: const EdgeInsets.all(24), child: child),
   );
@@ -491,21 +591,21 @@ class _ControlCenterState extends State<ControlCenter> {
         padding: const EdgeInsets.symmetric(vertical: 36),
         child: Column(
           children: [
-            Icon(icon, size: 42, color: const Color(0xff87a5ad)),
+            Icon(icon, size: 42, color: colors.onSurfaceVariant),
             const SizedBox(height: 18),
             Text(
               title,
-              style: const TextStyle(
+              style: TextStyle(
                 fontWeight: FontWeight.w600,
                 fontSize: 18,
-                color: ink,
+                color: colors.onSurface,
               ),
             ),
             const SizedBox(height: 10),
             Text(
               subtitle,
               textAlign: TextAlign.center,
-              style: const TextStyle(color: Color(0xff74888f)),
+              style: TextStyle(color: colors.onSurfaceVariant),
             ),
             if (button != null) ...[const SizedBox(height: 24), button],
           ],
@@ -513,17 +613,25 @@ class _ControlCenterState extends State<ControlCenter> {
       ),
     ),
   );
-  Widget pill(String text, {Color color = accent}) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-    decoration: BoxDecoration(
-      color: color.withValues(alpha: .09),
-      borderRadius: BorderRadius.circular(7),
-    ),
-    child: Text(
-      text,
-      style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.w600),
-    ),
-  );
+  Widget pill(String text, {Color? color}) {
+    color ??= colors.primary;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: .09),
+        borderRadius: BorderRadius.circular(7),
+      ),
+      child: Text(
+        text,
+        style: TextStyle(
+          color: color,
+          fontSize: 11,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    );
+  }
+
   Widget overview() {
     final online = c.state.machines
         .where(
@@ -582,12 +690,12 @@ class _ControlCenterState extends State<ControlCenter> {
                       children: [
                         Row(
                           children: [
-                            Icon(entry.$1, color: accent, size: 19),
+                            Icon(entry.$1, color: colors.primary, size: 19),
                             const Spacer(),
                             Text(
                               entry.$2,
-                              style: const TextStyle(
-                                color: Color(0xff73868c),
+                              style: TextStyle(
+                                color: colors.onSurfaceVariant,
                                 fontSize: 12,
                               ),
                             ),
@@ -596,17 +704,17 @@ class _ControlCenterState extends State<ControlCenter> {
                         const SizedBox(height: 18),
                         Text(
                           entry.$3,
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 36,
                             fontWeight: FontWeight.w600,
-                            color: ink,
+                            color: colors.onSurface,
                           ),
                         ),
                         const SizedBox(height: 6),
                         Text(
                           entry.$4,
-                          style: const TextStyle(
-                            color: Color(0xff81939a),
+                          style: TextStyle(
+                            color: colors.onSurfaceVariant,
                             fontSize: 11,
                           ),
                         ),
@@ -622,18 +730,18 @@ class _ControlCenterState extends State<ControlCenter> {
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
+              Text(
                 '开始连接御坂网络',
                 style: TextStyle(
                   fontSize: 20,
                   fontWeight: FontWeight.w600,
-                  color: ink,
+                  color: colors.onSurface,
                 ),
               ),
               const SizedBox(height: 8),
-              const Text(
+              Text(
                 '首次使用按以下步骤完成准备，任务执行状态会自动回传。',
-                style: TextStyle(color: Color(0xff74888f)),
+                style: TextStyle(color: colors.onSurfaceVariant),
               ),
               const SizedBox(height: 24),
               for (final step in [
@@ -644,11 +752,11 @@ class _ControlCenterState extends State<ControlCenter> {
                 ListTile(
                   contentPadding: EdgeInsets.zero,
                   leading: CircleAvatar(
-                    backgroundColor: const Color(0xffe7f3ef),
+                    backgroundColor: colors.primaryContainer,
                     child: Text(
                       '0${step.$1}',
-                      style: const TextStyle(
-                        color: accent,
+                      style: TextStyle(
+                        color: colors.onPrimaryContainer,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
@@ -664,16 +772,16 @@ class _ControlCenterState extends State<ControlCenter> {
         const SizedBox(height: 24),
         Row(
           children: [
-            const Icon(
+            Icon(
               LucideIcons.lockKeyhole,
               size: 15,
-              color: Color(0xff74888f),
+              color: colors.onSurfaceVariant,
             ),
             const SizedBox(width: 8),
-            const Expanded(
+            Expanded(
               child: Text(
                 '账号与任务配置保存在系统安全存储；机器通信使用双向 TLS 认证。',
-                style: TextStyle(color: Color(0xff74888f), fontSize: 12),
+                style: TextStyle(color: colors.onSurfaceVariant, fontSize: 12),
               ),
             ),
           ],
@@ -712,7 +820,7 @@ class _ControlCenterState extends State<ControlCenter> {
                     runSpacing: 10,
                     crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
-                      const Icon(LucideIcons.server, color: accent),
+                      Icon(LucideIcons.server, color: colors.primary),
                       Text(
                         m.name,
                         style: const TextStyle(
@@ -726,7 +834,7 @@ class _ControlCenterState extends State<ControlCenter> {
                             : status == null
                             ? '等待同步'
                             : '在线',
-                        color: error != null ? const Color(0xffb64141) : accent,
+                        color: error != null ? colors.error : colors.primary,
                       ),
                       if (status != null) pill(status.platform),
                     ],
@@ -734,28 +842,25 @@ class _ControlCenterState extends State<ControlCenter> {
                   const SizedBox(height: 14),
                   SelectableText(
                     '${m.host}:${m.port}',
-                    style: const TextStyle(color: Color(0xff687e87)),
+                    style: TextStyle(color: colors.onSurfaceVariant),
                   ),
                   const SizedBox(height: 10),
                   if (error != null)
-                    Text(
-                      error,
-                      style: const TextStyle(color: Color(0xffb64141)),
-                    )
+                    Text(error, style: TextStyle(color: colors.error))
                   else if (status != null)
                     Text(
                       'Sisters ${status.version}  ·  biliTickerBuy ${status.biliVersion}  ·  并发上限 ${status.maxConcurrency}',
-                      style: const TextStyle(
-                        color: Color(0xff74888f),
+                      style: TextStyle(
+                        color: colors.onSurfaceVariant,
                         fontSize: 12,
                       ),
                     ),
                   if (status != null && !status.runtimeReady)
-                    const Padding(
+                    Padding(
                       padding: EdgeInsets.only(top: 8),
                       child: Text(
                         '运行时尚未就绪，请重新部署完整安装包。',
-                        style: TextStyle(color: Color(0xffad7828)),
+                        style: TextStyle(color: colors.warning),
                       ),
                     ),
                   const SizedBox(height: 16),
@@ -800,12 +905,12 @@ class _ControlCenterState extends State<ControlCenter> {
       heading('IDENTITY & TASKS', '准备每一次执行', '登录账号，选择演出与购票人，再将任务分发到 Sisters。'),
       Row(
         children: [
-          const Text(
+          Text(
             '登录账号',
             style: TextStyle(
               fontSize: 19,
               fontWeight: FontWeight.w600,
-              color: ink,
+              color: colors.onSurface,
             ),
           ),
           const Spacer(),
@@ -831,12 +936,12 @@ class _ControlCenterState extends State<ControlCenter> {
       const SizedBox(height: 30),
       Row(
         children: [
-          const Text(
+          Text(
             '抢票任务',
             style: TextStyle(
               fontSize: 19,
               fontWeight: FontWeight.w600,
-              color: ink,
+              color: colors.onSurface,
             ),
           ),
           const Spacer(),
@@ -865,7 +970,7 @@ class _ControlCenterState extends State<ControlCenter> {
                 children: [
                   Row(
                     children: [
-                      const Icon(LucideIcons.ticket, color: accent, size: 28),
+                      Icon(LucideIcons.ticket, color: colors.primary, size: 28),
                       const SizedBox(width: 18),
                       Expanded(
                         child: Column(
@@ -885,12 +990,12 @@ class _ControlCenterState extends State<ControlCenter> {
                                       .map((a) => a.name)
                                       .firstOrNull ??
                                   '账号已移除',
-                              style: const TextStyle(color: Color(0xff74888f)),
+                              style: TextStyle(color: colors.onSurfaceVariant),
                             ),
                             const SizedBox(height: 4),
                             Text(
                               startLabel(t),
-                              style: const TextStyle(color: Color(0xff74888f)),
+                              style: TextStyle(color: colors.onSurfaceVariant),
                             ),
                           ],
                         ),
@@ -952,9 +1057,12 @@ class _ControlCenterState extends State<ControlCenter> {
         children: [
           ListTile(
             contentPadding: EdgeInsets.zero,
-            leading: const CircleAvatar(
-              backgroundColor: Color(0xffe7f3ef),
-              child: Icon(LucideIcons.userRound, color: accent),
+            leading: CircleAvatar(
+              backgroundColor: colors.primaryContainer,
+              child: Icon(
+                LucideIcons.userRound,
+                color: colors.onPrimaryContainer,
+              ),
             ),
             title: Text(account.name),
             subtitle: Text(label),
@@ -967,7 +1075,7 @@ class _ControlCenterState extends State<ControlCenter> {
           if (account.lastChecked != null)
             Text(
               '上次检查：${account.lastChecked!.toLocal().toString().split('.').first}',
-              style: const TextStyle(color: Color(0xff74888f), fontSize: 12),
+              style: TextStyle(color: colors.onSurfaceVariant, fontSize: 12),
             ),
           const SizedBox(height: 8),
           Wrap(
@@ -1035,7 +1143,7 @@ class _ControlCenterState extends State<ControlCenter> {
             child: panel(
               Text(
                 '${c.connectionErrors.length} 台机器连接异常，以下记录可能不是最新状态。',
-                style: const TextStyle(color: Color(0xffad7828)),
+                style: TextStyle(color: colors.warning),
               ),
             ),
           ),
@@ -1068,12 +1176,12 @@ class _ControlCenterState extends State<ControlCenter> {
                         pill(
                           stateName(t.state),
                           color: t.state == TaskState.TASK_STATE_FAILED
-                              ? const Color(0xffb64141)
-                              : accent,
+                              ? colors.error
+                              : colors.primary,
                         ),
                         Text(
                           m.name,
-                          style: const TextStyle(color: Color(0xff74888f)),
+                          style: TextStyle(color: colors.onSurfaceVariant),
                         ),
                         if (active)
                           TextButton.icon(
@@ -1100,8 +1208,8 @@ class _ControlCenterState extends State<ControlCenter> {
                     const SizedBox(height: 8),
                     Text(
                       '最后同步：${c.lastSeen[m.id]?.toLocal().toString().split('.').first ?? '—'}',
-                      style: const TextStyle(
-                        color: Color(0xff84969c),
+                      style: TextStyle(
+                        color: colors.onSurfaceVariant,
                         fontSize: 11,
                       ),
                     ),
@@ -1277,7 +1385,7 @@ class _MachineDialogState extends State<MachineDialog> {
       passphrase = TextEditingController(),
       sshPort = TextEditingController(text: '22');
   late final port = TextEditingController(
-    text: '${widget.existing?.port ?? 17443}',
+    text: '${widget.existing?.port ?? defaultSistersPort}',
   );
   late final ca = TextEditingController(text: widget.existing?.caCert ?? '');
   late final cert = TextEditingController(
@@ -1491,10 +1599,10 @@ class _MachineDialogState extends State<MachineDialog> {
     onSubmit: submit,
     submitLabel: manual ? '保存连接' : '安全部署',
     children: [
-      const Text(
+      Text(
         'SSH 用于安装；任务与状态通过 mTLS 加密传输。部署包约 30–40 MB，'
         '网络较慢时上传可能需要十几分钟，期间请勿关闭应用。',
-        style: TextStyle(color: Color(0xff74888f)),
+        style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
       ),
       const SizedBox(height: 16),
       if (widget.existing == null)
@@ -1514,9 +1622,12 @@ class _MachineDialogState extends State<MachineDialog> {
         field(password, 'SSH 密码（仅用于本次部署）', secret: true),
         fileField(key, 'SSH 私钥（选择文件）'),
         field(passphrase, 'SSH 私钥口令（加密私钥时填写）', secret: true),
-        const Text(
+        Text(
           '安装内置的 Sisters 与 biliTickerBuy；重新部署会重启服务。',
-          style: TextStyle(color: Color(0xff74888f), fontSize: 12),
+          style: TextStyle(
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+            fontSize: 12,
+          ),
         ),
       ] else ...[
         fileField(ca, 'CA 证书'),
@@ -1581,7 +1692,9 @@ class WorkDialog extends StatelessWidget {
                   padding: const EdgeInsets.only(top: 12),
                   child: Text(
                     error!,
-                    style: const TextStyle(color: Color(0xffb64141)),
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.error,
+                    ),
                   ),
                 ),
             ],
@@ -1768,9 +1881,12 @@ class _LoginDialogState extends State<LoginDialog> {
           ),
       ],
       const SizedBox(height: 12),
-      const Text(
+      Text(
         '登录凭据不会写入普通配置文件。',
-        style: TextStyle(color: Color(0xff74888f), fontSize: 12),
+        style: TextStyle(
+          color: Theme.of(context).colorScheme.onSurfaceVariant,
+          fontSize: 12,
+        ),
       ),
     ],
   );
@@ -1945,9 +2061,12 @@ class _TaskDialogState extends State<TaskDialog> {
         if (purchase == null) ...[
           field(project, '演出 ID 或会员购链接'),
           field(date, '日期（有日历场次时填写）', hint: 'YYYY-MM-DD'),
-          const Text(
+          Text(
             '将通过 biliTickerBuy 读取真实场次、票档和账号购票人。',
-            style: TextStyle(color: Color(0xff74888f), fontSize: 12),
+            style: TextStyle(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+              fontSize: 12,
+            ),
           ),
         ] else ...[
           field(name, '任务名称'),
@@ -1977,9 +2096,12 @@ class _TaskDialogState extends State<TaskDialog> {
           ),
           const SizedBox(height: 14),
           field(startAt, '开售时间（北京时间）', hint: '2026-11-20 20:00:00'),
-          const Text(
+          Text(
             '默认使用所选票档的起售时间，Sisters 按此倒计时后开始抢票；留空则分发后立即开始。',
-            style: TextStyle(color: Color(0xff74888f), fontSize: 12),
+            style: TextStyle(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+              fontSize: 12,
+            ),
           ),
           const SizedBox(height: 20),
           const Text('购票人', style: TextStyle(fontWeight: FontWeight.w600)),
@@ -2020,11 +2142,11 @@ class _TaskDialogState extends State<TaskDialog> {
             const SizedBox(height: 14),
           ],
           if (addresses.isEmpty)
-            const Padding(
+            Padding(
               padding: EdgeInsets.only(bottom: 14),
               child: Text(
                 '请先在哔哩哔哩添加收货地址，再重新读取。当前运行时要求电子票也提供地址。',
-                style: TextStyle(color: Color(0xffad7828)),
+                style: TextStyle(color: Theme.of(context).colorScheme.warning),
               ),
             ),
           field(buyer, '联系人（必填）'),
@@ -2033,9 +2155,12 @@ class _TaskDialogState extends State<TaskDialog> {
             onPressed: busy ? null : () => setState(() => purchase = null),
             child: const Text('重新选择演出'),
           ),
-          const Text(
+          Text(
             '任务保存后不会立即执行。请在任务列表中选择机器并分发。',
-            style: TextStyle(color: Color(0xff74888f), fontSize: 12),
+            style: TextStyle(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+              fontSize: 12,
+            ),
           ),
         ],
       ],

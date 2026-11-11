@@ -144,8 +144,17 @@ func TestValidateDeploymentInputs(t *testing.T) {
 	if e := validate(&base); e != nil {
 		t.Fatal(e)
 	}
-	if base.Port != 22 || base.GRPCPort != 17443 {
+	if base.Port != 22 || base.GRPCPort != 20001 {
 		t.Fatal("defaults")
+	}
+	custom := base
+	custom.Port = 2222
+	custom.GRPCPort = 24443
+	if e := validate(&custom); e != nil {
+		t.Fatal(e)
+	}
+	if custom.Port != 2222 || custom.GRPCPort != 24443 {
+		t.Fatal("explicit ports overwritten")
 	}
 	for _, dir := range []string{"../escape", "/tmp/escape", "a/../../b", "a;touch bad", "a\nb", ".", "a//b", "a/../b"} {
 		r := base

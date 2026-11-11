@@ -19,7 +19,7 @@ import tempfile
 from typing import Any, Callable
 from urllib.parse import urlsplit
 
-VERSION = "0.1.6"
+VERSION = "0.2.0"
 BILI_VERSION = "2.15.18"
 MAX_REQUEST_BYTES = 4 * 1024 * 1024
 OPERATIONS = frozenset({"ping", "qr_start", "qr_poll", "login_cookie", "login_state", "search", "purchase_context", "build_config", "validate", "run"})

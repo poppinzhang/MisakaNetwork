@@ -131,7 +131,7 @@ void main() {
       find.byType(CheckboxListTile),
     );
     expect(tiles.map((t) => t.onChanged == null), [true, false]);
-    expect(find.text('node.example:17443 · 已提交，不会重复执行'), findsOneWidget);
+    expect(find.text('node.example:20001 · 已提交，不会重复执行'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
   testWidgets('phone dialogs stay usable with the soft keyboard visible', (
@@ -203,7 +203,7 @@ void main() {
     await tester.tap(find.text('安全部署'));
     await tester.pumpAndSettle();
     expect(c.state.machines.single.name, '节点 x');
-    expect(find.textContaining('本机无法直接连接 node.example:17443'), findsOneWidget);
+    expect(find.textContaining('本机无法直接连接 node.example:20001'), findsOneWidget);
     expect(find.textContaining('防火墙或安全组'), findsOneWidget);
     await tester.pump(const Duration(seconds: 7));
     await tester.pumpAndSettle();

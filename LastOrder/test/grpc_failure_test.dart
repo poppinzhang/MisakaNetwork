@@ -71,7 +71,7 @@ void main() {
       File('${directory.path}/$name').writeAsStringSync(name);
     }
     final channel = await openSistersChannel(
-      node(17443, directory: directory.path),
+      node(defaultSistersPort, directory: directory.path),
     );
     addTearDown(channel.shutdown);
     expect(channel.options.connectTimeout, const Duration(seconds: 8));

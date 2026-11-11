@@ -1,11 +1,13 @@
 import 'dart:convert';
 
+const defaultSistersPort = 20001;
+
 class Machine {
   Machine({
     required this.id,
     required this.name,
     required this.host,
-    this.port = 17443,
+    this.port = defaultSistersPort,
     required this.caCert,
     required this.clientCert,
     required this.clientKey,
@@ -36,7 +38,7 @@ class Machine {
     id: j['id'] as String,
     name: j['name'] as String,
     host: j['host'] as String,
-    port: j['port'] as int? ?? 17443,
+    port: j['port'] as int? ?? defaultSistersPort,
     caCert: j['caCert'] as String,
     clientCert: j['clientCert'] as String,
     clientKey: j['clientKey'] as String,
@@ -163,20 +165,25 @@ class TicketTask {
   );
 }
 
+enum AppThemeMode { system, light, dark }
+
 class SavedState {
   static const schemaVersion = 2;
   SavedState({
     List<Machine>? machines,
     List<Account>? accounts,
     List<TicketTask>? tasks,
+    this.themeMode = AppThemeMode.system,
   }) : machines = machines ?? [],
        accounts = accounts ?? [],
        tasks = tasks ?? [];
   final List<Machine> machines;
   final List<Account> accounts;
   final List<TicketTask> tasks;
+  final AppThemeMode themeMode;
   String encode() => jsonEncode({
     'schema': schemaVersion,
+    'theme_mode': themeMode.name,
     'machines': machines.map((e) => e.toJson()).toList(),
     'accounts': accounts.map((e) => e.toJson()).toList(),
     'tasks': tasks.map((e) => e.toJson()).toList(),
@@ -185,6 +192,11 @@ class SavedState {
     final j = jsonDecode(data) as Map<String, dynamic>;
     if (j['schema'] != schemaVersion) throw const FormatException('不支持的本地配置版本');
     return SavedState(
+      themeMode:
+          AppThemeMode.values
+              .where((mode) => mode.name == j['theme_mode'])
+              .firstOrNull ??
+          AppThemeMode.system,
       machines: (j['machines'] as List)
           .map((e) => Machine.fromJson(Map<String, dynamic>.from(e as Map)))
           .toList(),

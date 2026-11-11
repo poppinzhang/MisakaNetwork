@@ -24,7 +24,7 @@ def check(binary: Path) -> None:
         if error:
             assert not event["ok"] and event["error"]["code"] == error
         elif request["op"] == "ping":
-            assert event["data"] == {"version": "0.1.6", "bili_version": "2.15.18", "protocol": 1, "ready": True}
+            assert event["data"] == {"version": "0.2.0", "bili_version": "2.15.18", "protocol": 1, "ready": True}
         else:
             assert not event["data"]["ok"] and event["data"]["errors"]
     print("Packaged runtime: 4 offline checks passed; no login or ordering requests executed.")

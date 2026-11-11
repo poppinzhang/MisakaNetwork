@@ -43,10 +43,23 @@ void main() {
       expect(loaded.accounts, isEmpty);
       expect(loaded.machines, isEmpty);
       expect(loaded.tasks, isEmpty);
+      expect(loaded.themeMode, AppThemeMode.system);
       expect(await oldFile.readAsString(), previous);
       expect(await File('${temporary.path}/state-v2.json').exists(), false);
     },
   );
+
+  test('theme preference survives a fresh local store instance', () async {
+    for (final mode in AppThemeMode.values) {
+      await store.save(SavedState(themeMode: mode));
+      final reopened = TestLocalStore(temporary.path);
+      expect((await reopened.load()).themeMode, mode);
+      final saved = jsonDecode(
+        await File('${temporary.path}/state-v2.json').readAsString(),
+      );
+      expect(saved['theme_mode'], mode.name);
+    }
+  });
 
   test(
     'credential pruning only removes unreferenced imported copies',

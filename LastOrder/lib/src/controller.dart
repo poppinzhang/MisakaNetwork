@@ -127,11 +127,16 @@ class AppController extends ChangeNotifier {
     List<Machine>? machines,
     List<Account>? accounts,
     List<TicketTask>? tasks,
+    AppThemeMode? themeMode,
   }) => SavedState(
     machines: machines ?? state.machines,
     accounts: accounts ?? state.accounts,
     tasks: tasks ?? state.tasks,
+    themeMode: themeMode ?? state.themeMode,
   );
+
+  Future<void> setThemeMode(AppThemeMode mode) =>
+      _save(() => _next(themeMode: mode));
 
   /// Rejects a name another machine uses. Check it before deploying: a
   /// deployment restarts the remote service and cancels its running tasks.

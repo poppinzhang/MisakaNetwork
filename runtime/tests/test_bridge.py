@@ -62,7 +62,7 @@ class BridgeTests(unittest.TestCase):
     def test_ping_has_real_version(self):
         code, events = self.invoke({"op": "ping"})
         self.assertEqual(code, 0)
-        self.assertEqual(events[-1]["data"]["version"], "0.1.6")
+        self.assertEqual(events[-1]["data"]["version"], "0.2.0")
         self.assertEqual(events[-1]["data"]["bili_version"], "2.15.18")
 
     def test_cookie_formats(self):
@@ -452,6 +452,9 @@ class SourceIntegrityTests(unittest.TestCase):
                 self.assertEqual(re.search(r'const Version = "([^"]+)"', source).group(1), version)
         pubspec = (project / "LastOrder/pubspec.yaml").read_text()
         self.assertEqual(re.search(r"^version: (.+)$", pubspec, re.MULTILINE).group(1), f"{version}+{build}")
+        app_info = (project / "LastOrder/lib/src/app_info.dart").read_text()
+        self.assertEqual(re.search(r"const appVersion = '([^']+)';", app_info).group(1), version)
+        self.assertEqual(int(re.search(r"const appBuildNumber = (\d+);", app_info).group(1)), build)
         windows = (project / "LastOrder/windows/runner/Runner.rc").read_text()
         self.assertIn(f'#define VERSION_AS_STRING "{version}+{build}"', windows)
         self.assertIn(f'#define VERSION_AS_NUMBER {version.replace(".", ",")},{build}', windows)

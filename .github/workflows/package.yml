@@ -83,15 +83,15 @@ jobs:
           tar -xzf .build/bundles/macos-${{ matrix.arch }}.tar.gz -C .build/unpack
           mv .build/unpack/runtime .build/runtime/macos-${{ matrix.arch }}/misaka-runtime
       - run: python scripts/package_macos.py --app .build/LastOrder.app --arch ${{ matrix.arch }}
-      - run: python scripts/check_release.py dist/0.1.6 --target macos-${{ matrix.arch }} --forbid "$HOME" --forbid "$GITHUB_WORKSPACE"
+      - run: python scripts/check_release.py dist/0.2.0 --target macos-${{ matrix.arch }} --forbid "$HOME" --forbid "$GITHUB_WORKSPACE"
       - uses: actions/upload-artifact@v4
         with:
           name: LastOrder-macos-${{ matrix.arch }}
           path: |
-            dist/0.1.6/*.zip
-            dist/0.1.6/*.sha256
-            dist/0.1.6/SHA256SUMS
-            dist/0.1.6/release.json
+            dist/0.2.0/*.zip
+            dist/0.2.0/*.sha256
+            dist/0.2.0/SHA256SUMS
+            dist/0.2.0/release.json
           if-no-files-found: error
   windows:
     needs: bundles
@@ -125,15 +125,15 @@ jobs:
       - run: python runtime/check_privacy.py .build/runtime/windows-amd64/misaka-runtime
       - run: python scripts/build_windows.py
       - run: python scripts/package_windows.py
-      - run: python scripts/check_release.py dist/0.1.6 --target windows-amd64 --forbid "$env:USERPROFILE" --forbid "$env:GITHUB_WORKSPACE"
+      - run: python scripts/check_release.py dist/0.2.0 --target windows-amd64 --forbid "$env:USERPROFILE" --forbid "$env:GITHUB_WORKSPACE"
       - uses: actions/upload-artifact@v4
         with:
           name: LastOrder-windows-amd64
           path: |
-            dist/0.1.6/*.zip
-            dist/0.1.6/*.sha256
-            dist/0.1.6/SHA256SUMS
-            dist/0.1.6/release.json
+            dist/0.2.0/*.zip
+            dist/0.2.0/*.sha256
+            dist/0.2.0/SHA256SUMS
+            dist/0.2.0/release.json
           if-no-files-found: error
   android:
     needs: bundles
@@ -192,15 +192,15 @@ jobs:
           else
             python scripts/package_android.py
           fi
-      - run: python scripts/check_release.py dist/0.1.6 --target android-arm64 --target android-amd64 --forbid "$HOME" --forbid "$GITHUB_WORKSPACE"
+      - run: python scripts/check_release.py dist/0.2.0 --target android-arm64 --target android-amd64 --forbid "$HOME" --forbid "$GITHUB_WORKSPACE"
       - uses: actions/upload-artifact@v4
         with:
           name: LastOrder-android
           path: |
-            dist/0.1.6/*.apk
-            dist/0.1.6/*.sha256
-            dist/0.1.6/SHA256SUMS
-            dist/0.1.6/release.json
+            dist/0.2.0/*.apk
+            dist/0.2.0/*.sha256
+            dist/0.2.0/SHA256SUMS
+            dist/0.2.0/release.json
           if-no-files-found: error
   complete-release:
     needs: [macos, windows, android]
@@ -214,10 +214,10 @@ jobs:
         with:
           pattern: LastOrder-*
           path: .build/release-inputs
-      - run: python scripts/release_manifest.py .build/release-inputs/LastOrder-* --output dist/0.1.6
-      - run: python scripts/check_release.py dist/0.1.6
+      - run: python scripts/release_manifest.py .build/release-inputs/LastOrder-* --output dist/0.2.0
+      - run: python scripts/check_release.py dist/0.2.0
       - uses: actions/upload-artifact@v4
         with:
-          name: LastOrder-0.1.6-complete
-          path: dist/0.1.6/*
+          name: LastOrder-0.2.0-complete
+          path: dist/0.2.0/*
           if-no-files-found: error

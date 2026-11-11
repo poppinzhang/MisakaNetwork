@@ -156,7 +156,7 @@ func validate(r *Request) error {
 		r.Port = 22
 	}
 	if r.GRPCPort == 0 {
-		r.GRPCPort = 17443
+		r.GRPCPort = 20001
 	}
 	if r.RemoteDirectory == "" {
 		r.RemoteDirectory = ".local/share/misaka"
