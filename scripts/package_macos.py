@@ -36,7 +36,7 @@ def main() -> None:
             raise SystemExit("App version/build number does not match this release")
         target_arch = "x86_64" if args.arch == "amd64" else "arm64"
         for binary in (app / "Contents/MacOS/LastOrder", app / "Contents/Frameworks/App.framework/App", app / "Contents/Frameworks/FlutterMacOS.framework/FlutterMacOS", local_runtime / "misaka-runtime"):
-            subprocess.run(["lipo", "-verify_arch", target_arch, str(binary)], check=True)
+            subprocess.run(["lipo", str(binary), "-verify_arch", target_arch], check=True)
         resources = app / "Contents/Resources"
         shutil.copytree(local_runtime, resources / "runtime", symlinks=True)
         shutil.copytree(args.bundles, resources / "bundles", symlinks=True)

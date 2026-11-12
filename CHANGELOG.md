@@ -19,6 +19,8 @@
 
 ### 修复
 
+- 修正 macOS 打包时 `lipo` 架构检查参数顺序，兼容云端 Xcode 工具链；仍严格拒绝缺少目标架构的二进制。
+- Android CI 显式安装 `platform-tools`，避免 SDK 初始化请求已移除的旧 `tools` 包；SDK 36、build-tools 36.0.0 与 NDK 版本保持不变。
 - 修复托管 CI 隐私扫描把官方 Python / wheel 中的公共 runner 构建路径误判为本次环境信息的问题；云端继续完整扫描本次仓库路径标记，本地个人路径检查保持不变。
 
 ### 验证、升级影响与限制

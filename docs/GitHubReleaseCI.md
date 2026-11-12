@@ -37,7 +37,7 @@
 2. 将本次改动从 `CHANGELOG.md` 的 `## unstaged` 移入 `## <版本号> — <YYYY-MM-DD>`，前方保留空的 `unstaged`。新增 `docs/releases/<版本号>.md`，明确升级操作与已知限制。CI 尚未执行时记录为待构建，不能预写 CI 通过或真实业务验收。
 3. 完成本地源码测试及发布准备，提交所需源码。后续正式发布时再创建并推送版本 Tag；或者为已存在且包含工作流的版本 Tag 手动运行 Release。预检拒绝分支、版本/构建号不一致、非空 `unstaged`、日期不一致或缺少发布说明。
 4. CI 在四种原生平台构建 Python 运行时及 Sisters 包，执行 Go/Python 测试、依赖闭合检查、运行时离线检查和隐私检查。每份运行时使用独立 venv，避免混入 runner 预装的 Python 包。
-5. macOS 两种架构、Windows x64 和 Android 两种架构全部重新构建，每份完整应用均包含四种 Sisters 包。macOS/Windows 执行 Flutter 静态检查与测试；Android 固定 SDK、JDK 与 NDK，使用正式密钥签名。
+5. macOS 两种架构、Windows x64 和 Android 两种架构全部重新构建，每份完整应用均包含四种 Sisters 包。macOS/Windows 执行 Flutter 静态检查与测试；Android 固定 SDK、JDK 与 NDK，初始化时只请求 `platform-tools`，后续显式安装所需 API/build-tools/NDK，使用正式密钥签名。
 6. 所有平台成功后合并清单，检查版本、平台、内嵌部署包、字节数和校验和。缺少任何目标都不会进入发布作业。
 7. 发布作业将必要文件复制到全新的 staging 目录，再次校验文件集合、完整状态、当前版本和 Android 签名模式。只允许非空、普通文件，单个文件须小于 2 GiB；不接受符号链接。
 8. 发布脚本核对本地 HEAD、本地 Tag 和远程 Tag 的提交一致，拒绝已存在的同版本 Release，创建草稿并逐项上传。远端文件名集合、上传状态、大小和 SHA-256 全部一致后，再次核对 Tag，最后公开正式 Release 并标记为 Latest。创建与公开均显式关闭 prerelease，公开前后核对 Release 类型；不会因版本号为 `0.x` 自动改成预发布。1.0.0 前仍属于早期研发版本。
