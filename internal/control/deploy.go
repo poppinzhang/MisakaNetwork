@@ -80,6 +80,7 @@ type Request struct {
 	PKIDirectory         string `json:"pki_directory,omitempty"`
 	ServerName           string `json:"server_name,omitempty"`
 	GRPCPort             int    `json:"grpc_port,omitempty"`
+	ProgressPath         string `json:"progress_path,omitempty"`
 }
 type Response struct {
 	OK          bool   `json:"ok"`
@@ -103,6 +104,8 @@ func (e *pinError) Error() string { return "SSH 主机指纹尚未确认" }
 
 func Handle(r Request) Response {
 	switch r.Action {
+	case "generate_cloud_ssh_key":
+		return cloudSSHKeyResponse(GenerateCloudSSHKey)
 	case "protect_path":
 		if e := ProtectPath(r.Directory); e != nil {
 			return Response{Error: publicError(e)}
@@ -304,6 +307,11 @@ func Deploy(r Request) (Deployment, error) {
 	if e := validate(&r); e != nil {
 		return result, e
 	}
+	progress, e := newProgressReporter(r.ProgressPath)
+	if e != nil {
+		return result, e
+	}
+	progress.report(2, "准备部署")
 	auth := []ssh.AuthMethod{}
 	if r.PrivateKeyPath != "" {
 		b, e := os.ReadFile(r.PrivateKeyPath)
@@ -327,6 +335,7 @@ func Deploy(r Request) (Deployment, error) {
 	if len(auth) == 0 {
 		return result, errors.New("请提供 SSH 密码或私钥")
 	}
+	progress.report(5, "连接 SSH")
 	config := &ssh.ClientConfig{User: r.Username, Auth: auth, HostKeyCallback: hostCallback(r.HostKeyFingerprint), Timeout: 15 * time.Second}
 	address := net.JoinHostPort(r.Host, strconv.Itoa(r.Port))
 	raw, e := (&net.Dialer{Timeout: 15 * time.Second}).Dial("tcp", address)
@@ -362,6 +371,7 @@ func Deploy(r Request) (Deployment, error) {
 	}
 	client := ssh.NewClient(sc, ch, req)
 	defer client.Close()
+	progress.report(10, "检查系统与安装包")
 	platform, arch, e := remotePlatform(client)
 	if e != nil {
 		return result, e
@@ -381,6 +391,7 @@ func Deploy(r Request) (Deployment, error) {
 	if _, e = f.Seek(0, io.SeekStart); e != nil {
 		return result, errors.New("无法重新读取部署包")
 	}
+	progress.report(15, "准备安全配置")
 	identity, e := InitPKI(r.PKIDirectory)
 	if e != nil {
 		return result, e
@@ -406,10 +417,17 @@ func Deploy(r Request) (Deployment, error) {
 	}
 	release := path.Join(root, "releases", Version+"-"+hex.EncodeToString(nonce))
 	q := shellQuote
-	_, e = run(client, "umask 077; mkdir -p "+q(release)+" && tar -xzf - -C "+q(release), f)
+	info, e := f.Stat()
+	if e != nil || info.Size() <= 0 {
+		return result, errors.New("无法读取部署包大小")
+	}
+	progress.report(20, "上传并解压安装包")
+	upload := &uploadProgressReader{reader: f, total: info.Size(), report: progress.report}
+	_, e = run(client, "umask 077; mkdir -p "+q(release)+" && tar -xzf - -C "+q(release), upload)
 	if e != nil {
 		return result, staged("上传或解压部署包失败；当前版本未变更")
 	}
+	progress.report(78, "写入安全配置")
 	cfg, _ := json.Marshal(map[string]any{"listen": fmt.Sprintf("0.0.0.0:%d", r.GRPCPort), "cert": "server.pem", "key": "server.key", "ca": "ca.pem", "runtime": "runtime/misaka-runtime", "max_concurrency": 2, "queue_capacity": 64})
 	secretArchive, e := archiveFiles(map[string][]byte{"server.pem": cert, "server.key": key, "ca.pem": ca, "config.json": cfg})
 	if e != nil {
@@ -420,10 +438,12 @@ func Deploy(r Request) (Deployment, error) {
 		return result, staged("写入远程私有配置失败；当前版本未变更")
 	}
 	// Probe both executables before changing the active release.
+	progress.report(82, "检查 Sisters")
 	out, e := run(client, q(path.Join(release, "sisters"))+" --version", nil)
 	if e != nil || !strings.Contains(out, Version) {
 		return result, staged("远程 Sisters 自检失败；当前版本未变更")
 	}
+	progress.report(86, "检查抢票运行时")
 	out, e = run(client, "printf '%s\\n' '{\"op\":\"ping\",\"params\":{}}' | "+q(path.Join(release, "runtime/misaka-runtime")), nil)
 	if e != nil || !validRuntimeProbe(out) {
 		return result, staged("远程 biliTickerBuy 运行时自检失败；当前版本未变更")
@@ -433,13 +453,17 @@ func Deploy(r Request) (Deployment, error) {
 	if !staging.Stop() {
 		return result, errStagingExpired
 	}
+	progress.report(90, "启动 Sisters")
 	if e = activate(client, platform, root, release, remoteHome, func() error {
+		progress.report(94, "验证安全连接")
 		return verifyDeployment(context.Background(), client, identity, cert, r.ServerName, r.GRPCPort)
 	}); e != nil {
 		return result, e
 	}
+	progress.report(97, "检查直连状态")
 	endpoint := net.JoinHostPort(r.Host, strconv.Itoa(r.GRPCPort))
 	result = Deployment{Identity: identity, Endpoint: endpoint, ServerName: r.ServerName, Platform: platform, Arch: arch, Reachable: reachable(context.Background(), identity, cert, r.ServerName, endpoint)}
+	progress.report(100, "部署完成")
 	return result, nil
 }
 func serviceDefinition(platform, root, home string) (servicePath string, body []byte, restart, stop string) {

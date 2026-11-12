@@ -13,6 +13,8 @@ class Machine {
     required this.clientKey,
     this.serverName = '',
     this.fingerprint = '',
+    this.deploymentPending = false,
+    this.deploymentError = '',
   });
   final String id,
       name,
@@ -21,8 +23,35 @@ class Machine {
       clientCert,
       clientKey,
       serverName,
-      fingerprint;
+      fingerprint,
+      deploymentError;
   final int port;
+  final bool deploymentPending;
+
+  bool get canConnect =>
+      !deploymentPending &&
+      deploymentError.isEmpty &&
+      caCert.isNotEmpty &&
+      clientCert.isNotEmpty &&
+      clientKey.isNotEmpty;
+
+  Machine copyWith({
+    String? fingerprint,
+    bool? deploymentPending,
+    String? deploymentError,
+  }) => Machine(
+    id: id,
+    name: name,
+    host: host,
+    port: port,
+    caCert: caCert,
+    clientCert: clientCert,
+    clientKey: clientKey,
+    serverName: serverName,
+    fingerprint: fingerprint ?? this.fingerprint,
+    deploymentPending: deploymentPending ?? this.deploymentPending,
+    deploymentError: deploymentError ?? this.deploymentError,
+  );
   Map<String, dynamic> toJson() => {
     'id': id,
     'name': name,
@@ -33,6 +62,8 @@ class Machine {
     'clientKey': clientKey,
     'serverName': serverName,
     'fingerprint': fingerprint,
+    'deploymentPending': deploymentPending,
+    'deploymentError': deploymentError,
   };
   factory Machine.fromJson(Map<String, dynamic> j) => Machine(
     id: j['id'] as String,
@@ -44,6 +75,8 @@ class Machine {
     clientKey: j['clientKey'] as String,
     serverName: j['serverName'] as String? ?? '',
     fingerprint: j['fingerprint'] as String? ?? '',
+    deploymentPending: j['deploymentPending'] as bool? ?? false,
+    deploymentError: j['deploymentError'] as String? ?? '',
   );
 }
 
@@ -123,6 +156,81 @@ String normalizeStartAt(String value) {
   throw const UserError('开售时间应为北京时间，例如 2026-11-20 20:00:00。');
 }
 
+/// Public selection details suitable for ordinary task metadata. Purchase
+/// context, buyer details and credentials must stay in secret storage.
+class TaskSummary {
+  const TaskSummary({
+    this.projectName = '',
+    this.screenName = '',
+    this.ticketName = '',
+    this.selectedDate = '',
+    this.quantity = 0,
+  });
+
+  final String projectName, screenName, ticketName, selectedDate;
+  final int quantity;
+
+  factory TaskSummary.fromSelection(
+    Map<String, dynamic> purchase,
+    int ticketIndex,
+    int quantity,
+  ) {
+    final options = purchase['ticket_options'];
+    if (options is! List ||
+        ticketIndex < 0 ||
+        ticketIndex >= options.length ||
+        options[ticketIndex] is! Map) {
+      throw const UserError('所选场次或票档无效，请重新读取演出后选择。');
+    }
+    if (quantity <= 0) throw const UserError('购票数量必须大于零。');
+    final ticket = options[ticketIndex] as Map;
+    String text(Object? value) {
+      if (value == null) return '';
+      if (value is String) return value.trim();
+      throw const UserError('演出或票档信息格式异常，请重新读取演出后重试。');
+    }
+
+    final screen = text(ticket['screen']);
+    final description = text(ticket['desc']);
+    return TaskSummary(
+      projectName: text(purchase['project_name']),
+      screenName: screen.isEmpty ? text(ticket['screen_name']) : screen,
+      ticketName: description.isEmpty ? text(ticket['display']) : description,
+      selectedDate: text(purchase['selected_date']),
+      quantity: quantity,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+    'projectName': projectName,
+    'screenName': screenName,
+    'ticketName': ticketName,
+    'selectedDate': selectedDate,
+    'quantity': quantity,
+  };
+
+  factory TaskSummary.fromJson(Map<String, dynamic> j) {
+    String text(String key) {
+      final value = j[key];
+      if (value == null) return '';
+      if (value is String) return value.trim();
+      throw const FormatException('任务摘要格式无效。');
+    }
+
+    final quantity = j['quantity'] ?? 0;
+    if (quantity is! int || quantity < 0) {
+      throw const FormatException('任务摘要格式无效。');
+    }
+    return TaskSummary(
+      projectName: text('projectName'),
+      screenName: text('screenName'),
+      ticketName: text('ticketName'),
+      selectedDate: text('selectedDate'),
+      quantity: quantity,
+    );
+  }
+}
+
 class TicketTask {
   TicketTask({
     required this.id,
@@ -130,6 +238,7 @@ class TicketTask {
     required this.accountId,
     this.startAt = '',
     this.dispatchedTo = const [],
+    this.summary,
   });
   final String id, name, accountId;
 
@@ -140,12 +249,14 @@ class TicketTask {
   /// Machines that accepted this task. Sisters keeps accepted task IDs only in
   /// memory, so a task is submitted to each machine at most once.
   final List<String> dispatchedTo;
+  final TaskSummary? summary;
   TicketTask withDispatched(Iterable<String> machineIds) => TicketTask(
     id: id,
     name: name,
     accountId: accountId,
     startAt: startAt,
     dispatchedTo: {...dispatchedTo, ...machineIds}.toList()..sort(),
+    summary: summary,
   );
   Map<String, dynamic> toJson() => {
     'id': id,
@@ -153,6 +264,7 @@ class TicketTask {
     'accountId': accountId,
     'startAt': startAt,
     'dispatchedTo': dispatchedTo,
+    if (summary != null) 'summary': summary!.toJson(),
   };
   factory TicketTask.fromJson(Map<String, dynamic> j) => TicketTask(
     id: j['id'] as String,
@@ -162,6 +274,9 @@ class TicketTask {
     dispatchedTo: [
       for (final id in j['dispatchedTo'] as List? ?? const []) id as String,
     ],
+    summary: j['summary'] == null
+        ? null
+        : TaskSummary.fromJson(Map<String, dynamic>.from(j['summary'] as Map)),
   );
 }
 

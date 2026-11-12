@@ -72,6 +72,25 @@ func InitPKI(dir string) (Identity, error) {
 	if e := ProtectPath(dir); e != nil {
 		return out, e
 	}
+	// Independent desktop helper processes and concurrent Android JNI calls
+	// share one CA. OS locks are released automatically if a process exits.
+	lockPath := filepath.Join(dir, ".init.lock")
+	if info, e := os.Lstat(lockPath); e == nil && !info.Mode().IsRegular() {
+		return out, errors.New("证书目录锁不能是符号链接或非普通文件")
+	} else if e != nil && !os.IsNotExist(e) {
+		return out, e
+	}
+	lock, e := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0600)
+	if e != nil {
+		return out, e
+	}
+	defer lock.Close()
+	if e = ProtectPath(lockPath); e != nil {
+		return out, e
+	}
+	if e = lockPKIFile(lock); e != nil {
+		return out, errors.New("无法锁定控制端证书目录")
+	}
 	names := []string{"ca.pem", "ca.key", "client.pem", "client.key"}
 	count := 0
 	for _, name := range names {

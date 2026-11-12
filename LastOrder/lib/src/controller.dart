@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
@@ -8,6 +9,54 @@ import 'package:uuid/uuid.dart';
 import '../generated/misaka/v1/sisters.pbgrpc.dart';
 import 'models.dart';
 import 'services.dart';
+import 'cloud_controller.dart';
+
+enum DeploymentPhase { deploying, awaitingConfirmation, failed, succeeded }
+
+class MachineDeployment {
+  const MachineDeployment({
+    this.phase = DeploymentPhase.deploying,
+    this.percent = 0,
+    this.stage = '准备部署',
+    this.fingerprint = '',
+    this.error,
+  });
+  final DeploymentPhase phase;
+  final int percent;
+  final String stage, fingerprint;
+  final String? error;
+  bool get active => phase == DeploymentPhase.deploying || awaitingConfirmation;
+  bool get awaitingConfirmation =>
+      phase == DeploymentPhase.awaitingConfirmation;
+}
+
+class _DeploymentJob {
+  _DeploymentJob(this.machine, this.request, this.importedFiles);
+  Machine machine;
+  final Map<String, dynamic> request;
+  final List<String> importedFiles;
+}
+
+/// Compare addresses independently of SSH/gRPC ports. Canonicalize literal
+/// IPv6, IPv4-mapped IPv6, and the spelling of hostnames without DNS requests.
+String deploymentHostKey(String host) {
+  var value = host.trim().toLowerCase();
+  if (value.startsWith('[') && value.endsWith(']')) {
+    value = value.substring(1, value.length - 1);
+  }
+  final address = InternetAddress.tryParse(value);
+  if (address != null) {
+    final bytes = address.rawAddress;
+    if (bytes.length == 16 &&
+        bytes.take(10).every((b) => b == 0) &&
+        bytes[10] == 255 &&
+        bytes[11] == 255) {
+      return bytes.skip(12).join('.');
+    }
+    return bytes.join('.');
+  }
+  return value.endsWith('.') ? value.substring(0, value.length - 1) : value;
+}
 
 class AppController extends ChangeNotifier {
   AppController({
@@ -15,8 +64,11 @@ class AppController extends ChangeNotifier {
     required this.gateway,
     required this.runtime,
     required this.helper,
-  });
+  }) {
+    cloud = CloudController(store: store, helper: helper)..addListener(_notify);
+  }
   final StateStore store;
+  late final CloudController cloud;
   final AgentGateway gateway;
   final RuntimeBridge runtime;
   final DeploymentHelper helper;
@@ -29,6 +81,12 @@ class AppController extends ChangeNotifier {
   /// Deployments in flight. Quitting kills the helper, which can leave the
   /// remote half switched without a rollback.
   int deploying = 0;
+  final Map<String, MachineDeployment> deployments = {};
+  final Map<String, _DeploymentJob> _deploymentJobs = {};
+  final Map<String, int> _deploymentRevisions = {};
+  Future<void>? _pkiInitialization;
+  Future<void> _credentialPrune = Future<void>.value();
+  int _credentialImportHolds = 0;
   String? startupError;
   Timer? _timer, _accountTimer;
   final Set<String> checkingAccounts = {};
@@ -38,10 +96,28 @@ class AppController extends ChangeNotifier {
       _activeChecks = {};
   final Map<String, Future<void>> _accountOperations = {};
   Future<void> _stateOperation = Future<void>.value();
+  Future<void>? _refreshOperation;
   Future<void> initialize({bool poll = true}) async {
     try {
       state = await store.load();
       initialized = true;
+      unawaited(cloud.initialize());
+      if (state.machines.any((m) => m.deploymentPending)) {
+        await _save(
+          () => _next(
+            machines: [
+              for (final m in state.machines)
+                m.deploymentPending
+                    ? m.copyWith(
+                        deploymentPending: false,
+                        deploymentError: '上次部署被中断，远程状态未确认。请检查机器后重新部署。',
+                      )
+                    : m,
+            ],
+          ),
+          retainOnFailure: true,
+        );
+      }
       await _pruneCredentials();
       if (poll) {
         _timer = Timer.periodic(const Duration(seconds: 5), (_) => refresh());
@@ -141,12 +217,51 @@ class AppController extends ChangeNotifier {
   /// Rejects a name another machine uses. Check it before deploying: a
   /// deployment restarts the remote service and cancels its running tasks.
   void requireUniqueMachineName(String name, {String? id}) {
-    if (state.machines.any((m) => m.id != id && m.name == name)) {
+    if ([
+      ...state.machines,
+      ..._deploymentJobs.values.map((job) => job.machine),
+    ].any((m) => m.id != id && m.name == name)) {
       throw const UserError('机器名称已存在，请使用不同的名称。');
     }
   }
 
+  void requireUniqueDeploymentHost(String host, {String? id}) {
+    final key = deploymentHostKey(host);
+    if ([
+      ...state.machines,
+      ..._deploymentJobs.values.map((job) => job.machine),
+    ].any((m) => m.id != id && deploymentHostKey(m.host) == key)) {
+      throw const UserError('该 IP 或主机地址已在机器列表中，请使用原机器的「重新部署」。');
+    }
+  }
+
+  bool isDeploying(String id) =>
+      _deploymentJobs.containsKey(id) || (deployments[id]?.active ?? false);
+
+  void holdCredentialImports() => _credentialImportHolds++;
+
+  void releaseCredentialImports() {
+    if (_credentialImportHolds > 0) _credentialImportHolds--;
+    if (_credentialImportHolds == 0) unawaited(_pruneCredentials());
+  }
+
+  Future<String?> importCredential() async {
+    holdCredentialImports();
+    try {
+      // A previous dialog may already have started pruning. Wait before the
+      // picker creates a new file, so that cleanup cannot delete this import.
+      await _credentialPrune;
+      return await importProtectedFile(store);
+    } finally {
+      // The surrounding dialog continues to hold the selected file.
+      if (_credentialImportHolds > 0) _credentialImportHolds--;
+    }
+  }
+
   Future<void> addMachine(Machine machine) async {
+    if (isDeploying(machine.id)) {
+      throw const UserError('该机器正在部署，请等待部署结束。');
+    }
     requireUniqueMachineName(machine.name, id: machine.id);
     if (machine.host.trim().isEmpty ||
         machine.port < 1 ||
@@ -158,78 +273,117 @@ class AppController extends ChangeNotifier {
         machine.clientKey.isEmpty) {
       throw const UserError('mTLS 的 CA、客户端证书和私钥均必填。');
     }
-    await _save(
-      () => _next(
+    await _save(() {
+      if (isDeploying(machine.id)) {
+        throw const UserError('该机器正在部署，请等待部署结束。');
+      }
+      requireUniqueMachineName(machine.name, id: machine.id);
+      return _next(
         machines: [...state.machines.where((e) => e.id != machine.id), machine],
-      ),
-    );
+      );
+    });
     await _pruneCredentials();
     unawaited(refresh());
   }
 
   Future<void> removeMachine(Machine machine) async {
-    await _save(
-      () => _next(
+    if (isDeploying(machine.id)) {
+      throw const UserError('该机器正在部署，请等待部署结束后再移除。');
+    }
+    await _save(() {
+      if (isDeploying(machine.id)) {
+        throw const UserError('该机器正在部署，请等待部署结束后再移除。');
+      }
+      return _next(
         machines: state.machines.where((e) => e.id != machine.id).toList(),
-      ),
-    );
+      );
+    });
     await _pruneCredentials();
     statuses.remove(machine.id);
     connectionErrors.remove(machine.id);
     lastSeen.remove(machine.id);
+    deployments.remove(machine.id);
     _notify();
   }
 
   /// Deletes imported key and certificate copies that no saved machine uses:
   /// a removed machine's files, or an SSH key copy left when the app stopped
-  /// during a deployment. Machine dialogs are modal, so none is mid-import.
+  /// during a deployment. Dialogs and background jobs hold imports until their
+  /// owner either saves or finishes using them.
   Future<void> _pruneCredentials() async {
+    if (_credentialImportHolds > 0 || _deploymentJobs.isNotEmpty) return;
     try {
-      await store.pruneCredentials({
-        for (final m in state.machines) ...[
-          m.caCert,
-          m.clientCert,
-          m.clientKey,
-        ],
+      final previous = _credentialPrune;
+      final operation = previous.then((_) async {
+        if (_credentialImportHolds > 0 || _deploymentJobs.isNotEmpty) return;
+        await store.pruneCredentials({
+          for (final m in state.machines) ...[
+            m.caCert,
+            m.clientCert,
+            m.clientKey,
+          ],
+        });
       });
+      _credentialPrune = operation.catchError((Object _) {});
+      await operation;
     } catch (_) {
       // Retried after the next machine change or start; the files stay private.
     }
   }
 
-  Future<void> refresh() async {
-    if (polling || disposed || !initialized) return;
+  Future<void> refresh() {
+    final current = _refreshOperation;
+    if (current != null) return current;
+    if (disposed || !initialized) return Future<void>.value();
+    // Publish the shared operation before notifying listeners, which may also
+    // request a refresh. Every caller waits for this round's final state.
+    final operation = Future<void>.microtask(_refresh);
+    _refreshOperation = operation;
     polling = true;
     _notify();
-    await Future.wait(
-      state.machines.map((m) async {
-        try {
-          final s = await gateway.status(m);
-          if (!state.machines.any((v) => v.id == m.id)) return;
-          statuses[m.id] = s;
-          connectionErrors.remove(m.id);
-          lastSeen[m.id] = DateTime.now();
-        } catch (e) {
-          if (state.machines.any((v) => v.id == m.id)) {
-            connectionErrors[m.id] = readableError(e);
-          }
-        }
-      }),
-    );
-    // Also covers submissions whose response was lost before it was recorded.
-    final held = <String, Set<String>>{};
-    for (final m in state.machines) {
-      for (final t in statuses[m.id]?.tasks ?? const <TaskStatus>[]) {
-        (held[t.id] ??= {}).add(m.id);
-      }
-    }
+    return operation;
+  }
+
+  Future<void> _refresh() async {
     try {
-      if (!disposed) await _recordDispatches(held);
-    } catch (_) {
-      // Retried on the next poll; dispatch reports its own recording failures.
+      await Future.wait(
+        state.machines.where((m) => m.canConnect && !isDeploying(m.id)).map((
+          m,
+        ) async {
+          try {
+            final s = await gateway.status(m);
+            if (!state.machines.any((v) => identical(v, m)) ||
+                isDeploying(m.id)) {
+              return;
+            }
+            statuses[m.id] = s;
+            connectionErrors.remove(m.id);
+            lastSeen[m.id] = DateTime.now();
+          } catch (e) {
+            if (state.machines.any((v) => identical(v, m)) &&
+                !isDeploying(m.id)) {
+              connectionErrors[m.id] = readableError(e);
+            }
+          }
+        }),
+      );
+      // Also covers submissions whose response was lost before it was recorded.
+      final held = <String, Set<String>>{};
+      for (final m in state.machines) {
+        for (final t in statuses[m.id]?.tasks ?? const <TaskStatus>[]) {
+          (held[t.id] ??= {}).add(m.id);
+        }
+      }
+      try {
+        if (!disposed) await _recordDispatches(held);
+      } catch (_) {
+        // Retried on the next poll; dispatch reports its own recording failures.
+      }
+    } finally {
+      polling = false;
+      _refreshOperation = null;
+      _notify();
     }
-    polling = false;
-    _notify();
   }
 
   /// Persists the machines known to hold each task, so dispatch never submits
@@ -566,6 +720,7 @@ class AppController extends ChangeNotifier {
     Account account,
     Map<String, dynamic> config, {
     String startAt = '',
+    TaskSummary? summary,
   }) => _forAccount(account.id, () async {
     final current = _requireAccount(account.id);
     if (name.trim().isEmpty) throw const UserError('请填写任务名称。');
@@ -589,6 +744,7 @@ class AppController extends ChangeNotifier {
       name: name.trim(),
       accountId: current.id,
       startAt: start,
+      summary: summary,
     );
     await store.writeSecret('task.${task.id}', jsonEncode(clean));
     try {
@@ -622,8 +778,19 @@ class AppController extends ChangeNotifier {
     // resubmitting the same ID could run the task, and place orders, again.
     final saved = _requireTask(task.id);
     final pending = <Machine>[];
+    final revisions = {
+      for (final machine in machines)
+        machine.id: _deploymentRevisions[machine.id] ?? 0,
+    };
     for (final machine in machines) {
-      if (saved.dispatchedTo.contains(machine.id)) {
+      final current = state.machines
+          .where((m) => m.id == machine.id)
+          .firstOrNull;
+      if (isDeploying(machine.id) ||
+          !machine.canConnect ||
+          (current != null && !current.canConnect)) {
+        errors[machine.name] = '该机器部署尚未完成，请部署成功后再分发任务。';
+      } else if (saved.dispatchedTo.contains(machine.id)) {
         errors[machine.name] = '此任务已提交到该机器，为避免重复执行不会再次提交。如需重新执行，请新建任务。';
       } else {
         pending.add(machine);
@@ -656,11 +823,26 @@ class AppController extends ChangeNotifier {
     }
 
     requireUnchanged();
+    void requireMachineReady(Machine machine) {
+      if (revisions[machine.id] != (_deploymentRevisions[machine.id] ?? 0)) {
+        throw const UserError('该机器的部署状态已变化，请重新选择后再分发任务。');
+      }
+      final current = state.machines
+          .where((m) => m.id == machine.id)
+          .firstOrNull;
+      if (isDeploying(machine.id) ||
+          !machine.canConnect ||
+          (current != null && !current.canConnect)) {
+        throw const UserError('该机器部署尚未完成，请部署成功后再分发任务。');
+      }
+    }
+
     final accepted = <String>{};
     await Future.wait(
       pending.map((machine) async {
         try {
           requireUnchanged();
+          requireMachineReady(machine);
           // An older agent would drop time_start and start buying immediately.
           if (saved.startAt.isNotEmpty &&
               !(await gateway.status(machine)).supportsTimeStart) {
@@ -668,6 +850,7 @@ class AppController extends ChangeNotifier {
             return;
           }
           requireUnchanged();
+          requireMachineReady(machine);
           final result = await gateway.submit(
             machine,
             TaskRequest(
@@ -705,18 +888,330 @@ class AppController extends ChangeNotifier {
     await refresh();
   }
 
+  /// Persist the visible placeholder before starting any remote work. The
+  /// reservation happens before the first await, including concurrent calls
+  /// whose local saves have not finished yet.
+  Future<void> startDeployment({
+    required String name,
+    required String host,
+    required int port,
+    required Map<String, dynamic> request,
+    Machine? existing,
+    List<String> importedFiles = const [],
+  }) async {
+    if (!initialized || disposed) throw const UserError('配置尚未加载，无法部署。');
+    name = name.trim();
+    host = host.trim();
+    if (host.startsWith('[') && host.endsWith(']')) {
+      host = host.substring(1, host.length - 1);
+    }
+    if (name.isEmpty || host.isEmpty || port < 1 || port > 65535) {
+      throw const UserError('请填写有效的机器名称、主机地址和端口。');
+    }
+    final id = existing?.id ?? const Uuid().v4();
+    if (isDeploying(id)) throw const UserError('该机器正在部署，请等待部署结束。');
+    final previous = state.machines.where((m) => m.id == id).firstOrNull;
+    if (existing != null && previous == null) {
+      throw const UserError('机器已被移除，请重新添加。');
+    }
+    requireUniqueMachineName(name, id: id);
+    requireUniqueDeploymentHost(host, id: id);
+    final sshPort = request['port'] ?? 22;
+    if (sshPort is! int || sshPort < 1 || sshPort > 65535) {
+      throw const UserError('SSH 端口须在 1–65535 之间。');
+    }
+    if ((request['username'] as String? ?? '').trim().isEmpty ||
+        ((request['password'] as String? ?? '').isEmpty &&
+            (request['private_key_path'] as String? ?? '').isEmpty)) {
+      throw const UserError('请填写 SSH 用户和密码或私钥路径。');
+    }
+    final fingerprint =
+        previous != null &&
+            deploymentHostKey(previous.host) == deploymentHostKey(host)
+        ? previous.fingerprint
+        : '';
+    final pending = Machine(
+      id: id,
+      name: name,
+      host: host,
+      port: port,
+      caCert: previous?.caCert ?? '',
+      clientCert: previous?.clientCert ?? '',
+      clientKey: previous?.clientKey ?? '',
+      serverName: host,
+      fingerprint: fingerprint,
+      deploymentPending: true,
+    );
+    final job = _DeploymentJob(pending, {
+      for (final key in [
+        'username',
+        'password',
+        'private_key_path',
+        'private_key_passphrase',
+      ])
+        if (request.containsKey(key)) key: request[key],
+      'host': host,
+      'port': sshPort,
+      'grpc_port': port,
+      'host_key_fingerprint': fingerprint,
+      'server_name': host,
+      'remote_directory': '.local/share/misaka',
+    }, List.of(importedFiles));
+    _deploymentJobs[id] = job;
+    _deploymentRevisions[id] = (_deploymentRevisions[id] ?? 0) + 1;
+    deployments[id] = const MachineDeployment();
+    deploying++;
+    _notify();
+    try {
+      await _save(() {
+        requireUniqueMachineName(name, id: id);
+        requireUniqueDeploymentHost(host, id: id);
+        final machines = [...state.machines];
+        final index = machines.indexWhere((m) => m.id == id);
+        if (index < 0) {
+          if (existing != null) throw const UserError('机器已被移除，请重新添加。');
+          machines.add(pending);
+        } else {
+          machines[index] = pending;
+        }
+        return _next(machines: machines);
+      });
+    } catch (_) {
+      _deploymentJobs.remove(id);
+      deployments.remove(id);
+      deploying--;
+      job.request.clear();
+      _notify();
+      // A rejected start has not taken ownership of the dialog's imports.
+      rethrow;
+    }
+    statuses.remove(id);
+    connectionErrors.remove(id);
+    lastSeen.remove(id);
+    _notify();
+    unawaited(_continueDeployment(job));
+  }
+
+  Future<void> confirmDeployment(String id) async {
+    if (disposed) throw const UserError('应用已关闭，部署已中断。');
+    final job = _deploymentJobs[id];
+    final deployment = deployments[id];
+    if (job == null || deployment == null || !deployment.awaitingConfirmation) {
+      throw const UserError('该机器当前无需确认 SSH 指纹。');
+    }
+    job.request['host_key_fingerprint'] = deployment.fingerprint;
+    job.machine = job.machine.copyWith(fingerprint: deployment.fingerprint);
+    deployments[id] = MachineDeployment(
+      percent: deployment.percent,
+      stage: '连接已确认的主机',
+      fingerprint: deployment.fingerprint,
+    );
+    _notify();
+    try {
+      await _save(
+        () => _next(
+          machines: [
+            for (final m in state.machines) m.id == id ? job.machine : m,
+          ],
+        ),
+      );
+    } catch (e) {
+      await _failDeployment(job, readableError(e));
+      return;
+    }
+    unawaited(_continueDeployment(job));
+  }
+
+  Future<void> rejectDeployment(String id) async {
+    final job = _deploymentJobs[id];
+    if (job == null || !(deployments[id]?.awaitingConfirmation ?? false)) {
+      throw const UserError('仅等待指纹确认的部署可以取消。');
+    }
+    await _failDeployment(job, '未确认 SSH 主机指纹，部署已取消。');
+  }
+
+  Future<void> _continueDeployment(_DeploymentJob job) async {
+    final id = job.machine.id;
+    try {
+      final result = await _invokeDeploy(
+        job.request,
+        onProgress: (progress) {
+          if (disposed || !identical(_deploymentJobs[id], job)) return;
+          final previous = deployments[id]?.percent ?? 0;
+          final percent = progress.percent.clamp(previous, 99);
+          deployments[id] = MachineDeployment(
+            percent: percent,
+            stage: progress.percent >= 100 ? '保存机器连接' : progress.stage,
+            fingerprint: job.machine.fingerprint,
+          );
+          _notify();
+        },
+      );
+      if (disposed) {
+        await _releaseDeployment(job);
+        return;
+      }
+      if (result['needs_confirmation'] == true) {
+        final fingerprint = result['fingerprint'];
+        if (job.machine.fingerprint.isNotEmpty ||
+            fingerprint is! String ||
+            !fingerprint.startsWith('SHA256:')) {
+          throw const UserError('SSH 指纹仍未通过验证，部署已停止。');
+        }
+        deployments[id] = MachineDeployment(
+          phase: DeploymentPhase.awaitingConfirmation,
+          percent: deployments[id]?.percent ?? 0,
+          stage: '等待确认 SSH 主机指纹',
+          fingerprint: fingerprint,
+        );
+        _notify();
+        return;
+      }
+      String credential(String key) {
+        final value = result[key];
+        if (value is! String || value.isEmpty) {
+          throw const UserError('部署返回的连接凭据不完整，请检查机器后重新部署。');
+        }
+        return value;
+      }
+
+      final machine = Machine(
+        id: id,
+        name: job.machine.name,
+        host: job.machine.host,
+        port: job.machine.port,
+        caCert: credential('ca_cert'),
+        clientCert: credential('client_cert'),
+        clientKey: credential('client_key'),
+        serverName: result['server_name'] as String? ?? job.machine.host,
+        fingerprint: job.machine.fingerprint,
+      );
+      try {
+        await _save(
+          () => _next(
+            machines: [
+              for (final m in state.machines) m.id == id ? machine : m,
+            ],
+          ),
+        );
+      } catch (_) {
+        throw const UserError('远程部署已完成，但本地连接未能保存。请检查存储权限后重新部署。');
+      }
+      deployments[id] = const MachineDeployment(
+        phase: DeploymentPhase.succeeded,
+        percent: 100,
+        stage: '部署完成',
+      );
+      if (result['reachable'] == false) {
+        connectionErrors[id] =
+            '本机无法直接连接 ${machine.host}:${machine.port}。请确认防火墙或安全组已放行该 TCP 端口，且地址可从本机访问。';
+      }
+      await _releaseDeployment(job);
+      // Preserve the actionable firewall hint until the next scheduled poll.
+      if (result['reachable'] != false) unawaited(refresh());
+    } catch (e) {
+      if (disposed) {
+        await _releaseDeployment(job);
+      } else {
+        await _failDeployment(job, readableError(e));
+      }
+    }
+  }
+
+  Future<void> _failDeployment(_DeploymentJob job, String message) async {
+    final id = job.machine.id;
+    final percent = deployments[id]?.percent ?? 0;
+    var failure = message;
+    try {
+      await _save(
+        () => _next(
+          machines: [
+            for (final m in state.machines)
+              m.id == id
+                  ? m.copyWith(
+                      deploymentPending: false,
+                      deploymentError: message,
+                    )
+                  : m,
+          ],
+        ),
+        retainOnFailure: true,
+      );
+    } catch (_) {
+      failure = '$message 本地状态未能保存，重启后请检查机器。';
+    }
+    deployments[id] = MachineDeployment(
+      phase: DeploymentPhase.failed,
+      percent: percent,
+      stage: '部署失败',
+      fingerprint: job.machine.fingerprint,
+      error: failure,
+    );
+    await _releaseDeployment(job);
+  }
+
+  Future<void> _releaseDeployment(_DeploymentJob job) async {
+    final id = job.machine.id;
+    if (!identical(_deploymentJobs[id], job)) return;
+    _deploymentJobs.remove(id);
+    deploying--;
+    job.request.clear();
+    final keep = {
+      for (final machine in state.machines) ...[
+        machine.caCert,
+        machine.clientCert,
+        machine.clientKey,
+      ],
+      for (final active in _deploymentJobs.values) ...active.importedFiles,
+    };
+    for (final path in job.importedFiles) {
+      if (keep.contains(path)) continue;
+      try {
+        await File(path).delete();
+      } on FileSystemException {
+        // A later credential prune retries cleanup in the private directory.
+      }
+    }
+    await _pruneCredentials();
+    _notify();
+  }
+
+  Future<Map<String, dynamic>> _invokeDeploy(
+    Map<String, dynamic> fields, {
+    void Function(DeploymentProgress)? onProgress,
+  }) async {
+    if (disposed) throw const UserError('应用已关闭，部署已中断。');
+    final directory = await store.directory();
+    if (disposed) throw const UserError('应用已关闭，部署已中断。');
+    final pki = p.join(directory, 'pki');
+    // Desktop helpers are separate processes. Finish initial key generation
+    // once before allowing their concurrent Deploy calls to read that PKI.
+    final initialization = _pkiInitialization ??= helper
+        .call({'action': 'init_pki', 'directory': pki})
+        .then<void>((_) {});
+    try {
+      await initialization;
+    } catch (_) {
+      if (identical(_pkiInitialization, initialization)) {
+        _pkiInitialization = null;
+      }
+      rethrow;
+    }
+    if (disposed) throw const UserError('应用已关闭，部署已中断。');
+    final bundles = await deploymentBundlesDirectory();
+    if (disposed) throw const UserError('应用已关闭，部署已中断。');
+    return helper.call({
+      'action': 'deploy',
+      'pki_directory': pki,
+      'bundles_directory': bundles,
+      ...fields,
+    }, onProgress: onProgress);
+  }
+
   Future<Map<String, dynamic>> deploy(Map<String, dynamic> fields) async {
     deploying++;
     try {
-      final directory = await store.directory();
-      final pki = p.join(directory, 'pki');
-      await helper.call({'action': 'init_pki', 'directory': pki});
-      return await helper.call({
-        'action': 'deploy',
-        'pki_directory': pki,
-        'bundles_directory': await deploymentBundlesDirectory(),
-        ...fields,
-      });
+      return await _invokeDeploy(fields);
     } finally {
       deploying--;
     }
@@ -725,8 +1220,16 @@ class AppController extends ChangeNotifier {
   @override
   void dispose() {
     disposed = true;
+    cloud.removeListener(_notify);
+    cloud.dispose();
     _timer?.cancel();
     _accountTimer?.cancel();
+    for (final job in _deploymentJobs.values.toList()) {
+      job.request.clear();
+      if (deployments[job.machine.id]?.awaitingConfirmation ?? false) {
+        unawaited(_releaseDeployment(job));
+      }
+    }
     super.dispose();
   }
 }

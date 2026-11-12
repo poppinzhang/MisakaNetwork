@@ -71,6 +71,7 @@ void main() {
       final c = controller(store: store);
       addTearDown(c.dispose);
       await c.initialize(poll: false);
+      await c.cloud.initialize();
       var notifications = 0;
       c.addListener(() => notifications++);
       store.failSave = true;

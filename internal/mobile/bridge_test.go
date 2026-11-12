@@ -50,3 +50,16 @@ func TestHandleRejectsEscapingPaths(t *testing.T) {
 		}
 	}
 }
+
+func TestProgressPathMustRemainPrivate(t *testing.T) {
+	root, outside := t.TempDir(), t.TempDir()
+	data, _ := json.Marshal(control.Request{Action: "deploy", ProgressPath: filepath.Join(outside, "progress.json")})
+	var response control.Response
+	json.Unmarshal(Handle(data, root), &response)
+	if response.OK || response.Error != "文件必须位于应用私有目录" {
+		t.Fatal("progress path escaped application storage")
+	}
+	if _, err := os.Stat(filepath.Join(outside, "progress.json")); !os.IsNotExist(err) {
+		t.Fatal("outside file created")
+	}
+}

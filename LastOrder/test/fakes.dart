@@ -67,8 +67,12 @@ class FakeGateway implements AgentGateway {
   final remoteTasks = <TaskStatus>[];
   TaskState submitState = TaskState.TASK_STATE_QUEUED;
   bool timeStartSupported = true;
+  final statusRequests = <Machine>[];
+  Future<AgentStatus> Function(Machine)? statusHandler;
   @override
   Future<AgentStatus> status(Machine m) async {
+    statusRequests.add(m);
+    if (statusHandler != null) return statusHandler!(m);
     if (fail.contains(m.id)) throw const UserError('连接失败');
     return AgentStatus(
       version: '0.2.3',
@@ -127,13 +131,36 @@ class FakeRuntime implements RuntimeBridge {
 }
 
 class FakeHelper implements DeploymentHelper {
+  bool cloudSshReady = false;
   final requests = <Map<String, dynamic>>[];
   Future<void>? deployGate;
   bool failDeploy = false;
   bool? reachable;
+  Future<Map<String, dynamic>> Function(
+    Map<String, dynamic>,
+    void Function(DeploymentProgress)?,
+  )?
+  handler;
+  final progressCallbacks = <String, void Function(DeploymentProgress)>{};
   @override
-  Future<Map<String, dynamic>> call(Map<String, dynamic> request) async {
+  Future<Map<String, dynamic>> call(
+    Map<String, dynamic> request, {
+    void Function(DeploymentProgress)? onProgress,
+  }) async {
+    if (request['action'] == 'generate_cloud_ssh_key' && handler == null) {
+      if (!cloudSshReady) return {};
+      // Synthetic fixture only; deployment tests do not exercise cryptography.
+      return {
+        'private_key': '-----BEGIN RSA PRIVATE KEY-----\nTEST ONLY\n-----END RSA PRIVATE KEY-----',
+        'public_key': 'ssh-rsa TEST-ONLY',
+        'fingerprint': 'SHA256:TEST-ONLY',
+      };
+    }
     requests.add(request);
+    if (onProgress != null && request['host'] is String) {
+      progressCallbacks[request['host'] as String] = onProgress;
+    }
+    if (handler != null) return handler!(request, onProgress);
     if (request['action'] == 'deploy') {
       await deployGate;
       if (failDeploy) throw const UserError('部署失败');

@@ -15,7 +15,9 @@ import java.util.concurrent.Executors
 /** Credentials and protocol payloads never enter intent extras or logcat. */
 class EmbeddedBridge(private val context: Context) {
     private val main = Handler(Looper.getMainLooper())
-    private val helper = Executors.newSingleThreadExecutor()
+    // Deployments may wait on independent SSH uploads. Resource extraction stays
+    // serial below, and the Go PKI initializer holds an OS file lock.
+    private val helper = Executors.newCachedThreadPool()
     private val runtime = Executors.newSingleThreadExecutor()
     private val resources = Executors.newSingleThreadExecutor()
     @Volatile private var closed = false

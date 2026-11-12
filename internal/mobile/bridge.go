@@ -40,7 +40,7 @@ func Handle(data []byte, appRoot string) (result []byte) {
 	if decoder.Decode(&extra) != io.EOF {
 		return invalid()
 	}
-	for _, local := range []string{request.Directory, request.PKIDirectory, request.BundlePath, request.BundlesDirectory, request.PrivateKeyPath} {
+	for _, local := range []string{request.Directory, request.PKIDirectory, request.BundlePath, request.BundlesDirectory, request.PrivateKeyPath, request.ProgressPath} {
 		if local != "" && !privatePath(appRoot, local) {
 			return encode(control.Response{Error: "文件必须位于应用私有目录"})
 		}

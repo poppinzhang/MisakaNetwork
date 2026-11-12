@@ -14,8 +14,12 @@ import '../generated/misaka/v1/sisters.pbgrpc.dart';
 import 'about_dialog.dart';
 import 'app_info.dart';
 import 'controller.dart';
+import 'cloud_models.dart';
+import 'cloud_ui.dart';
+import 'dispatch_dialog.dart';
 import 'models.dart';
 import 'services.dart';
+import 'task_messages.dart';
 import 'theme.dart';
 
 class LastOrderApp extends StatefulWidget {
@@ -112,12 +116,15 @@ class _ControlCenterState extends State<ControlCenter> {
   bool savingTheme = false;
   int page = 0;
   bool busy = false;
-  static const titles = ['网络概览', '机器管理', '账号与任务', '任务监控'];
+  CloudProvider? credentialProvider;
+  int credentialNavigationRevision = 0;
+  static const titles = ['网络概览', '机器管理', '账号与任务', '任务监控', '公有云部署'];
   static const icons = [
     LucideIcons.layoutDashboard,
     LucideIcons.server,
     LucideIcons.ticket,
     LucideIcons.activity,
+    LucideIcons.cloud,
   ];
   Future<void> action(Future<void> Function() fn, {String? success}) async {
     setState(() => busy = true);
@@ -486,6 +493,10 @@ class _ControlCenterState extends State<ControlCenter> {
                             ? const Center(child: CircularProgressIndicator())
                             : PageTransitionSwitcher(
                                 duration: const Duration(milliseconds: 240),
+                                layoutBuilder: (children) => Stack(
+                                  fit: StackFit.expand,
+                                  children: children,
+                                ),
                                 transitionBuilder:
                                     (child, primary, secondary) =>
                                         FadeThroughTransition(
@@ -509,6 +520,14 @@ class _ControlCenterState extends State<ControlCenter> {
                                           machines,
                                           tasks,
                                           monitor,
+                                          () => CloudCredentialsPage(
+                                            key: ValueKey(
+                                              credentialNavigationRevision,
+                                            ),
+                                            controller: c.cloud,
+                                            initialProvider: credentialProvider,
+                                            onCreate: cloudCreateDialog,
+                                          ),
                                         ][page](),
                                       ),
                                     ),
@@ -826,116 +845,392 @@ class _ControlCenterState extends State<ControlCenter> {
   }
 
   Widget machines() => Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
+    crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
       heading(
         'SISTERS',
         '连接你的执行节点',
         '支持 Linux 与 macOS；部署时验证 SSH 主机指纹。',
-        trailing: FilledButton.icon(
-          onPressed: busy ? null : () => machineDialog(),
-          icon: const Icon(LucideIcons.plus, size: 18),
-          label: const Text('添加机器'),
+        trailing: Wrap(
+          spacing: 12,
+          runSpacing: 10,
+          children: [
+            OutlinedButton.icon(
+              onPressed: () => setState(() {
+                page = 4;
+                credentialProvider = null;
+              }),
+              icon: const Icon(LucideIcons.keyRound, size: 17),
+              label: const Text('公有云凭证'),
+            ),
+            FilledButton.icon(
+              onPressed: busy ? null : () => machineDialog(),
+              icon: const Icon(LucideIcons.plus, size: 18),
+              label: const Text('添加机器'),
+            ),
+          ],
         ),
       ),
-      if (c.state.machines.isEmpty)
+      if (c.state.machines.isEmpty && c.cloud.jobs.isEmpty)
         empty(LucideIcons.server, '还没有 Sisters', '添加第一台机器，建立安全的任务执行连接。')
       else
-        ...c.state.machines.map((m) {
-          final status = c.statuses[m.id];
-          final error = c.connectionErrors[m.id];
-          return Padding(
-            padding: const EdgeInsets.only(bottom: 16),
-            child: panel(
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
+        responsiveCards([
+          for (final m in c.cloud.jobs.reversed)
+            CloudMachineCard(
+              key: ValueKey(m.id),
+              machine: m,
+              controller: c.cloud,
+            ),
+          for (final m in c.state.machines) machineCard(m),
+        ]),
+    ],
+  );
+
+  Widget responsiveCards(List<Widget> cards) => LayoutBuilder(
+    builder: (context, constraints) {
+      final textScale = MediaQuery.textScalerOf(context).scale(14) / 14;
+      final columns =
+          constraints.maxWidth >= 720 * (textScale < 1 ? 1 : textScale) ? 2 : 1;
+      return Column(
+        children: [
+          for (var i = 0; i < cards.length; i += columns)
+            Padding(
+              padding: EdgeInsets.only(
+                bottom: i + columns < cards.length ? 16 : 0,
+              ),
+              child: IntrinsicHeight(
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Expanded(child: cards[i]),
+                    if (columns == 2) ...[
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: i + 1 < cards.length
+                            ? cards[i + 1]
+                            : const SizedBox.shrink(),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+        ],
+      );
+    },
+  );
+
+  Widget machineCard(Machine m) {
+    final status = c.statuses[m.id];
+    final deployment = c.deployments[m.id];
+    final deploying = deployment?.active ?? false;
+    final awaiting = deployment?.awaitingConfirmation ?? false;
+    final deploymentError =
+        deployment?.error ??
+        (m.deploymentError.isEmpty ? null : m.deploymentError);
+    final error = deploymentError ?? c.connectionErrors[m.id];
+    final stackStatus = MediaQuery.textScalerOf(context).scale(14) > 18;
+    final statusBadge = pill(
+      deploying
+          ? '部署 Sisters'
+          : deploymentError != null
+          ? '部署失败'
+          : error != null
+          ? '连接异常'
+          : status == null
+          ? '等待同步'
+          : '在线',
+      color: deploying
+          ? colors.primary
+          : error != null
+          ? colors.error
+          : status == null
+          ? colors.onSurfaceVariant
+          : colors.primary,
+    );
+    return KeyedSubtree(
+      key: ValueKey('machine-card-${m.id}'),
+      child: panel(
+        padding: const EdgeInsets.all(20),
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        color: colors.primaryContainer,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Icon(
+                        LucideIcons.server,
+                        size: 21,
+                        color: colors.onPrimaryContainer,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            m.name,
+                            style: const TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          if (stackStatus) ...[
+                            const SizedBox(height: 8),
+                            statusBadge,
+                          ],
+                          if (status != null && !deploying) ...[
+                            const SizedBox(height: 4),
+                            Text(
+                              status.platform,
+                              style: TextStyle(
+                                color: colors.onSurfaceVariant,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                    if (!stackStatus) ...[
+                      const SizedBox(width: 12),
+                      statusBadge,
+                    ],
+                  ],
+                ),
+                const SizedBox(height: 18),
+                SelectableText(
+                  '${m.host}:${m.port}',
+                  style: TextStyle(color: colors.onSurface),
+                ),
+                const SizedBox(height: 10),
+                if (deploying)
+                  deploymentProgress(deployment!)
+                else if (error != null)
+                  Text(
+                    error,
+                    style: TextStyle(color: colors.error, fontSize: 12),
+                  )
+                else if (status != null)
                   Wrap(
                     spacing: 14,
-                    runSpacing: 10,
-                    crossAxisAlignment: WrapCrossAlignment.center,
+                    runSpacing: 6,
                     children: [
-                      Icon(LucideIcons.server, color: colors.primary),
-                      Text(
-                        m.name,
-                        style: const TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w600,
+                      for (final detail in [
+                        'Sisters ${status.version}',
+                        'biliTickerBuy ${status.biliVersion}',
+                        '并发上限 ${status.maxConcurrency}',
+                      ])
+                        Text(
+                          detail,
+                          style: TextStyle(
+                            color: colors.onSurfaceVariant,
+                            fontSize: 12,
+                          ),
                         ),
-                      ),
-                      pill(
-                        error != null
-                            ? '连接异常'
-                            : status == null
-                            ? '等待同步'
-                            : '在线',
-                        color: error != null ? colors.error : colors.primary,
-                      ),
-                      if (status != null) pill(status.platform),
                     ],
-                  ),
-                  const SizedBox(height: 14),
-                  SelectableText(
-                    '${m.host}:${m.port}',
-                    style: TextStyle(color: colors.onSurfaceVariant),
-                  ),
-                  const SizedBox(height: 10),
-                  if (error != null)
-                    Text(error, style: TextStyle(color: colors.error))
-                  else if (status != null)
-                    Text(
-                      'Sisters ${status.version}  ·  biliTickerBuy ${status.biliVersion}  ·  并发上限 ${status.maxConcurrency}',
-                      style: TextStyle(
-                        color: colors.onSurfaceVariant,
-                        fontSize: 12,
-                      ),
+                  )
+                else
+                  Text(
+                    '等待下一次状态同步。',
+                    style: TextStyle(
+                      color: colors.onSurfaceVariant,
+                      fontSize: 12,
                     ),
-                  if (status != null && !status.runtimeReady)
-                    Padding(
-                      padding: EdgeInsets.only(top: 8),
-                      child: Text(
-                        '运行时尚未就绪，请重新部署完整安装包。',
-                        style: TextStyle(color: colors.warning),
-                      ),
+                  ),
+                if (!deploying && status != null && !status.runtimeReady)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Text(
+                      '运行时尚未就绪，请重新部署完整安装包。',
+                      style: TextStyle(color: colors.warning),
                     ),
-                  const SizedBox(height: 16),
+                  ),
+              ],
+            ),
+            Padding(
+              padding: const EdgeInsets.only(top: 20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Divider(height: 1),
+                  const SizedBox(height: 12),
                   Wrap(
                     spacing: 12,
+                    runSpacing: 8,
+                    crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
-                      OutlinedButton.icon(
-                        onPressed: busy
-                            ? null
-                            : () => machineDialog(existing: m),
-                        icon: const Icon(LucideIcons.upload, size: 16),
-                        label: const Text('重新部署'),
-                      ),
-                      TextButton(
-                        onPressed: busy
-                            ? null
-                            : () async {
-                                if (await confirm(
-                                  '移除机器',
-                                  '仅移除本地连接。远程 Sisters 与已启动任务会继续运行。',
-                                )) {
-                                  await action(
-                                    () => c.removeMachine(m),
-                                    success: '已移除机器',
-                                  );
-                                }
-                              },
-                        child: const Text('移除连接'),
-                      ),
+                      if (awaiting) ...[
+                        FilledButton.icon(
+                          onPressed: () => confirmMachineFingerprint(m),
+                          icon: const Icon(LucideIcons.shieldCheck, size: 16),
+                          label: const Text('核对 SSH 指纹'),
+                        ),
+                        TextButton(
+                          onPressed: () =>
+                              action(() => c.rejectDeployment(m.id)),
+                          child: const Text('取消部署'),
+                        ),
+                      ] else if (deploying)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 8),
+                          child: Row(
+                            children: [
+                              Icon(
+                                LucideIcons.layers,
+                                size: 16,
+                                color: colors.primary,
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  '正在后台部署，可继续添加其他机器',
+                                  style: TextStyle(
+                                    color: colors.onSurfaceVariant,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        )
+                      else ...[
+                        OutlinedButton.icon(
+                          onPressed: busy
+                              ? null
+                              : () => machineDialog(existing: m),
+                          icon: const Icon(LucideIcons.upload, size: 16),
+                          label: Text(
+                            deploymentError != null ? '重试部署' : '重新部署',
+                          ),
+                        ),
+                        TextButton(
+                          onPressed: busy
+                              ? null
+                              : () async {
+                                  if (await confirm(
+                                    '移除机器',
+                                    '仅移除本地连接。远程 Sisters 与已启动任务会继续运行。',
+                                  )) {
+                                    await action(
+                                      () => c.removeMachine(m),
+                                      success: '已移除机器',
+                                    );
+                                  }
+                                },
+                          child: const Text('移除连接'),
+                        ),
+                      ],
                     ],
                   ),
                 ],
               ),
             ),
-          );
-        }),
-    ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget deploymentProgress(MachineDeployment deployment) => Container(
+    width: double.infinity,
+    padding: const EdgeInsets.all(14),
+    decoration: BoxDecoration(
+      color: colors.primary.withValues(alpha: .055),
+      borderRadius: BorderRadius.circular(12),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                '估算进度',
+                style: TextStyle(color: colors.onSurfaceVariant, fontSize: 12),
+              ),
+            ),
+            Text(
+              '${deployment.percent}%',
+              style: TextStyle(
+                color: colors.primary,
+                fontSize: 20,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        LinearProgressIndicator(
+          value: deployment.percent / 100,
+          minHeight: 6,
+          borderRadius: BorderRadius.circular(3),
+          backgroundColor: colors.primary.withValues(alpha: .1),
+          semanticsLabel: '部署 Sisters，${deployment.stage}',
+          semanticsValue: '${deployment.percent}%',
+        ),
+        const SizedBox(height: 10),
+        Text(
+          deployment.stage,
+          style: TextStyle(color: colors.onSurfaceVariant, fontSize: 12),
+        ),
+      ],
+    ),
   );
+
+  Future<void> confirmMachineFingerprint(Machine machine) async {
+    final deployment = c.deployments[machine.id];
+    if (deployment == null || !deployment.awaitingConfirmation) return;
+    final approved = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        scrollable: true,
+        title: const Text('确认 SSH 主机指纹'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('${machine.name} · ${machine.host}'),
+            const SizedBox(height: 12),
+            const Text('请与服务器管理员提供的指纹核对一致后继续。'),
+            const SizedBox(height: 16),
+            SelectableText(
+              deployment.fingerprint,
+              style: const TextStyle(fontFamily: 'Menlo', fontSize: 12),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('指纹一致，部署'),
+          ),
+        ],
+      ),
+    );
+    if (approved == true && mounted) {
+      await action(() => c.confirmDeployment(machine.id));
+    }
+  }
+
   Widget tasks() => Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
+    crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
       heading('IDENTITY & TASKS', '准备每一次执行', '登录账号，选择演出与购票人，再将任务分发到 Sisters。'),
       Row(
@@ -965,9 +1260,7 @@ class _ControlCenterState extends State<ControlCenter> {
       if (c.state.accounts.isEmpty)
         empty(LucideIcons.userRound, '还没有登录账号', '使用哔哩哔哩手机客户端扫码登录。')
       else
-        panel(
-          Column(children: [for (final a in c.state.accounts) accountCard(a)]),
-        ),
+        responsiveCards([for (final a in c.state.accounts) accountCard(a)]),
       const SizedBox(height: 30),
       Row(
         children: [
@@ -996,165 +1289,359 @@ class _ControlCenterState extends State<ControlCenter> {
       if (c.state.tasks.isEmpty)
         empty(LucideIcons.ticket, '暂无抢票任务', '添加账号后，选择演出场次、票档与购票人。')
       else
-        ...c.state.tasks.map(
-          (t) => Padding(
-            padding: const EdgeInsets.only(bottom: 14),
-            child: panel(
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+        responsiveCards([for (final t in c.state.tasks) taskCard(t)]),
+    ],
+  );
+
+  Widget taskHeading(IconData icon, String name, Widget badge) => Row(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Container(
+        width: 40,
+        height: 40,
+        decoration: BoxDecoration(
+          color: colors.primaryContainer,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Icon(icon, size: 21, color: colors.onPrimaryContainer),
+      ),
+      const SizedBox(width: 12),
+      Expanded(
+        child: Text(
+          name,
+          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+        ),
+      ),
+      const SizedBox(width: 12),
+      badge,
+    ],
+  );
+
+  Widget taskDetail(IconData icon, String label, String value) => Padding(
+    padding: const EdgeInsets.only(bottom: 8),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(top: 2),
+          child: Icon(icon, size: 15, color: colors.onSurfaceVariant),
+        ),
+        const SizedBox(width: 9),
+        Expanded(
+          child: Text.rich(
+            TextSpan(
+              children: [
+                TextSpan(
+                  text: '$label  ',
+                  style: TextStyle(color: colors.onSurfaceVariant),
+                ),
+                TextSpan(text: value),
+              ],
+            ),
+            style: TextStyle(
+              fontSize: 13,
+              height: 1.45,
+              color: colors.onSurface,
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
+
+  Widget taskDetails(TicketTask task) {
+    final account = c.state.accounts
+        .where((a) => a.id == task.accountId)
+        .firstOrNull;
+    final summary = task.summary;
+    final session = summary == null
+        ? ''
+        : [
+            summary.selectedDate,
+            summary.screenName,
+          ].where((value) => value.isNotEmpty).join(' · ');
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        taskDetail(
+          LucideIcons.userRound,
+          '账号',
+          account == null ? '账号已移除' : '${account.name} · UID ${account.uid}',
+        ),
+        if (summary == null)
+          taskDetail(LucideIcons.calendarDays, '场次', '未记录场次与票档信息')
+        else ...[
+          taskDetail(
+            LucideIcons.music2,
+            '演出',
+            summary.projectName.isEmpty ? '未记录演出名称' : summary.projectName,
+          ),
+          taskDetail(
+            LucideIcons.calendarDays,
+            '场次',
+            session.isEmpty ? '未记录场次' : session,
+          ),
+          taskDetail(
+            LucideIcons.ticket,
+            '票档',
+            '${summary.ticketName.isEmpty ? '未记录票档' : summary.ticketName}${summary.quantity > 0 ? ' · ${summary.quantity} 张' : ''}',
+          ),
+        ],
+        taskDetail(
+          LucideIcons.clock3,
+          '开抢',
+          task.startAt.isEmpty
+              ? '分发后立即开始'
+              : '${task.startAt.replaceFirst('T', ' ')}（北京时间）',
+        ),
+      ],
+    );
+  }
+
+  Widget taskCard(TicketTask task) => KeyedSubtree(
+    key: ValueKey('task-card-${task.id}'),
+    child: panel(
+      padding: const EdgeInsets.all(20),
+      Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              taskHeading(
+                LucideIcons.ticket,
+                task.name,
+                pill(
+                  task.dispatchedTo.isEmpty
+                      ? '未分发'
+                      : '已分发 ${task.dispatchedTo.length} 台',
+                  color: task.dispatchedTo.isEmpty
+                      ? colors.onSurfaceVariant
+                      : colors.primary,
+                ),
+              ),
+              const SizedBox(height: 18),
+              taskDetails(task),
+            ],
+          ),
+          Padding(
+            padding: const EdgeInsets.only(top: 12),
+            child: Column(
+              children: [
+                const Divider(height: 1),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    FilledButton.tonalIcon(
+                      onPressed: busy || c.state.machines.isEmpty
+                          ? null
+                          : () => dispatchDialog(task),
+                      icon: const Icon(LucideIcons.send, size: 16),
+                      label: const Text('分发'),
+                    ),
+                    const Spacer(),
+                    IconButton(
+                      tooltip: '删除任务',
+                      onPressed: busy
+                          ? null
+                          : () async {
+                              if (await confirm(
+                                '删除本地任务',
+                                '删除本地配置，不会停止远程运行的任务。停止任务请前往任务监控。',
+                              )) {
+                                await action(
+                                  () => c.removeTask(task),
+                                  success: '已删除任务',
+                                );
+                              }
+                            },
+                      icon: const Icon(LucideIcons.trash2, size: 18),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
+
+  Widget accountCard(Account account) {
+    final checking = c.checkingAccounts.contains(account.id);
+    final status = checking
+        ? '验证中'
+        : switch (account.authStatus) {
+            AccountAuthStatus.valid => '登录有效',
+            AccountAuthStatus.expired => '登录失效',
+            AccountAuthStatus.unknown => '待确认',
+          };
+    final statusColor = checking
+        ? colors.primary
+        : switch (account.authStatus) {
+            AccountAuthStatus.valid => colors.primary,
+            AccountAuthStatus.expired => colors.error,
+            AccountAuthStatus.unknown => colors.warning,
+          };
+    final explanation = checking
+        ? '正在验证登录状态…'
+        : c.accountMessages[account.id] ??
+              switch (account.authStatus) {
+                AccountAuthStatus.valid => '登录信息已安全保存，可创建和分发任务。',
+                AccountAuthStatus.expired => '请重新扫码登录，恢复任务分发。',
+                AccountAuthStatus.unknown => '请先检查登录状态，确认前暂停任务分发。',
+              };
+    final taskCount = c.state.tasks
+        .where((task) => task.accountId == account.id)
+        .length;
+    return KeyedSubtree(
+      key: ValueKey('account-card-${account.id}'),
+      child: panel(
+        padding: const EdgeInsets.all(20),
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    CircleAvatar(
+                      radius: 20,
+                      backgroundColor: colors.primaryContainer,
+                      child: Icon(
+                        LucideIcons.userRound,
+                        size: 21,
+                        color: colors.onPrimaryContainer,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            account.name,
+                            style: const TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            'UID ${account.uid}',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: colors.onSurfaceVariant,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    pill(status, color: statusColor),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                Wrap(
+                  spacing: 16,
+                  runSpacing: 8,
+                  children: [
+                    Text(
+                      '关联任务 $taskCount 个',
+                      style: TextStyle(fontSize: 12, color: colors.onSurface),
+                    ),
+                    Text(
+                      '上次检查：${account.lastChecked?.toLocal().toString().split('.').first ?? '尚未检查'}',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: colors.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  explanation,
+                  style: TextStyle(
+                    fontSize: 12,
+                    height: 1.45,
+                    color:
+                        checking ||
+                            account.authStatus == AccountAuthStatus.valid
+                        ? colors.onSurfaceVariant
+                        : statusColor,
+                  ),
+                ),
+              ],
+            ),
+            Padding(
+              padding: const EdgeInsets.only(top: 18),
+              child: Column(
                 children: [
+                  const Divider(height: 1),
+                  const SizedBox(height: 12),
                   Row(
+                    crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
-                      Icon(LucideIcons.ticket, color: colors.primary, size: 28),
-                      const SizedBox(width: 18),
                       Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
+                        child: Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
                           children: [
-                            Text(
-                              t.name,
-                              style: const TextStyle(
-                                fontSize: 17,
-                                fontWeight: FontWeight.w600,
-                              ),
+                            OutlinedButton.icon(
+                              onPressed: busy || checking
+                                  ? null
+                                  : () => action(() async {
+                                      await c.checkAccount(account);
+                                    }),
+                              icon: const Icon(LucideIcons.refreshCw, size: 16),
+                              label: const Text('检查登录'),
                             ),
-                            const SizedBox(height: 6),
-                            Text(
-                              c.state.accounts
-                                      .where((a) => a.id == t.accountId)
-                                      .map((a) => a.name)
-                                      .firstOrNull ??
-                                  '账号已移除',
-                              style: TextStyle(color: colors.onSurfaceVariant),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              startLabel(t),
-                              style: TextStyle(color: colors.onSurfaceVariant),
+                            FilledButton.tonalIcon(
+                              onPressed: busy
+                                  ? null
+                                  : () => showDialog<void>(
+                                      context: context,
+                                      builder: (_) => LoginDialog(
+                                        controller: c,
+                                        account: account,
+                                      ),
+                                    ),
+                              icon: const Icon(LucideIcons.scanLine, size: 16),
+                              label: const Text('重新登录'),
                             ),
                           ],
                         ),
                       ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      FilledButton.tonalIcon(
-                        onPressed: busy || c.state.machines.isEmpty
-                            ? null
-                            : () => dispatchDialog(t),
-                        icon: const Icon(LucideIcons.send, size: 16),
-                        label: const Text('分发'),
-                      ),
                       const SizedBox(width: 8),
                       IconButton(
-                        tooltip: '删除任务',
+                        tooltip: '移除账号',
+                        icon: const Icon(LucideIcons.trash2, size: 18),
                         onPressed: busy
                             ? null
                             : () async {
                                 if (await confirm(
-                                  '删除本地任务',
-                                  '删除本地配置，不会停止远程运行的任务。停止任务请前往任务监控。',
+                                  '移除账号',
+                                  '移除此账号在系统安全存储中保存的 Cookie。',
                                 )) {
                                   await action(
-                                    () => c.removeTask(t),
-                                    success: '已删除任务',
+                                    () => c.removeAccount(account),
+                                    success: '已移除账号',
                                   );
                                 }
                               },
-                        icon: const Icon(LucideIcons.trash2, size: 18),
                       ),
                     ],
                   ),
                 ],
               ),
             ),
-          ),
+          ],
         ),
-    ],
-  );
-  Widget accountCard(Account account) {
-    final checking = c.checkingAccounts.contains(account.id);
-    final label = checking
-        ? '正在验证登录状态…'
-        : switch (account.authStatus) {
-            AccountAuthStatus.valid => '登录有效 · 安全存储保护',
-            AccountAuthStatus.expired => '登录已失效 · 请重新扫码登录',
-            AccountAuthStatus.unknown => '登录状态待确认 · 暂停任务分发',
-          };
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 10),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            leading: CircleAvatar(
-              backgroundColor: colors.primaryContainer,
-              child: Icon(
-                LucideIcons.userRound,
-                color: colors.onPrimaryContainer,
-              ),
-            ),
-            title: Text(account.name),
-            subtitle: Text(label),
-          ),
-          if (c.accountMessages[account.id] case final String message)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: Text(message),
-            ),
-          if (account.lastChecked != null)
-            Text(
-              '上次检查：${account.lastChecked!.toLocal().toString().split('.').first}',
-              style: TextStyle(color: colors.onSurfaceVariant, fontSize: 12),
-            ),
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: [
-              OutlinedButton.icon(
-                onPressed: busy || checking
-                    ? null
-                    : () => action(() async {
-                        await c.checkAccount(account);
-                      }),
-                icon: const Icon(LucideIcons.refreshCw, size: 16),
-                label: const Text('检查登录'),
-              ),
-              FilledButton.tonalIcon(
-                onPressed: busy
-                    ? null
-                    : () => showDialog<void>(
-                        context: context,
-                        builder: (_) =>
-                            LoginDialog(controller: c, account: account),
-                      ),
-                icon: const Icon(LucideIcons.scanLine, size: 16),
-                label: const Text('重新登录'),
-              ),
-              IconButton(
-                tooltip: '移除账号',
-                icon: const Icon(LucideIcons.trash2, size: 18),
-                onPressed: busy
-                    ? null
-                    : () async {
-                        if (await confirm('移除账号', '移除此账号在系统安全存储中保存的 Cookie。')) {
-                          await action(
-                            () => c.removeAccount(account),
-                            success: '已移除账号',
-                          );
-                        }
-                      },
-              ),
-            ],
-          ),
-        ],
       ),
     );
   }
@@ -1185,106 +1672,131 @@ class _ControlCenterState extends State<ControlCenter> {
         if (items.isEmpty)
           empty(LucideIcons.activity, '尚无执行记录', '分发任务后，这里将展示节点进度和执行结果。')
         else
-          ...items.map((item) {
-            final (m, t) = item;
-            final active =
-                t.state == TaskState.TASK_STATE_RUNNING ||
-                t.state == TaskState.TASK_STATE_QUEUED;
-            return Padding(
-              padding: const EdgeInsets.only(bottom: 14),
-              child: panel(
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Wrap(
-                      spacing: 12,
-                      runSpacing: 8,
-                      crossAxisAlignment: WrapCrossAlignment.center,
-                      children: [
-                        Text(
-                          t.name,
-                          style: const TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        pill(
-                          stateName(t.state),
-                          color: t.state == TaskState.TASK_STATE_FAILED
-                              ? colors.error
-                              : colors.primary,
-                        ),
-                        Text(
-                          m.name,
-                          style: TextStyle(color: colors.onSurfaceVariant),
-                        ),
-                        if (active)
-                          TextButton.icon(
-                            onPressed: busy
-                                ? null
-                                : () async {
-                                    if (await confirm(
-                                      '停止任务',
-                                      '停止 ${m.name} 上的「${t.name}」。其他节点上的任务不受影响。',
-                                    )) {
-                                      await action(
-                                        () => c.cancel(m, t.id),
-                                        success: '已请求停止任务',
-                                      );
-                                    }
-                                  },
-                            icon: const Icon(LucideIcons.square, size: 14),
-                            label: const Text('停止'),
-                          ),
-                      ],
-                    ),
-                    const SizedBox(height: 10),
-                    SelectableText(t.message.isEmpty ? '等待执行信息' : t.message),
-                    const SizedBox(height: 8),
-                    Text(
-                      '最后同步：${c.lastSeen[m.id]?.toLocal().toString().split('.').first ?? '—'}',
-                      style: TextStyle(
-                        color: colors.onSurfaceVariant,
-                        fontSize: 11,
-                      ),
-                    ),
-                    if (t.events.isNotEmpty)
-                      ExpansionTile(
-                        tilePadding: EdgeInsets.zero,
-                        title: Text(
-                          '查看事件记录（${t.events.length}）',
-                          style: const TextStyle(fontSize: 13),
-                        ),
-                        children: [
-                          ConstrainedBox(
-                            constraints: const BoxConstraints(maxHeight: 320),
-                            child: SingleChildScrollView(
-                              child: Align(
-                                alignment: Alignment.centerLeft,
-                                child: SelectableText(
-                                  t.events
-                                      .map(
-                                        (e) =>
-                                            '${DateTime.fromMillisecondsSinceEpoch(e.timestampUnixMs.toInt()).toLocal().toString().split('.').first}  [${e.level}]  ${e.message}',
-                                      )
-                                      .join('\n'),
-                                  style: const TextStyle(
-                                    fontFamily: 'Menlo',
-                                    fontSize: 11,
-                                    height: 1.7,
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                  ],
-                ),
-              ),
-            );
-          }),
+          responsiveCards([for (final (m, t) in items) monitorCard(m, t)]),
       ],
+    );
+  }
+
+  Widget monitorTaskDetails(TicketTask task) {
+    final account = c.state.accounts
+        .where((a) => a.id == task.accountId)
+        .firstOrNull;
+    final summary = task.summary;
+    final session = summary == null
+        ? ''
+        : [
+            summary.selectedDate,
+            summary.screenName,
+            summary.ticketName,
+          ].where((value) => value.isNotEmpty).join(' · ');
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        taskDetail(LucideIcons.userRound, '账号', account?.name ?? '账号已移除'),
+        taskDetail(
+          LucideIcons.calendarDays,
+          '场次',
+          session.isEmpty ? '未记录场次与票档信息' : session,
+        ),
+      ],
+    );
+  }
+
+  Widget monitorCard(Machine machine, TaskStatus status) {
+    final active =
+        status.state == TaskState.TASK_STATE_RUNNING ||
+        status.state == TaskState.TASK_STATE_QUEUED;
+    final task = c.state.tasks.where((t) => t.id == status.id).firstOrNull;
+    return KeyedSubtree(
+      key: ValueKey('monitor-card-${machine.id}-${status.id}'),
+      child: panel(
+        padding: const EdgeInsets.all(20),
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                taskHeading(
+                  LucideIcons.activity,
+                  status.name,
+                  pill(
+                    stateName(status.state),
+                    color: status.state == TaskState.TASK_STATE_FAILED
+                        ? colors.error
+                        : colors.primary,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                taskDetail(LucideIcons.server, '机器', machine.name),
+                if (task != null)
+                  monitorTaskDetails(task)
+                else
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Text(
+                      '本地任务已移除，无法显示账号与场次',
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: colors.onSurfaceVariant,
+                      ),
+                    ),
+                  ),
+                const SizedBox(height: 4),
+                TaskMessages(
+                  key: PageStorageKey(
+                    'task-messages-${machine.id}-${status.id}',
+                  ),
+                  status: status,
+                ),
+              ],
+            ),
+            Padding(
+              padding: const EdgeInsets.only(top: 14),
+              child: Column(
+                children: [
+                  const Divider(height: 1),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          '最后同步：${c.lastSeen[machine.id]?.toLocal().toString().split('.').first ?? '—'}',
+                          style: TextStyle(
+                            color: colors.onSurfaceVariant,
+                            fontSize: 11,
+                          ),
+                        ),
+                      ),
+                      if (active) ...[
+                        const SizedBox(width: 8),
+                        TextButton.icon(
+                          onPressed: busy
+                              ? null
+                              : () async {
+                                  if (await confirm(
+                                    '停止任务',
+                                    '停止 ${machine.name} 上的「${status.name}」。其他节点上的任务不受影响。',
+                                  )) {
+                                    await action(
+                                      () => c.cancel(machine, status.id),
+                                      success: '已请求停止任务',
+                                    );
+                                  }
+                                },
+                          icon: const Icon(LucideIcons.square, size: 14),
+                          label: const Text('停止'),
+                        ),
+                      ],
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -1293,79 +1805,46 @@ class _ControlCenterState extends State<ControlCenter> {
       context: context,
       builder: (_) => MachineDialog(controller: c, existing: existing),
     );
-    if (warning != null) message(warning, error: true);
+    if (!mounted) return;
+    if (warning == 'cloud-create') {
+      await cloudCreateDialog();
+    } else if (warning != null) {
+      message(warning, error: true);
+    }
+  }
+
+  Future<void> cloudCreateDialog() async {
+    final result = await showDialog<Object>(
+      context: context,
+      builder: (_) => CloudCreateDialog(controller: c.cloud),
+    );
+    if (!mounted) return;
+    if (result is CloudProvider) {
+      setState(() {
+        credentialProvider = result;
+        credentialNavigationRevision++;
+        page = 4;
+      });
+    } else if (result == true) {
+      setState(() => page = 1);
+      message('已添加预览机器，可继续添加其他机器。');
+    }
   }
 
   Future<void> dispatchDialog(TicketTask task) async {
-    final chosen = <String>{};
     final saved =
         c.state.tasks.where((t) => t.id == task.id).firstOrNull ?? task;
-    final submitted = saved.dispatchedTo;
-    final confirmed = await showDialog<bool>(
+    final chosen = await showDialog<List<String>>(
       context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, set) => AlertDialog(
-          title: Text('分发「${task.name}」'),
-          content: SizedBox(
-            width: 460,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  '提交后将执行真实抢票任务。相同任务可分发到多台机器，请留意重复订单并及时支付。'
-                  '每台机器只提交一次，需要重新执行时请新建任务。',
-                ),
-                const SizedBox(height: 12),
-                Text(
-                  startPassed(saved)
-                      ? '${startLabel(saved)}，时间已过，提交后立即开始'
-                      : startLabel(saved),
-                  style: const TextStyle(fontWeight: FontWeight.w600),
-                ),
-                const SizedBox(height: 16),
-                Flexible(
-                  child: SingleChildScrollView(
-                    child: Column(
-                      children: [
-                        for (final m in c.state.machines)
-                          CheckboxListTile(
-                            value: chosen.contains(m.id),
-                            onChanged: submitted.contains(m.id)
-                                ? null
-                                : (v) => set(
-                                    () => v == true
-                                        ? chosen.add(m.id)
-                                        : chosen.remove(m.id),
-                                  ),
-                            title: Text(m.name),
-                            subtitle: Text(
-                              submitted.contains(m.id)
-                                  ? '${m.host}:${m.port} · 已提交，不会重复执行'
-                                  : '${m.host}:${m.port}',
-                            ),
-                          ),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('返回'),
-            ),
-            FilledButton(
-              onPressed: chosen.isEmpty ? null : () => Navigator.pop(ctx, true),
-              child: Text('提交到 ${chosen.length} 台机器'),
-            ),
-          ],
-        ),
+      builder: (_) => DispatchDialog(
+        controller: c,
+        task: saved,
+        startDescription: startPassed(saved)
+            ? '${startLabel(saved)}，时间已过，提交后立即开始'
+            : startLabel(saved),
       ),
     );
-    if (confirmed == true) {
+    if (mounted && chosen != null && chosen.isNotEmpty) {
       await action(() async {
         final errors = await c.dispatch(
           task,
@@ -1435,10 +1914,16 @@ class _MachineDialogState extends State<MachineDialog> {
   bool manual = false, busy = false;
   final importedFiles = <String>[];
   bool saved = false;
+  @override
+  void initState() {
+    super.initState();
+    widget.controller.holdCredentialImports();
+  }
+
   Future<void> pick(TextEditingController target) async {
     setState(() => busy = true);
     try {
-      final path = await importProtectedFile(widget.controller.store);
+      final path = await widget.controller.importCredential();
       if (path != null) {
         if (!mounted) {
           await File(path).delete();
@@ -1482,6 +1967,7 @@ class _MachineDialogState extends State<MachineDialog> {
         File(path).delete().catchError((_) => File(path));
       }
     }
+    widget.controller.releaseCredentialImports();
     for (final c in [
       name,
       host,
@@ -1518,8 +2004,6 @@ class _MachineDialogState extends State<MachineDialog> {
         name.text.trim(),
         id: widget.existing?.id,
       );
-      Map<String, dynamic> result = {};
-      String fingerprint = widget.existing?.fingerprint ?? '';
       if (!manual) {
         final ssh = int.tryParse(sshPort.text);
         if (ssh == null || ssh < 1 || ssh > 65535) {
@@ -1529,96 +2013,45 @@ class _MachineDialogState extends State<MachineDialog> {
             (password.text.isEmpty && key.text.trim().isEmpty)) {
           throw const UserError('请填写 SSH 用户和密码或私钥路径。');
         }
-        final request = <String, dynamic>{
-          'host': host.text.trim(),
-          'port': ssh,
-          'username': username.text.trim(),
-          'password': password.text,
-          'private_key_path': key.text.trim(),
-          'private_key_passphrase': passphrase.text,
-          'host_key_fingerprint': fingerprint,
-          'server_name': host.text.trim(),
-          'grpc_port': grpcPort,
-          'remote_directory': '.local/share/misaka',
-        };
-        result = await widget.controller.deploy(request);
-        if (result['needs_confirmation'] == true) {
-          fingerprint = result['fingerprint'] as String;
-          if (!mounted) return;
-          final approved =
-              await showDialog<bool>(
-                context: context,
-                builder: (context) => AlertDialog(
-                  title: const Text('确认 SSH 主机指纹'),
-                  content: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text('请与服务器管理员提供的指纹核对一致后继续。'),
-                      const SizedBox(height: 16),
-                      SelectableText(
-                        fingerprint,
-                        style: const TextStyle(
-                          fontFamily: 'Menlo',
-                          fontSize: 12,
-                        ),
-                      ),
-                    ],
-                  ),
-                  actions: [
-                    TextButton(
-                      onPressed: () => Navigator.pop(context, false),
-                      child: const Text('取消'),
-                    ),
-                    FilledButton(
-                      onPressed: () => Navigator.pop(context, true),
-                      child: const Text('指纹一致，部署'),
-                    ),
-                  ],
-                ),
-              ) ??
-              false;
-          if (!approved) return;
-          result = await widget.controller.deploy({
-            ...request,
-            'host_key_fingerprint': fingerprint,
-          });
-        }
-        if (result['needs_confirmation'] == true) {
-          throw const UserError('SSH 指纹仍未通过验证，部署已停止。');
-        }
+        await widget.controller.startDeployment(
+          name: name.text.trim(),
+          host: host.text.trim(),
+          port: grpcPort,
+          existing: widget.existing,
+          importedFiles: List.of(importedFiles),
+          request: {
+            'host': host.text.trim(),
+            'port': ssh,
+            'username': username.text.trim(),
+            'password': password.text,
+            'private_key_path': key.text.trim(),
+            'private_key_passphrase': passphrase.text,
+            'host_key_fingerprint': widget.existing?.fingerprint ?? '',
+            'server_name': host.text.trim(),
+            'grpc_port': grpcPort,
+            'remote_directory': '.local/share/misaka',
+          },
+        );
+        // The controller owns the imported SSH key until deployment finishes.
+        importedFiles.clear();
+        saved = true;
+        if (mounted) Navigator.pop(context);
+        return;
       }
       final machine = Machine(
         id: widget.existing?.id ?? const Uuid().v4(),
         name: name.text.trim(),
         host: host.text.trim(),
         port: grpcPort,
-        caCert: manual ? ca.text.trim() : (result['ca_cert'] ?? '') as String,
-        clientCert: manual
-            ? cert.text.trim()
-            : (result['client_cert'] ?? '') as String,
-        clientKey: manual
-            ? privateKey.text.trim()
-            : (result['client_key'] ?? '') as String,
-        serverName: manual
-            ? serverName.text.trim()
-            : (result['server_name'] ?? host.text.trim()) as String,
-        fingerprint: fingerprint,
+        caCert: ca.text.trim(),
+        clientCert: cert.text.trim(),
+        clientKey: privateKey.text.trim(),
+        serverName: serverName.text.trim(),
+        fingerprint: widget.existing?.fingerprint ?? '',
       );
       await widget.controller.addMachine(machine);
       saved = true;
-      // The service passed its checks through SSH, but this device could not
-      // reach it directly, which is how tasks and status will travel.
-      final unreachable = !manual && result['reachable'] == false;
-      if (mounted) {
-        Navigator.pop(
-          context,
-          unreachable
-              ? '已部署「${machine.name}」，但本机无法直接连接 ${machine.host}:${machine.port}。'
-                    '请确认防火墙或安全组已放行该 TCP 端口，且地址可从本机访问。'
-              : null,
-        );
-      }
+      if (mounted) Navigator.pop(context);
     } catch (e) {
       if (mounted) setState(() => error = readableError(e));
     } finally {
@@ -1634,9 +2067,62 @@ class _MachineDialogState extends State<MachineDialog> {
     onSubmit: submit,
     submitLabel: manual ? '保存连接' : '安全部署',
     children: [
+      if (widget.existing == null) ...[
+        Container(
+          padding: const EdgeInsets.all(18),
+          decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.primary.withValues(alpha: .06),
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Text(
+                '还没有云服务器？',
+                style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                '选择云厂商和内置配置，衔接创建与部署流程。',
+                style: TextStyle(
+                  fontSize: 12,
+                  height: 1.6,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: FilledButton.tonalIcon(
+                  key: const ValueKey('cloud-create-entry'),
+                  onPressed: busy
+                      ? null
+                      : () => Navigator.pop(context, 'cloud-create'),
+                  icon: const Icon(LucideIcons.cloud, size: 18),
+                  label: const Text('云服务器创建&部署'),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                '交互预览 · 不创建真实资源',
+                style: TextStyle(
+                  fontSize: 11,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 22),
+        const Text(
+          '已有机器，通过 SSH 部署',
+          style: TextStyle(fontWeight: FontWeight.w600),
+        ),
+        const SizedBox(height: 10),
+      ],
       Text(
-        'SSH 用于安装；任务与状态通过 mTLS 加密传输。部署包约 30–40 MB，'
-        '网络较慢时上传可能需要十几分钟，期间请勿关闭应用。',
+        '点击安全部署后，可在机器列表查看进度并继续添加其他机器。'
+        '首次连接需在卡片上核对 SSH 主机指纹。部署期间请保持应用运行。',
         style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
       ),
       const SizedBox(height: 16),
@@ -2033,6 +2519,11 @@ class _TaskDialogState extends State<TaskDialog> {
           account,
           config,
           startAt: start,
+          summary: TaskSummary.fromSelection(
+            purchase!,
+            ticketIndex,
+            buyers.length,
+          ),
         );
         if (mounted) Navigator.pop(context);
       }

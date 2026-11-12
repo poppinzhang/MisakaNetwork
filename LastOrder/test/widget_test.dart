@@ -557,7 +557,8 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('账号与任务').first);
     await tester.pumpAndSettle();
-    expect(find.text('登录已失效 · 请重新扫码登录'), findsOneWidget);
+    expect(find.text('登录失效'), findsOneWidget);
+    expect(find.text('请重新扫码登录，恢复任务分发。'), findsOneWidget);
     await tester.tap(find.text('重新登录'));
     await tester.pumpAndSettle();
     expect(find.text('重新登录账号'), findsOneWidget);
@@ -605,8 +606,14 @@ void main() {
       final runtime = FakeRuntime();
       runtime.responses['purchase_context'] = {
         'project_name': '测试演出',
+        'selected_date': '2026-11-28',
         'ticket_options': [
-          {'display': '测试场次 / 票档', 'sale_start': '2026-11-20 20:00:00'},
+          {
+            'display': '测试场次 / 票档',
+            'screen': '周六晚场',
+            'desc': '前排票',
+            'sale_start': '2026-11-20 20:00:00',
+          },
         ],
         'buyers': [
           {'name': '测试购票人'},
@@ -670,6 +677,12 @@ void main() {
       await tester.pumpAndSettle();
       expect(c.state.tasks.single.name, '测试演出');
       expect(c.state.tasks.single.startAt, '2026-11-20T20:00:00');
+      final summary = c.state.tasks.single.summary!;
+      expect(summary.projectName, '测试演出');
+      expect(summary.screenName, '周六晚场');
+      expect(summary.ticketName, '前排票');
+      expect(summary.selectedDate, '2026-11-28');
+      expect(summary.quantity, 1);
       expect(
         runtime.calls,
         containsAllInOrder(['purchase_context', 'build_config', 'validate']),

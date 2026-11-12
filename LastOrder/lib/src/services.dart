@@ -502,8 +502,47 @@ class LocalRuntime implements RuntimeBridge {
         );
 }
 
+class DeploymentProgress {
+  const DeploymentProgress({required this.percent, required this.stage});
+  final int percent;
+  final String stage;
+
+  /// Only known stages cross the helper boundary. Never display arbitrary
+  /// helper output, request fields or remote stdout as progress text.
+  static DeploymentProgress? decode(Object? value) {
+    if (value is! Map || value['percent'] is! int) return null;
+    final percent = value['percent'] as int;
+    final stage = value['stage'];
+    const ranges = <String, (int, int)>{
+      '准备部署': (2, 2),
+      '连接 SSH': (5, 5),
+      '检查系统与安装包': (10, 10),
+      '准备安全配置': (15, 15),
+      '上传并解压安装包': (20, 75),
+      '写入安全配置': (78, 78),
+      '检查 Sisters': (82, 82),
+      '检查抢票运行时': (86, 86),
+      '启动 Sisters': (90, 90),
+      '验证安全连接': (94, 94),
+      '检查直连状态': (97, 97),
+      '部署完成': (100, 100),
+    };
+    final range = ranges[stage];
+    if (stage is! String ||
+        range == null ||
+        percent < range.$1 ||
+        percent > range.$2) {
+      return null;
+    }
+    return DeploymentProgress(percent: percent, stage: stage);
+  }
+}
+
 abstract class DeploymentHelper {
-  Future<Map<String, dynamic>> call(Map<String, dynamic> request);
+  Future<Map<String, dynamic>> call(
+    Map<String, dynamic> request, {
+    void Function(DeploymentProgress)? onProgress,
+  });
 }
 
 /// Deploy bounds its own stages (stall detection, a staging budget, health
@@ -515,7 +554,14 @@ Duration helperTimeout(Map<String, dynamic> request) =>
 
 class LocalHelper implements DeploymentHelper {
   @override
-  Future<Map<String, dynamic>> call(Map<String, dynamic> request) =>
+  Future<Map<String, dynamic>> call(
+    Map<String, dynamic> request, {
+    void Function(DeploymentProgress)? onProgress,
+  }) => request['action'] == 'deploy' && onProgress != null
+      ? trackDeploymentProgress(request, onProgress, _invoke)
+      : _invoke(request);
+
+  Future<Map<String, dynamic>> _invoke(Map<String, dynamic> request) =>
       Platform.isAndroid
       ? const EmbeddedServices().call(
           'helper',
@@ -528,6 +574,79 @@ class LocalHelper implements DeploymentHelper {
           request,
           timeout: helperTimeout(request),
         );
+}
+
+/// Each deployment owns a private directory, including on Android where the
+/// helper runs inside JNI. The progress file holds only bounded public stages.
+Future<Map<String, dynamic>> trackDeploymentProgress(
+  Map<String, dynamic> request,
+  void Function(DeploymentProgress) onProgress,
+  Future<Map<String, dynamic>> Function(Map<String, dynamic>) invoke, {
+  Future<void> Function(String, String) protect = restrictPermissions,
+}) async {
+  final parent = Platform.isAndroid
+      ? await getTemporaryDirectory()
+      : Directory.systemTemp;
+  final directory = await parent.createTemp('misaka-deployment-');
+  final file = File(p.join(directory.path, 'progress.json'));
+  Timer? timer;
+  Future<void>? reading;
+  var closed = false;
+  var lastPercent = -1;
+  var lastStage = '';
+
+  Future<void> read() async {
+    try {
+      if (!await file.exists() || await file.length() > 1024) return;
+      final progress = DeploymentProgress.decode(
+        jsonDecode(await file.readAsString()),
+      );
+      if (closed ||
+          progress == null ||
+          progress.percent < lastPercent ||
+          (progress.percent == lastPercent && progress.stage == lastStage)) {
+        return;
+      }
+      // 100% is released only after a successful terminal response. A helper
+      // which crashes after its last snapshot must not briefly appear complete.
+      if (progress.percent == 100) return;
+      lastPercent = progress.percent;
+      lastStage = progress.stage;
+      onProgress(progress);
+    } on FileSystemException {
+      // Atomic replacement can briefly be unavailable on Windows. Retry later.
+    } on FormatException {
+      // Tolerate missing/partial snapshots from an interrupted helper.
+    }
+  }
+
+  void poll() {
+    if (reading != null || closed) return;
+    reading = read().whenComplete(() => reading = null);
+  }
+
+  try {
+    await protect(directory.path, '700');
+    timer = Timer.periodic(const Duration(milliseconds: 200), (_) => poll());
+    final result = await invoke({...request, 'progress_path': file.path});
+    timer.cancel();
+    await reading;
+    await read();
+    if (result['needs_confirmation'] != true) {
+      onProgress(const DeploymentProgress(percent: 100, stage: '部署完成'));
+    }
+    return result;
+  } finally {
+    closed = true;
+    timer?.cancel();
+    await reading;
+    try {
+      await directory.delete(recursive: true);
+    } on FileSystemException {
+      // A native request may outlive a timeout. It can finish cleanup safely;
+      // any leftover file contains only the public progress snapshot.
+    }
+  }
 }
 
 /// The native picker grants sandbox access; keep a private copy for reconnects.
