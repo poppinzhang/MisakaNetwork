@@ -36,6 +36,27 @@ def github_json(endpoint: str, *, paginate: bool = False):
     return result
 
 
+def github_write_json(endpoint: str, *, method: str, body: dict):
+    # Keep structured request bodies out of command-line quoting and preserve
+    # JSON booleans, Unicode and newlines in release notes. Never retry writes.
+    with tempfile.TemporaryDirectory(prefix="misaka-release-request-") as temporary:
+        request_path = Path(temporary) / "request.json"
+        request_path.write_text(json.dumps(body, ensure_ascii=False), encoding="utf-8")
+        return json.loads(run_command([
+            "gh", "api", "--hostname", "github.com", endpoint,
+            "--header", "Accept: application/vnd.github+json",
+            "--header", "Content-Type: application/json",
+            "--method", method, "--input", str(request_path),
+        ]))
+
+
+def matches_release(response, *, tag: str, draft: bool, release_id: int | None = None) -> bool:
+    return (isinstance(response, dict) and type(response.get("id")) is int
+            and response["id"] > 0 and (release_id is None or response["id"] == release_id)
+            and response.get("tag_name") == tag and response.get("draft") is draft
+            and response.get("prerelease") is False)
+
+
 def validate_identity(tag: str, repository: str, commit: str) -> None:
     if tag not in (VERSION, "v" + VERSION):
         raise ValueError("Release tag must match the configured version")
@@ -112,41 +133,39 @@ def publish(directory: Path, *, tag: str, repository: str, commit: str) -> None:
             raise ValueError("A published release already exists for this version; it will not be overwritten")
         raise ValueError("An existing draft must be reviewed and removed before rerunning publication")
 
-    repo_argument = "github.com/" + repository
-    with tempfile.TemporaryDirectory(prefix="misaka-release-notes-") as temporary:
-        notes_path = Path(temporary) / "release-notes.md"
-        notes_path.write_text(notes, encoding="utf-8")
-        command = ["gh", "release", "create", tag, "--repo", repo_argument,
-                   "--verify-tag", "--draft", "--prerelease=false", "--title", f"MisakaNetwork {VERSION}",
-                   "--notes-file", str(notes_path)]
-        run_command(command)
-
-    created = github_json(f"repos/{repository}/releases/tags/{tag}")
-    if (not isinstance(created, dict) or created.get("tag_name") != tag
-            or created.get("draft") is not True
-            or created.get("prerelease") is not False
-            or type(created.get("id")) is not int or created["id"] <= 0):
+    verify_remote_tag(tag, repository, commit)
+    # The creation response identifies this exact draft. REST's tag endpoint
+    # only returns published releases, and the list may not show a new draft.
+    created = github_write_json(f"repos/{repository}/releases", method="POST", body={
+        "tag_name": tag, "target_commitish": commit, "name": f"MisakaNetwork {VERSION}",
+        "body": notes, "draft": True, "prerelease": False,
+    })
+    if not matches_release(created, tag=tag, draft=True):
         raise ValueError("New release is not an unambiguous draft; refusing to upload")
     release_id = created["id"]
+    confirmed = github_json(f"repos/{repository}/releases/{release_id}")
+    if not matches_release(confirmed, tag=tag, draft=True, release_id=release_id):
+        raise ValueError("New release is not an unambiguous draft; refusing to upload")
     # Use one explicit argument per allowlisted file. Neither shell globbing nor
     # --clobber may be used here, even when the staging directory was verified.
+    # gh upload supports drafts via its GraphQL lookup, unlike REST /tags.
+    repo_argument = "github.com/" + repository
     run_command(["gh", "release", "upload", tag, "--repo", repo_argument,
                  *(str((directory / name).resolve()) for name in release_asset_names())])
 
     current = github_json(f"repos/{repository}/releases/{release_id}")
-    if (not isinstance(current, dict) or current.get("id") != release_id
-            or current.get("tag_name") != tag or current.get("draft") is not True
-            or current.get("prerelease") is not False):
+    if not matches_release(current, tag=tag, draft=True, release_id=release_id):
         raise ValueError("Release changed while uploading; refusing to publish")
     assets = github_json(f"repos/{repository}/releases/{release_id}/assets?per_page=100", paginate=True)
     verify_remote_assets(directory, assets)
     verify_remote_tag(tag, repository, commit)
-    run_command(["gh", "release", "edit", tag, "--repo", repo_argument,
-                 "--verify-tag", "--draft=false", "--prerelease=false", "--latest"])
+    updated = github_write_json(f"repos/{repository}/releases/{release_id}", method="PATCH", body={
+        "draft": False, "prerelease": False, "make_latest": "true",
+    })
+    if not matches_release(updated, tag=tag, draft=False, release_id=release_id):
+        raise ValueError("Could not confirm the published release state")
     published = github_json(f"repos/{repository}/releases/{release_id}")
-    if (not isinstance(published, dict) or published.get("id") != release_id
-            or published.get("tag_name") != tag or published.get("draft") is not False
-            or published.get("prerelease") is not False):
+    if not matches_release(published, tag=tag, draft=False, release_id=release_id):
         raise ValueError("Could not confirm the published release state")
 
 

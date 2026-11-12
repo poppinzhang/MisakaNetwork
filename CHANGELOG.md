@@ -2,11 +2,29 @@
 
 ## unstaged
 
-- 修复 GitHub Release 草稿刚创建时 Release 列表尚未更新，导致发布作业误判草稿状态并中止的问题；改为按 Tag 验证新建 Release。
+## 0.2.3 — 2026-11-12
+
+发布方式：统一版本 **0.2.3+9**，通过 GitHub Actions 重新构建所有已支持平台并发布正式 Release（非 Pre-Release）；实际交付与验证结果见 [0.2.3 记录](docs/releases/0.2.3.md)。内嵌 biliTickerBuy 保持 **2.15.18**。
+
+### 修复
+
+- 修复 GitHub Release 草稿核验：使用创建 API 返回的 Release ID，按 ID 读取并检查草稿身份和状态；不依赖创建后列表可见性，也不使用只查询已发布版本的 REST Tag 接口读取草稿。
+- 公开时按同一 Release ID 更新为正式 Release 并设为 Latest，保留版本去重、Tag 提交一致性、12 个资产的名称/大小/SHA-256 校验和异常时停止发布的规则。
+- 回归测试按真实 API 语义模拟草稿 Tag 查询 404、列表延迟、创建/读取失败、无效 ID 与状态变化，防止模拟响应掩盖发布故障。
+
+### 改进、升级影响与限制
+
+- LastOrder、Sisters、helper、runtime 与平台版本资源统一为 0.2.3，构建号 9；五种完整应用包和四种内嵌部署包全部重建，不复用旧版本产物。
+- 记录允许 Codex 在参与完成的 Git 提交中附上署名的偏好，保留原 Git 作者配置。
+- 本版包含 0.2.1 中的图标、关于与离线许可、手机布局和 CI 改进；0.2.1 的公开发布未完成，完整功能变化见其历史记录。
+- 升级前核对订单并停止或等待已有任务完成；安装新版后重新部署全部 Sisters。既有 schema 2 配置、主题与端口保持不变，桌面端无需因本次升级重新登录。
+- Android 沿用已配置的长期发布密钥；从 0.2.0 等测试签名 APK 升级需卸载重装，并重新登录、添加机器和创建任务。
+- macOS 仍为 ad-hoc 签名且未公证，Windows 未含 Authenticode 签名；自动付款、跨节点自动取消、任务重启恢复、证书自动续期及 Windows Sisters 仍未实现。Android 后台同步不保证常驻。
+- 自动化检查和正式 Release 类型不代表真实登录、下单、付款或出票已验收。
 
 ## 0.2.1 — 2026-11-12
 
-发布方式：统一版本 **0.2.1+8**，通过 GitHub Actions 全平台构建并发布正式 Release；实际交付状态以 [0.2.1 记录](docs/releases/0.2.1.md) 及 Release 页面为准。每份完整 LastOrder 包含同版本 Linux/macOS 四种 Sisters 包，内嵌 biliTickerBuy 保持 **2.15.18**。
+发布尝试：统一版本 **0.2.1+8**，GitHub Actions 全平台构建通过，但公开发布在草稿核验阶段停止；没有公开安装包，详情见 [0.2.1 记录](docs/releases/0.2.1.md)。每份完整 LastOrder 包含同版本 Linux/macOS 四种 Sisters 包，内嵌 biliTickerBuy 保持 **2.15.18**。
 
 ### 改进
 

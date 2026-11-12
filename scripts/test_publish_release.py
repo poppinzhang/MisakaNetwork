@@ -21,6 +21,7 @@ class FakeGitHub:
     def __init__(self, directory):
         self.directory = directory
         self.calls = []
+        self.requests = []
         self.releases = []
         self.assets = []
         self.upload_failure = False
@@ -37,6 +38,15 @@ class FakeGitHub:
             return COMMIT
         if command[:2] == ["gh", "api"]:
             endpoint = command[4]
+            method = command[command.index("--method") + 1] if "--method" in command else "GET"
+            payload = (json.loads(Path(command[command.index("--input") + 1]).read_text(encoding="utf-8"))
+                       if "--input" in command else None)
+            self.requests.append({"endpoint": endpoint, "method": method, "payload": payload})
+            if endpoint.endswith("/releases") and method == "POST":
+                self.note_content = payload["body"]
+                self.releases = [{"id": 123, "tag_name": payload["tag_name"],
+                                  "draft": payload["draft"], "prerelease": payload["prerelease"]}]
+                return json.dumps(self.releases[0])
             if "/git/ref/tags/" in endpoint:
                 sha = "b" * 40 if self.annotated else COMMIT
                 if self.move_tag_after_upload and self.assets:
@@ -52,20 +62,21 @@ class FakeGitHub:
                     return json.dumps([[]])
                 return json.dumps([[], self.releases])
             if endpoint.endswith("/releases/tags/" + TAG):
-                return json.dumps(self.releases[0])
+                # REST lookup by tag cannot find an unpublished draft. gh's
+                # upload command separately supports drafts via GraphQL.
+                if self.releases and self.releases[0]["draft"] is False:
+                    return json.dumps(self.releases[0])
+                raise subprocess.CalledProcessError(1, command, stderr="synthetic 404")
             if endpoint.endswith("/releases/123/assets?per_page=100"):
                 assets = copy.deepcopy(self.assets)
                 if self.asset_change:
                     self.asset_change(assets)
                 return json.dumps([assets])
             if endpoint.endswith("/releases/123"):
+                if method == "PATCH":
+                    self.releases[0].update(draft=payload["draft"], prerelease=payload["prerelease"])
                 return json.dumps(self.releases[0])
             raise AssertionError("Unexpected endpoint: " + endpoint)
-        if command[:3] == ["gh", "release", "create"]:
-            self.note_content = Path(command[command.index("--notes-file") + 1]).read_text(encoding="utf-8")
-            self.releases = [{"id": 123, "tag_name": TAG, "draft": True,
-                              "prerelease": False}]
-            return "https://github.com/example/misaka/releases/tag/" + TAG
         if command[:3] == ["gh", "release", "upload"]:
             if self.upload_failure:
                 raise subprocess.CalledProcessError(1, command, stderr="synthetic upload failure")
@@ -74,13 +85,14 @@ class FakeGitHub:
                 self.assets.append({"name": name, "size": path.stat().st_size, "state": "uploaded",
                                     "digest": "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()})
             return ""
-        if command[:3] == ["gh", "release", "edit"]:
-            self.releases[0]["draft"] = False
-            return ""
         raise AssertionError("Unexpected command: " + repr(command))
 
     def mutations(self, operation):
-        return [call for call in self.calls if call[:3] == ["gh", "release", operation]]
+        if operation == "upload":
+            return [call for call in self.calls if call[:3] == ["gh", "release", "upload"]]
+        method = {"create": "POST", "edit": "PATCH"}[operation]
+        return [call for call in self.calls if call[:2] == ["gh", "api"]
+                and "--method" in call and call[call.index("--method") + 1] == method]
 
 
 class PublishReleaseTests(unittest.TestCase):
@@ -106,32 +118,99 @@ class PublishReleaseTests(unittest.TestCase):
         self.validation.assert_called_once_with(self.directory)
         self.assertEqual(self.github.note_content, "模拟发布说明\n")
         create = self.github.mutations("create")[0]
-        self.assertIn("--verify-tag", create)
-        self.assertIn("--draft", create)
-        self.assertIn("--prerelease=false", create)
-        self.assertNotIn("--prerelease", create)
-        self.assertNotIn("--latest=false", create)
+        self.assertEqual(create[4], f"repos/{REPOSITORY}/releases")
+        creation = next(request for request in self.github.requests if request["method"] == "POST")
+        self.assertEqual(creation["payload"], {
+            "tag_name": TAG, "target_commitish": COMMIT, "name": f"MisakaNetwork {VERSION}",
+            "body": "模拟发布说明\n", "draft": True, "prerelease": False,
+        })
         upload = self.github.mutations("upload")[0]
         self.assertEqual(upload[6:], [str((self.directory / name).resolve())
                                      for name in publish_release.release_asset_names()])
         self.assertNotIn("--clobber", upload)
         self.assertFalse(any("*" in argument for argument in upload))
         self.assertEqual(len(self.github.mutations("edit")), 1)
-        self.assertIn("--prerelease=false", self.github.mutations("edit")[0])
-        self.assertIn("--latest", self.github.mutations("edit")[0])
+        publication = next(request for request in self.github.requests if request["method"] == "PATCH")
+        self.assertEqual(publication["endpoint"], f"repos/{REPOSITORY}/releases/123")
+        self.assertEqual(publication["payload"], {"draft": False, "prerelease": False, "make_latest": "true"})
         self.assertFalse(self.github.releases[0]["draft"])
         self.assertFalse(self.github.releases[0]["prerelease"])
 
-    def test_created_release_uses_exact_tag_lookup_not_release_list(self):
+    def test_created_draft_uses_response_id_despite_stale_list_and_tag_404(self):
         self.github.stale_created_listing = True
         self.publish()
         self.assertFalse(self.github.releases[0]["draft"])
+        self.assertFalse(any("/releases/tags/" in request["endpoint"] for request in self.github.requests))
+        listing = [request for request in self.github.requests if request["endpoint"].endswith("releases?per_page=100")]
+        self.assertEqual(len(listing), 1)
+        reads = [request for request in self.github.requests if request["method"] == "GET"
+                 and request["endpoint"].endswith("releases/123")]
+        self.assertEqual(len(reads), 3)
+
+    def test_release_notes_preserve_unicode_newlines_and_shell_characters(self):
+        notes = '说明\n"quoted" \\ backslash\n$(false) `false`\n'
+        self.notes.return_value = notes
+        self.publish()
+        self.assertEqual(self.github.note_content, notes)
+        self.assertFalse(any(notes in argument for call in self.github.calls for argument in call))
+
+    def test_invalid_creation_response_never_uploads_or_publishes(self):
+        valid = {"id": 123, "tag_name": TAG, "draft": True, "prerelease": False}
+        invalid = [None, [], {}, *(dict(valid, **{key: value}) for key, value in (
+            ("id", True), ("id", 0), ("id", -1), ("id", "123"), ("tag_name", "another"),
+            ("draft", False), ("draft", 1), ("prerelease", True), ("prerelease", 0),
+        ))]
+        real = self.github.run
+        for response in invalid:
+            with self.subTest(response=response):
+                self.github.releases = []
+                self.github.calls = []
+                def run(command):
+                    result = real(command)
+                    if command[:2] == ["gh", "api"] and "POST" in command:
+                        return json.dumps(response)
+                    return result
+                self.runner.side_effect = run
+                with self.assertRaisesRegex(ValueError, "unambiguous draft"):
+                    self.publish()
+                self.assertEqual(self.github.mutations("upload"), [])
+                self.assertEqual(self.github.mutations("edit"), [])
+
+    def test_created_draft_read_must_match_creation_id_and_state(self):
+        real = self.github.run
+        for change in ({"id": 456}, {"tag_name": "another"}, {"draft": False}, {"prerelease": True}):
+            with self.subTest(change=change):
+                self.github.releases = []
+                self.github.calls = []
+                def run(command):
+                    result = real(command)
+                    if command[:2] == ["gh", "api"] and command[4].endswith("releases/123"):
+                        return json.dumps(dict(json.loads(result), **change))
+                    return result
+                self.runner.side_effect = run
+                with self.assertRaisesRegex(ValueError, "unambiguous draft"):
+                    self.publish()
+                self.assertEqual(self.github.mutations("upload"), [])
+                self.assertEqual(self.github.mutations("edit"), [])
+
+    def test_created_draft_read_failure_never_retries_creation(self):
+        real = self.github.run
+        def run(command):
+            if command[:2] == ["gh", "api"] and command[4].endswith("releases/123"):
+                raise subprocess.CalledProcessError(1, command, stderr="synthetic lookup failure")
+            return real(command)
+        self.runner.side_effect = run
+        with self.assertRaises(subprocess.CalledProcessError):
+            self.publish()
+        self.assertEqual(len(self.github.mutations("create")), 1)
+        self.assertEqual(self.github.mutations("upload"), [])
+        self.assertEqual(self.github.mutations("edit"), [])
 
     def test_unexpected_prerelease_draft_prevents_upload(self):
         real = self.github.run
         def run(command):
             result = real(command)
-            if command[:3] == ["gh", "release", "create"]:
+            if command[:2] == ["gh", "api"] and "POST" in command:
                 self.github.releases[0]["prerelease"] = True
             return result
         self.runner.side_effect = run
@@ -157,12 +236,24 @@ class PublishReleaseTests(unittest.TestCase):
         real = self.github.run
         def run(command):
             result = real(command)
-            if command[:3] == ["gh", "release", "edit"]:
+            if command[:2] == ["gh", "api"] and "PATCH" in command:
                 self.github.releases[0]["prerelease"] = True
             return result
         self.runner.side_effect = run
         with self.assertRaisesRegex(ValueError, "published release state"):
             self.publish()
+
+    def test_invalid_publication_response_is_not_reported_as_success(self):
+        real = self.github.run
+        def run(command):
+            result = real(command)
+            if command[:2] == ["gh", "api"] and "PATCH" in command:
+                return json.dumps({"id": 456, "tag_name": TAG, "draft": False, "prerelease": False})
+            return result
+        self.runner.side_effect = run
+        with self.assertRaisesRegex(ValueError, "published release state"):
+            self.publish()
+        self.assertEqual(len(self.github.mutations("edit")), 1)
 
     def test_annotated_tag_resolves_to_same_commit(self):
         self.github.annotated = True

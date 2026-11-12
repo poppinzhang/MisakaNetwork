@@ -12,7 +12,7 @@ import (
 	"path/filepath"
 )
 
-const Version = "0.2.1"
+const Version = "0.2.3"
 
 // Config paths are resolved relative to the configuration file by LoadConfig.
 type Config struct {

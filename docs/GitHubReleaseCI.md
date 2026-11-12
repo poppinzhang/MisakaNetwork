@@ -40,7 +40,7 @@
 5. macOS 两种架构、Windows x64 和 Android 两种架构全部重新构建，每份完整应用均包含四种 Sisters 包。macOS/Windows 执行 Flutter 静态检查与测试；Android 固定 SDK、JDK 与 NDK，初始化时只请求 `platform-tools`，后续显式安装所需 API/build-tools/NDK，使用正式密钥签名。
 6. 所有平台成功后合并清单，检查版本、平台、内嵌部署包、字节数和校验和。缺少任何目标都不会进入发布作业。
 7. 发布作业将必要文件复制到全新的 staging 目录，再次校验文件集合、完整状态、当前版本和 Android 签名模式。只允许非空、普通文件，单个文件须小于 2 GiB；不接受符号链接。
-8. 发布脚本核对本地 HEAD、本地 Tag 和远程 Tag 的提交一致，拒绝已存在的同版本 Release，创建草稿并按 Tag 直接读取验证，避免刚创建时 Release 列表尚未更新导致误判。随后逐项上传；远端文件名集合、上传状态、大小和 SHA-256 全部一致后，再次核对 Tag，最后公开正式 Release 并标记为 Latest。创建与公开均显式关闭 prerelease，公开前后核对 Release 类型；不会因版本号为 `0.x` 自动改成预发布。1.0.0 前仍属于早期研发版本。
+8. 发布脚本核对本地 HEAD、本地 Tag 和远程 Tag 的提交一致，拒绝已存在的同版本 Release，通过 REST 创建草稿，从创建响应取得 Release ID，并按 ID 直接读取验证。不依赖创建后的列表可见性，也不使用 REST Tag 接口查草稿（该接口仅用于已发布版本）。随后使用支持草稿查找的 GitHub CLI 上传；远端文件名集合、上传状态、大小和 SHA-256 全部一致后，再次核对 Tag，最后按同一 ID 更新为正式 Release 并标记为 Latest。创建与公开均显式关闭 prerelease，公开前后核对 Release 类型；不会因版本号为 `0.x` 自动改成预发布。1.0.0 前仍属于早期研发版本。
 
 托管 runner 的隐私检查显式扫描本次仓库目录，仍遍历二进制、ZIP 及 PyInstaller 压缩代码。公共 Python 发行包和官方 wheel 自带的通用 runner 主目录构建路径不等同于本次环境信息，因此 CI 不把整个通用 runner 主目录或公共临时根目录作为禁止标记；Android 额外检查实际签名文件路径；本地默认扫描个人主目录与仓库目录的规则不变。此检查不是任意秘密检测或完整安全审计。
 
@@ -89,4 +89,6 @@ actionlint
 
 工作流初次实现时的本地验证包括脚本及运行时单元测试、工作流 actionlint 检查；发布测试模拟 GitHub CLI，覆盖缺包、额外文件、损坏校验和、测试签名、Tag 变更、已存在 Release、上传失败和远端资产不一致。这些离线测试不执行云端 runner 构建、真实上传或真实业务验收；实际 CI 结果见对应发布记录。
 
-参考：[GitHub 托管运行环境](https://docs.github.com/en/actions/reference/runners/github-hosted-runners)、[复用工作流](https://docs.github.com/en/actions/how-tos/reuse-automations/reuse-workflows)、[草稿与已有 Tag](https://cli.github.com/manual/gh_release_create)、[Release assets API](https://docs.github.com/en/rest/releases/assets)。
+创建与公开使用 JSON 请求体临时文件，保留真实换行，不把发布正文插入 shell 命令。创建/读取响应必须具有正整数 ID、正确 Tag、草稿状态与非预发布状态；任何不一致都在上传前停止。
+
+参考：[GitHub Releases REST API](https://docs.github.com/en/rest/releases/releases)、[GitHub 托管运行环境](https://docs.github.com/en/actions/reference/runners/github-hosted-runners)、[复用工作流](https://docs.github.com/en/actions/how-tos/reuse-automations/reuse-workflows)、[草稿与已有 Tag](https://cli.github.com/manual/gh_release_create)、[Release assets API](https://docs.github.com/en/rest/releases/assets)。
