@@ -1,6 +1,6 @@
 # GitHub Release CI
 
-本流程由 `.github/workflows/release.yml`、可复用的 `package.yml`、`scripts/release_ci.py` 与 `scripts/publish_release.py` 组成。本次只完成本地实现与验证，未推送代码、创建远程 Tag/Release 或运行 Actions；没有新增版本，也没有修改既有安装包的交付记录。
+本流程由 `.github/workflows/release.yml`、可复用的 `package.yml`、`scripts/release_ci.py` 与 `scripts/publish_release.py` 组成。各版本的源码检查、云端构建与实际交付分别记录在 `docs/releases/`；0.2.1 开始实际运行本流程，已有安装包与历史 Tag 保持原样。
 
 ## 三种入口
 
@@ -41,6 +41,8 @@
 6. 所有平台成功后合并清单，检查版本、平台、内嵌部署包、字节数和校验和。缺少任何目标都不会进入发布作业。
 7. 发布作业将必要文件复制到全新的 staging 目录，再次校验文件集合、完整状态、当前版本和 Android 签名模式。只允许非空、普通文件，单个文件须小于 2 GiB；不接受符号链接。
 8. 发布脚本核对本地 HEAD、本地 Tag 和远程 Tag 的提交一致，拒绝已存在的同版本 Release，创建草稿并逐项上传。远端文件名集合、上传状态、大小和 SHA-256 全部一致后，再次核对 Tag，最后公开正式 Release 并标记为 Latest。创建与公开均显式关闭 prerelease，公开前后核对 Release 类型；不会因版本号为 `0.x` 自动改成预发布。1.0.0 前仍属于早期研发版本。
+
+托管 runner 的隐私检查显式扫描本次仓库目录与 runner 临时目录，仍遍历二进制、ZIP 及 PyInstaller 压缩代码。公共 Python 发行包和官方 wheel 自带的通用 runner 主目录构建路径不等同于本次环境信息，因此 CI 不把整个通用 runner 主目录作为禁止标记；本地默认扫描个人主目录与仓库目录的规则不变。此检查不是任意秘密检测或完整安全审计。
 
 Release 正文包含构建提交、签名状态、验证边界、当前版本 CHANGELOG 内容与固定到该提交的发布文档链接。CI 构建记录不代表真实账号登录、下单、付款或出票已验收；真实平台集成和业务验证仍分别记录。
 
@@ -85,6 +87,6 @@ actionlint
 
 准备好新版本记录后，可使用 `python3 scripts/release_ci.py preflight --ref refs/tags/<版本号>` 检查发布元数据；这里只校验 ref 格式和本地文档，远程 Tag 存在性由发布步骤确认。`stage` 子命令只复制白名单文件且拒绝已存在的输出目录。**`scripts/publish_release.py` 会写入 GitHub，仅正式发布时由 CI 执行，不用于本地试跑。**
 
-本次本地验证包括脚本及运行时单元测试、工作流 actionlint 检查；发布测试模拟 GitHub CLI，覆盖缺包、额外文件、损坏校验和、测试签名、Tag 变更、已存在 Release、上传失败和远端资产不一致。没有执行云端 runner 构建、真实上传或真实业务验收。
+工作流初次实现时的本地验证包括脚本及运行时单元测试、工作流 actionlint 检查；发布测试模拟 GitHub CLI，覆盖缺包、额外文件、损坏校验和、测试签名、Tag 变更、已存在 Release、上传失败和远端资产不一致。这些离线测试不执行云端 runner 构建、真实上传或真实业务验收；实际 CI 结果见对应发布记录。
 
 参考：[GitHub 托管运行环境](https://docs.github.com/en/actions/reference/runners/github-hosted-runners)、[复用工作流](https://docs.github.com/en/actions/how-tos/reuse-automations/reuse-workflows)、[草稿与已有 Tag](https://cli.github.com/manual/gh_release_create)、[Release assets API](https://docs.github.com/en/rest/releases/assets)。
