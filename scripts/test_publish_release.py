@@ -25,6 +25,7 @@ class FakeGitHub:
         self.assets = []
         self.upload_failure = False
         self.list_failure = False
+        self.stale_created_listing = False
         self.asset_change = None
         self.move_tag_after_upload = False
         self.annotated = False
@@ -47,7 +48,11 @@ class FakeGitHub:
             if endpoint.endswith("/releases?per_page=100"):
                 if self.list_failure:
                     raise subprocess.CalledProcessError(1, command, stderr="synthetic network failure")
+                if self.stale_created_listing and self.releases:
+                    return json.dumps([[]])
                 return json.dumps([[], self.releases])
+            if endpoint.endswith("/releases/tags/" + TAG):
+                return json.dumps(self.releases[0])
             if endpoint.endswith("/releases/123/assets?per_page=100"):
                 assets = copy.deepcopy(self.assets)
                 if self.asset_change:
@@ -116,6 +121,11 @@ class PublishReleaseTests(unittest.TestCase):
         self.assertIn("--latest", self.github.mutations("edit")[0])
         self.assertFalse(self.github.releases[0]["draft"])
         self.assertFalse(self.github.releases[0]["prerelease"])
+
+    def test_created_release_uses_exact_tag_lookup_not_release_list(self):
+        self.github.stale_created_listing = True
+        self.publish()
+        self.assertFalse(self.github.releases[0]["draft"])
 
     def test_unexpected_prerelease_draft_prevents_upload(self):
         real = self.github.run

@@ -2,6 +2,8 @@
 
 ## unstaged
 
+- 修复 GitHub Release 草稿刚创建时 Release 列表尚未更新，导致发布作业误判草稿状态并中止的问题；改为按 Tag 验证新建 Release。
+
 ## 0.2.1 — 2026-11-12
 
 发布方式：统一版本 **0.2.1+8**，通过 GitHub Actions 全平台构建并发布正式 Release；实际交付状态以 [0.2.1 记录](docs/releases/0.2.1.md) 及 Release 页面为准。每份完整 LastOrder 包含同版本 Linux/macOS 四种 Sisters 包，内嵌 biliTickerBuy 保持 **2.15.18**。

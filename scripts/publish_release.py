@@ -121,13 +121,13 @@ def publish(directory: Path, *, tag: str, repository: str, commit: str) -> None:
                    "--notes-file", str(notes_path)]
         run_command(command)
 
-    drafts = list_version_releases(repository)
-    if (len(drafts) != 1 or drafts[0].get("tag_name") != tag
-            or drafts[0].get("draft") is not True
-            or drafts[0].get("prerelease") is not False
-            or type(drafts[0].get("id")) is not int or drafts[0]["id"] <= 0):
+    created = github_json(f"repos/{repository}/releases/tags/{tag}")
+    if (not isinstance(created, dict) or created.get("tag_name") != tag
+            or created.get("draft") is not True
+            or created.get("prerelease") is not False
+            or type(created.get("id")) is not int or created["id"] <= 0):
         raise ValueError("New release is not an unambiguous draft; refusing to upload")
-    release_id = drafts[0]["id"]
+    release_id = created["id"]
     # Use one explicit argument per allowlisted file. Neither shell globbing nor
     # --clobber may be used here, even when the staging directory was verified.
     run_command(["gh", "release", "upload", tag, "--repo", repo_argument,
