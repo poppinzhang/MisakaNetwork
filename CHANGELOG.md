@@ -4,7 +4,7 @@
 
 ## 0.2.3 — 2026-11-12
 
-发布方式：统一版本 **0.2.3+9**，通过 GitHub Actions 重新构建所有已支持平台并发布正式 Release（非 Pre-Release）；实际交付与验证结果见 [0.2.3 记录](docs/releases/0.2.3.md)。内嵌 biliTickerBuy 保持 **2.15.18**。
+交付状态：统一版本 **0.2.3+9** 已通过 GitHub Actions 重新构建所有已支持平台，并公开为 [正式 Release](https://github.com/poppinzhang/MisakaNetwork/releases/tag/0.2.3)（Latest，非 Pre-Release）；五种安装包及七份校验/清单文件均已核验，详情见 [0.2.3 记录](docs/releases/0.2.3.md)。内嵌 biliTickerBuy 保持 **2.15.18**。
 
 ### 修复
 

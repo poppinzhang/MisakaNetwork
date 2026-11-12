@@ -68,7 +68,7 @@ LastOrder 模块 在本地部署，可以完成 抢票 Agent 部署、抢票平�
 
 以下是从用户 README 集中到本文件的实现摘要；调整对应功能时同步维护详细文档及用户可见的行为说明。
 
-* 当前交付基线见 [0.2.0 记录](docs/releases/0.2.0.md)：LastOrder 为 macOS arm64/x64、Windows x64、Android arm64/x64；Sisters 为 Linux/macOS arm64/x64。Windows Sisters 是项目目标，尚未实现。每份完整 LastOrder 均携带四种同版本 Sisters 离线部署包，包含 Python、biliTickerBuy 及依赖；部署时不在远程下载程序。
+* 当前交付基线见 [0.2.3 记录](docs/releases/0.2.3.md)：LastOrder 为 macOS arm64/x64、Windows x64、Android arm64/x64；Sisters 为 Linux/macOS arm64/x64。Windows Sisters 是项目目标，尚未实现。每份完整 LastOrder 均携带四种同版本 Sisters 离线部署包，包含 Python、biliTickerBuy 及依赖；部署时不在远程下载程序。
 * LastOrder 通过 SSH 密码或私钥部署，首次连接核对 SHA-256 主机指纹，后续严格验证。Linux 使用 systemd 用户服务，部署前检查 linger；无法开启时停止部署并提示管理员执行 `sudo loginctl enable-linger <用户名>`。macOS 使用 launchd 后台用户域。新机器默认 gRPC 端口为 `20001`；已有显式端口不变，切换须重新部署并放行对应 TCP 端口。部署后从控制端直连检查，具体失败与回滚语义见[部署说明](docs/架构与通信.md#部署)。
 * LastOrder 与 Sisters 使用 gRPC 和双向 TLS，双方验证证书，不提供跳过验证的入口。账号 Cookie 与含购票人信息的任务配置存入 macOS 登录钥匙串、Windows 加密存储或 Android Keystore 支持的加密存储；SSH 密码不持久化。Sisters 在内存中持有任务秘密，通过标准输入交给独立运行时，只回传白名单结构化进度，不转发上游原始日志。
 * 平台明确判定登录失效后清除旧 Cookie，网络异常保留凭据并暂停新分发；重新登录需核对原账号 UID。任务配置不保存 Cookie 副本，已分发任务不会随重新登录热更新凭据。存储格式和早期版本数据处理规则见 [Cookie 生命周期](docs/LastOrder/Cookie生命周期.md)。
