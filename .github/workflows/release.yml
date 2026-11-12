@@ -1,0 +1,68 @@
+name: Publish GitHub release
+
+on:
+  push:
+    tags:
+      - '[0-9]*'
+      - 'v[0-9]*'
+  # Select an existing version tag in the GitHub UI or pass --ref to gh.
+  # Branch refs are rejected before any native builds start.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: github-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Validate tag, version and release documentation
+        id: release
+        run: python3 scripts/release_ci.py preflight --ref "$GITHUB_REF" --github-output "$GITHUB_OUTPUT"
+
+  package:
+    needs: prepare
+    uses: ./.github/workflows/package.yml
+    with:
+      android_test_signing: false
+    secrets:
+      MISAKA_ANDROID_KEYSTORE_BASE64: ${{ secrets.MISAKA_ANDROID_KEYSTORE_BASE64 }}
+      MISAKA_ANDROID_STORE_PASSWORD: ${{ secrets.MISAKA_ANDROID_STORE_PASSWORD }}
+      MISAKA_ANDROID_KEY_ALIAS: ${{ secrets.MISAKA_ANDROID_KEY_ALIAS }}
+      MISAKA_ANDROID_KEY_PASSWORD: ${{ secrets.MISAKA_ANDROID_KEY_PASSWORD }}
+
+  publish:
+    needs: [prepare, package]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    env:
+      RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.package.outputs.artifact_name }}
+          path: .build/complete-release
+      - name: Validate and stage only public release assets
+        run: python scripts/release_ci.py stage .build/complete-release --output .build/release-assets
+      - name: Upload, verify and publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python scripts/publish_release.py .build/release-assets --tag "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --commit "$GITHUB_SHA"

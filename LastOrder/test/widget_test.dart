@@ -44,6 +44,113 @@ void main() {
     await tester.pumpWidget(LastOrderApp(controller: c));
     await tester.pumpAndSettle();
   });
+  const statisticLabels = ['在线 Sisters', '抢票任务', '执行中 / 排队', '登录账号'];
+  const statisticCaptions = [
+    '共 0 台机器',
+    '可分发到多个节点',
+    '以最近一次同步为准',
+    'Cookie 保存于安全存储',
+  ];
+  for (final width in [320.0, 390.0]) {
+    for (final textScale in [1.0, 1.3]) {
+      testWidgets(
+        'Android $width statistics use two columns at text scale $textScale',
+        (tester) async {
+          tester.view.physicalSize = Size(width, 844);
+          tester.view.devicePixelRatio = 1;
+          tester.platformDispatcher.textScaleFactorTestValue = textScale;
+          addTearDown(tester.view.resetPhysicalSize);
+          addTearDown(tester.view.resetDevicePixelRatio);
+          addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+          final c = controller();
+          await c.initialize(poll: false);
+          addTearDown(c.dispose);
+          await tester.pumpWidget(LastOrderApp(controller: c));
+          await tester.pumpAndSettle();
+
+          final cards = [
+            for (final label in statisticLabels)
+              tester.getRect(
+                find.ancestor(
+                  of: find.text(label),
+                  matching: find.byType(Card),
+                ),
+              ),
+          ];
+          expect(cards[0].top, cards[1].top);
+          expect(cards[2].top, cards[3].top);
+          expect(cards[0].left, cards[2].left);
+          expect(cards[1].left, cards[3].left);
+          expect(cards[1].left, greaterThan(cards[0].right));
+          expect(cards[2].top, greaterThan(cards[0].bottom));
+          expect(cards[2].top, greaterThan(cards[1].bottom));
+          final navigationTop = tester
+              .getTopLeft(find.byType(NavigationBar))
+              .dy;
+          for (var i = 0; i < cards.length; i++) {
+            expect(cards[i].width, closeTo(cards.first.width, .01));
+            expect(cards[i].left, greaterThanOrEqualTo(0));
+            expect(cards[i].right, lessThanOrEqualTo(width));
+            expect(cards[i].bottom, lessThan(navigationTop));
+            expect(find.text(statisticLabels[i]).hitTestable(), findsOneWidget);
+            final caption = find.text(statisticCaptions[i]);
+            expect(caption.hitTestable(), findsOneWidget);
+            expect(
+              tester.getBottomRight(caption).dy,
+              lessThan(cards[i].bottom),
+            );
+          }
+          if (width == 390 && textScale == 1) {
+            expect(find.text('开始连接御坂网络').hitTestable(), findsOneWidget);
+          }
+          expect(tester.takeException(), isNull);
+        },
+        variant: TargetPlatformVariant({TargetPlatform.android}),
+      );
+    }
+  }
+  for (final platform in [TargetPlatform.windows, TargetPlatform.macOS]) {
+    for (final layout in [(1360.0, 4), (800.0, 2), (390.0, 1)]) {
+      testWidgets(
+        '${platform.name} ${layout.$1} retains ${layout.$2} statistic columns',
+        (tester) async {
+          tester.view.physicalSize = Size(layout.$1, 1000);
+          tester.view.devicePixelRatio = 1;
+          addTearDown(tester.view.resetPhysicalSize);
+          addTearDown(tester.view.resetDevicePixelRatio);
+          final c = controller();
+          await c.initialize(poll: false);
+          addTearDown(c.dispose);
+          await tester.pumpWidget(LastOrderApp(controller: c));
+          await tester.pumpAndSettle();
+
+          final cards = [
+            for (final label in statisticLabels)
+              tester.getRect(
+                find.ancestor(
+                  of: find.text(label),
+                  matching: find.byType(Card),
+                ),
+              ),
+          ];
+          final columns = layout.$2;
+          for (var i = 0; i < cards.length; i++) {
+            expect(cards[i].width, closeTo(cards.first.width, .01));
+            expect(cards[i].top, cards[(i ~/ columns) * columns].top);
+            if (i % columns != 0) {
+              expect(cards[i].left, greaterThan(cards[i - 1].right));
+            }
+            if (i >= columns) {
+              expect(cards[i].left, cards[i - columns].left);
+              expect(cards[i].top, greaterThan(cards[i - columns].bottom));
+            }
+          }
+          expect(tester.takeException(), isNull);
+        },
+        variant: TargetPlatformVariant({platform}),
+      );
+    }
+  }
   for (final width in [320.0, 390.0]) {
     testWidgets('phone $width supports navigation and populated task cards', (
       tester,

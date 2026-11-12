@@ -48,9 +48,50 @@ LastOrder 模块 在本地部署，可以完成 抢票 Agent 部署、抢票平�
 
 * LastOrder 与 Sisters 之间的网络交互使用 gRPC 完成，需要使用 TLS 进行加密。
 
-## 开发与验证
+### biliTickerBuy 接入安全约束
 
-本文件面向 AI 编程代理，集中记录项目目标、技术约束和开发流程。根目录 `README.md` 面向使用者，介绍产品用途、安装操作、已支持平台、功能与使用边界；工具链版本、测试命令、协议生成和实现约束维护在本文件或 `docs/` 中，不堆入 README。
+* LastOrder 与 Sisters 只通过本项目的内嵌运行时接入 biliTickerBuy。创建订单策略保持 `standard`，禁止启用“代理池并发”（`local_fanout`）及其自制 TLS 客户端；平台 HTTPS 请求必须保留服务器证书链与域名验证。
+* 禁止以 biliTickerBuy 上游 Docker 镜像、启动器或 Web UI 提供登录、配置与抢票服务，禁止启动 Gradio 及其公网分享。不使用 Docker 不能替代这项 Web UI 限制；此约束不禁止本项目已有的隔离构建容器。
+* 禁止启用上游第三方通知渠道，包括 Server酱、PushPlus、Bark、ntfy、MeoW、Telegram 及自定义推送地址。相关密钥、地址与账号配置保持为空，不通过环境变量、配置文件、命令行或扩展运行参数绕过运行时白名单。
+* 每次升级 biliTickerBuy 的版本、固定提交或相关依赖，以及调整导入白名单、嵌入适配或运行参数时，必须重新核查网络请求、TLS 验证、敏感数据流、通知默认值和 Web UI/分享入口，并补充或更新离线回归验证。不能仅凭上游版本号、修复声明或既有审计结论解除上述限制。
+* 核查依据、当前隔离方式与升级步骤见 [biliTickerBuy 运行时接入安全约束](docs/biliTickerBuy运行时.md#接入安全约束)。记录验证范围与结果，不把源码与模拟测试结论表述为全部依赖、发行二进制或真实业务已安全验收。
+
+## 文档职责与维护
+
+* 根目录 `README.md` 面向大多没有技术背景的使用者，按产品用途、安装与操作、支持平台、功能、使用须知和升级影响组织内容。优先使用界面名称和用户能执行的步骤，不放协议架构图、工具链、命令行排障、存储实现或测试报告。
+* 部署准备条件、停止任务的方法、订单核对与付款、升级所需操作仍属于用户信息，应在 README 中用普通语言说明；需要管理员处理的 SSH、端口和 Linux 服务设置，链接到部署文档。
+* 「关于」中的项目介绍和名字由来是作者撰写的用户可读内容，应在 README 中保留其原意与相关链接，不因其中包含模块名、Worker Agent 或端口编号就当作实现细节删掉。原文维护于 `LastOrder/lib/src/about_dialog.dart`，修改时核对 README 是否需要同步。
+* 本文件面向 AI 编程代理，集中记录项目目标、技术约束、当前实现边界和开发流程；详细实现维护在 `docs/`，通过下方索引查阅，不将实现文档列表堆入用户 README。
+* README 中的安装入口、支持范围与版本说明必须以实际交付记录为准。区分源码中的 `unstaged` 改动与已交付安装包，不把本地测试包写成公开 Release，也不把源码或模拟验证写成真实业务验收。
+
+## 当前实现边界
+
+以下是从用户 README 集中到本文件的实现摘要；调整对应功能时同步维护详细文档及用户可见的行为说明。
+
+* 当前交付基线见 [0.2.0 记录](docs/releases/0.2.0.md)：LastOrder 为 macOS arm64/x64、Windows x64、Android arm64/x64；Sisters 为 Linux/macOS arm64/x64。Windows Sisters 是项目目标，尚未实现。每份完整 LastOrder 均携带四种同版本 Sisters 离线部署包，包含 Python、biliTickerBuy 及依赖；部署时不在远程下载程序。
+* LastOrder 通过 SSH 密码或私钥部署，首次连接核对 SHA-256 主机指纹，后续严格验证。Linux 使用 systemd 用户服务，部署前检查 linger；无法开启时停止部署并提示管理员执行 `sudo loginctl enable-linger <用户名>`。macOS 使用 launchd 后台用户域。新机器默认 gRPC 端口为 `20001`；已有显式端口不变，切换须重新部署并放行对应 TCP 端口。部署后从控制端直连检查，具体失败与回滚语义见[部署说明](docs/架构与通信.md#部署)。
+* LastOrder 与 Sisters 使用 gRPC 和双向 TLS，双方验证证书，不提供跳过验证的入口。账号 Cookie 与含购票人信息的任务配置存入 macOS 登录钥匙串、Windows 加密存储或 Android Keystore 支持的加密存储；SSH 密码不持久化。Sisters 在内存中持有任务秘密，通过标准输入交给独立运行时，只回传白名单结构化进度，不转发上游原始日志。
+* 平台明确判定登录失效后清除旧 Cookie，网络异常保留凭据并暂停新分发；重新登录需核对原账号 UID。任务配置不保存 Cookie 副本，已分发任务不会随重新登录热更新凭据。存储格式和早期版本数据处理规则见 [Cookie 生命周期](docs/LastOrder/Cookie生命周期.md)。
+* 任务 ID 用于 Sisters 幂等去重，LastOrder 持久化每个任务已提交到的机器，防止 Sisters 重启或淘汰历史后重复提交；需要重新执行时创建新任务。Sisters 按并发上限排队，各机器独立执行，不会在一台成功后自动取消其他机器。关闭管理台、删除本地任务或机器记录不取消远程执行；Sisters 重启或重部署会结束任务并清空远程内存记录，不自动恢复任务。
+* LastOrder 每五秒查询机器和任务状态，失败时保留最近状态并显示连接错误。`succeeded` / `duplicate_order` 才触发订单核对提示，进程正常退出或 `completed` 不表示已出票。自动付款、跨节点自动取消、任务重启恢复和证书自动续期尚未实现，Android 后台同步不保证常驻。
+
+### 实现文档索引
+
+| 文档 | 维护内容 |
+| --- | --- |
+| [架构与通信](docs/架构与通信.md) | 协议、安全通信、任务语义、SSH 部署和运行要求 |
+| [LastOrder 实现](docs/LastOrder/0.1.0实现.md) | 管理台、账号与任务操作、辅助进程、集成验证 |
+| [Windows 与 Android](docs/LastOrder/Windows与Android.md) | 平台接入、安全存储、打包和使用边界 |
+| [Cookie 生命周期](docs/LastOrder/Cookie生命周期.md) | 登录校验、凭据清理、重新登录和存储格式 |
+| [外观主题](docs/LastOrder/外观主题.md) | 主题切换、持久化及界面验证 |
+| [应用图标](docs/LastOrder/应用图标.md) | 图标来源和各平台资源生成 |
+| [开源许可](docs/LastOrder/开源许可.md) | 第三方声明收集、离线展示及更新验证 |
+| [Sisters 实现](docs/Sisters/0.1.0实现.md) | 服务配置、任务队列和运行方式 |
+| [biliTickerBuy 运行时](docs/biliTickerBuy运行时.md) | 内嵌适配、安全约束、导入与升级复核 |
+| [打包与发布](docs/打包与发布.md) | 全平台构建、统一版本、签名、校验和与发布流程 |
+| [离线包冒烟验证](docs/离线包冒烟验证.md) | 完整运行时和 Sisters 离线集成检查 |
+
+## 开发与验证
 
 ### 工具链与依赖
 

@@ -11,3 +11,49 @@ LastOrder/.dart_tool/
 LastOrder/build/
 LastOrder/assets/bundles/
 .vscode/
+
+# 本地环境变量；示例配置只能使用占位值。
+.env
+.env.*
+!.env.example
+!.env.sample
+!.env.template
+!.env.*.example
+!.env.*.sample
+!.env.*.template
+
+# SSH 私钥与本地连接配置；独立的公钥文件仍可提交。
+.ssh/
+id_rsa
+id_dsa
+id_ecdsa
+id_ed25519
+id_ecdsa_sk
+id_ed25519_sk
+*.ppk
+
+# 签名密钥库与口令配置，覆盖所有目录。
+*.p8
+*.p12
+*.pfx
+*.jks
+*.keystore
+key.properties
+keystore.properties
+
+# 本地账号、Cookie 与凭据导出，避免泛化忽略源码或普通配置。
+.aws/
+.netrc
+_netrc
+.pypirc
+.secrets/
+.credentials/
+cookie.json
+cookies.json
+cookie.txt
+cookies.txt
+accounts.json
+credentials.json
+secrets.json
+secrets.yaml
+secrets.yml

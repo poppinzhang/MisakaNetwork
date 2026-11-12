@@ -12,7 +12,7 @@ func TestCLI(t *testing.T) {
 		args     []string
 		code     int
 		contains string
-	}{{[]string{"--version"}, 0, "0.2.0"}, {nil, 2, "Usage"}, {[]string{"serve"}, 2, "Usage"}, {[]string{"serve", "--unknown", "secret"}, 2, "Usage"}, {[]string{"serve", "--config", "/nonexistent/private/path"}, 1, "cannot open agent configuration"}} {
+	}{{[]string{"--version"}, 0, "0.2.1"}, {nil, 2, "Usage"}, {[]string{"serve"}, 2, "Usage"}, {[]string{"serve", "--unknown", "secret"}, 2, "Usage"}, {[]string{"serve", "--config", "/nonexistent/private/path"}, 1, "cannot open agent configuration"}} {
 		var out, errOut bytes.Buffer
 		if code := run(context.Background(), tc.args, &out, &errOut); code != tc.code {
 			t.Fatalf("exit=%d want=%d", code, tc.code)

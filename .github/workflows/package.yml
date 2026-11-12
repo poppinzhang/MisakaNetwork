@@ -6,10 +6,66 @@ on:
         description: Use a debug key for test-only Android APKs
         type: boolean
         default: false
+  workflow_call:
+    inputs:
+      android_test_signing:
+        description: Use a debug key for test-only Android APKs
+        type: boolean
+        default: false
+    secrets:
+      MISAKA_ANDROID_KEYSTORE_BASE64:
+        required: false
+      MISAKA_ANDROID_STORE_PASSWORD:
+        required: false
+      MISAKA_ANDROID_KEY_ALIAS:
+        required: false
+      MISAKA_ANDROID_KEY_PASSWORD:
+        required: false
+    outputs:
+      version:
+        value: ${{ jobs.prepare.outputs.version }}
+      artifact_name:
+        value: ${{ jobs.prepare.outputs.artifact_name }}
 permissions:
   contents: read
 jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.metadata.outputs.version }}
+      dist_dir: ${{ steps.metadata.outputs.dist_dir }}
+      artifact_name: ${{ steps.metadata.outputs.artifact_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Validate release metadata
+        id: metadata
+        run: python3 scripts/release_ci.py metadata --github-output "$GITHUB_OUTPUT"
+      - name: Check release signing settings before building
+        if: ${{ !inputs.android_test_signing }}
+        env:
+          MISAKA_ANDROID_KEYSTORE_BASE64: ${{ secrets.MISAKA_ANDROID_KEYSTORE_BASE64 }}
+          MISAKA_ANDROID_STORE_PASSWORD: ${{ secrets.MISAKA_ANDROID_STORE_PASSWORD }}
+          MISAKA_ANDROID_KEY_ALIAS: ${{ secrets.MISAKA_ANDROID_KEY_ALIAS }}
+          MISAKA_ANDROID_KEY_PASSWORD: ${{ secrets.MISAKA_ANDROID_KEY_PASSWORD }}
+        run: |
+          python3 - <<'PY'
+          import base64, os
+          keys = ('MISAKA_ANDROID_KEYSTORE_BASE64', 'MISAKA_ANDROID_STORE_PASSWORD',
+                  'MISAKA_ANDROID_KEY_ALIAS', 'MISAKA_ANDROID_KEY_PASSWORD')
+          if not all(os.environ.get(key) for key in keys):
+              raise SystemExit('All four Android release signing secrets are required')
+          try:
+              if not base64.b64decode(os.environ[keys[0]], validate=True):
+                  raise ValueError('Empty keystore')
+          except ValueError:
+              raise SystemExit('Android release keystore must be non-empty valid base64')
+          PY
   bundles:
+    needs: prepare
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
@@ -25,6 +81,8 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
@@ -32,20 +90,32 @@ jobs:
         with:
           python-version: '3.12'
       - run: go test -race ./... && go vet ./...
-      - run: python -m pip install -r runtime/requirements-build.lock
-      - run: python -m unittest discover -s runtime/tests -v
-      - run: python -m unittest discover -s scripts -p 'test_*.py' -v
-      - run: python runtime/build.py --output .build/runtime/${{ matrix.target }}
-      - run: python runtime/check_bundle.py .build/runtime/${{ matrix.target }}/misaka-runtime/misaka-runtime
-      - run: python runtime/check_privacy.py .build/runtime/${{ matrix.target }}/misaka-runtime
+      - name: Install isolated runtime build dependencies
+        run: |
+          python -m venv .build/runtime-venv
+          .build/runtime-venv/bin/python -m pip install -r runtime/requirements-build.lock
+          .build/runtime-venv/bin/python -m pip check
+      - run: .build/runtime-venv/bin/python -m unittest discover -s runtime/tests -v
+      - run: .build/runtime-venv/bin/python -m unittest discover -s scripts -p 'test_*.py' -v
+      - run: .build/runtime-venv/bin/python runtime/build.py --output .build/runtime/${{ matrix.target }}
+      - run: .build/runtime-venv/bin/python runtime/check_bundle.py .build/runtime/${{ matrix.target }}/misaka-runtime/misaka-runtime
+      - run: .build/runtime-venv/bin/python runtime/check_privacy.py .build/runtime/${{ matrix.target }}/misaka-runtime
       - run: python scripts/build_bundles.py --targets ${{ matrix.target }}
       - uses: actions/upload-artifact@v4
         with:
-          name: bundle-${{ matrix.target }}
-          path: .build/bundles/${{ matrix.target }}.tar.gz*
+          name: internal-bundle-${{ matrix.target }}
+          path: |
+            .build/bundles/${{ matrix.target }}.tar.gz
+            .build/bundles/${{ matrix.target }}.tar.gz.sha256
           if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+          overwrite: true
   macos:
-    needs: bundles
+    needs: [prepare, bundles]
+    timeout-minutes: 120
+    env:
+      RELEASE_DIR: ${{ needs.prepare.outputs.dist_dir }}
     strategy:
       fail-fast: false
       matrix:
@@ -57,6 +127,8 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
@@ -65,7 +137,7 @@ jobs:
           python-version: '3.12'
       - uses: actions/download-artifact@v4
         with:
-          pattern: bundle-*
+          pattern: internal-bundle-*
           path: .build/bundles
           merge-multiple: true
       - run: python scripts/index_bundles.py .build/bundles
@@ -83,21 +155,29 @@ jobs:
           tar -xzf .build/bundles/macos-${{ matrix.arch }}.tar.gz -C .build/unpack
           mv .build/unpack/runtime .build/runtime/macos-${{ matrix.arch }}/misaka-runtime
       - run: python scripts/package_macos.py --app .build/LastOrder.app --arch ${{ matrix.arch }}
-      - run: python scripts/check_release.py dist/0.2.0 --target macos-${{ matrix.arch }} --forbid "$HOME" --forbid "$GITHUB_WORKSPACE"
+      - run: python scripts/check_release.py "$RELEASE_DIR" --target macos-${{ matrix.arch }} --forbid "$HOME" --forbid "$GITHUB_WORKSPACE"
       - uses: actions/upload-artifact@v4
         with:
-          name: LastOrder-macos-${{ matrix.arch }}
+          name: internal-app-macos-${{ matrix.arch }}
           path: |
-            dist/0.2.0/*.zip
-            dist/0.2.0/*.sha256
-            dist/0.2.0/SHA256SUMS
-            dist/0.2.0/release.json
+            ${{ env.RELEASE_DIR }}/*.zip
+            ${{ env.RELEASE_DIR }}/*.sha256
+            ${{ env.RELEASE_DIR }}/SHA256SUMS
+            ${{ env.RELEASE_DIR }}/release.json
           if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+          overwrite: true
   windows:
-    needs: bundles
+    needs: [prepare, bundles]
+    timeout-minutes: 120
+    env:
+      RELEASE_DIR: ${{ needs.prepare.outputs.dist_dir }}
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
@@ -108,7 +188,7 @@ jobs:
           python-version: '3.12'
       - uses: actions/download-artifact@v4
         with:
-          pattern: bundle-*
+          pattern: internal-bundle-*
           path: .build/bundles
           merge-multiple: true
       - run: python scripts/index_bundles.py .build/bundles
@@ -119,27 +199,40 @@ jobs:
       - name: Test LastOrder
         working-directory: LastOrder
         run: flutter pub get --enforce-lockfile && flutter analyze && flutter test
-      - run: python -m pip install -r runtime/requirements-build.lock
-      - run: python runtime/build.py --output .build/runtime/windows-amd64
-      - run: python runtime/check_bundle.py .build/runtime/windows-amd64/misaka-runtime/misaka-runtime.exe
-      - run: python runtime/check_privacy.py .build/runtime/windows-amd64/misaka-runtime
+      - name: Install isolated runtime build dependencies
+        run: |
+          python -m venv .build/runtime-venv
+          .build/runtime-venv/Scripts/python.exe -m pip install -r runtime/requirements-build.lock
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          .build/runtime-venv/Scripts/python.exe -m pip check
+      - run: .build/runtime-venv/Scripts/python.exe runtime/build.py --output .build/runtime/windows-amd64
+      - run: .build/runtime-venv/Scripts/python.exe runtime/check_bundle.py .build/runtime/windows-amd64/misaka-runtime/misaka-runtime.exe
+      - run: .build/runtime-venv/Scripts/python.exe runtime/check_privacy.py .build/runtime/windows-amd64/misaka-runtime
       - run: python scripts/build_windows.py
       - run: python scripts/package_windows.py
-      - run: python scripts/check_release.py dist/0.2.0 --target windows-amd64 --forbid "$env:USERPROFILE" --forbid "$env:GITHUB_WORKSPACE"
+      - run: python scripts/check_release.py "$env:RELEASE_DIR" --target windows-amd64 --forbid "$env:USERPROFILE" --forbid "$env:GITHUB_WORKSPACE"
       - uses: actions/upload-artifact@v4
         with:
-          name: LastOrder-windows-amd64
+          name: internal-app-windows-amd64
           path: |
-            dist/0.2.0/*.zip
-            dist/0.2.0/*.sha256
-            dist/0.2.0/SHA256SUMS
-            dist/0.2.0/release.json
+            ${{ env.RELEASE_DIR }}/*.zip
+            ${{ env.RELEASE_DIR }}/*.sha256
+            ${{ env.RELEASE_DIR }}/SHA256SUMS
+            ${{ env.RELEASE_DIR }}/release.json
           if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+          overwrite: true
   android:
-    needs: bundles
+    needs: [prepare, bundles]
+    timeout-minutes: 120
+    env:
+      RELEASE_DIR: ${{ needs.prepare.outputs.dist_dir }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
@@ -151,10 +244,13 @@ jobs:
           distribution: temurin
           java-version: '17'
       - uses: android-actions/setup-android@v3
-      - run: sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;28.2.13676358"
+      - name: Install and select the required Android SDK and NDK
+        run: |
+          sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;28.2.13676358"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/28.2.13676358" >> "$GITHUB_ENV"
       - uses: actions/download-artifact@v4
         with:
-          pattern: bundle-*
+          pattern: internal-bundle-*
           path: .build/bundles
           merge-multiple: true
       - run: python scripts/index_bundles.py .build/bundles
@@ -192,32 +288,58 @@ jobs:
           else
             python scripts/package_android.py
           fi
-      - run: python scripts/check_release.py dist/0.2.0 --target android-arm64 --target android-amd64 --forbid "$HOME" --forbid "$GITHUB_WORKSPACE"
+      - name: Remove temporary Android signing key
+        if: ${{ always() }}
+        run: rm -f "$RUNNER_TEMP/misaka-release.keystore"
+      - run: python scripts/check_release.py "$RELEASE_DIR" --target android-arm64 --target android-amd64 --forbid "$HOME" --forbid "$GITHUB_WORKSPACE"
       - uses: actions/upload-artifact@v4
         with:
-          name: LastOrder-android
+          name: internal-app-android
           path: |
-            dist/0.2.0/*.apk
-            dist/0.2.0/*.sha256
-            dist/0.2.0/SHA256SUMS
-            dist/0.2.0/release.json
+            ${{ env.RELEASE_DIR }}/*.apk
+            ${{ env.RELEASE_DIR }}/*.sha256
+            ${{ env.RELEASE_DIR }}/SHA256SUMS
+            ${{ env.RELEASE_DIR }}/release.json
           if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+          overwrite: true
   complete-release:
-    needs: [macos, windows, android]
+    needs: [prepare, macos, windows, android]
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      RELEASE_DIR: ${{ needs.prepare.outputs.dist_dir }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
       - uses: actions/download-artifact@v4
         with:
-          pattern: LastOrder-*
+          pattern: internal-app-*
           path: .build/release-inputs
-      - run: python scripts/release_manifest.py .build/release-inputs/LastOrder-* --output dist/0.2.0
-      - run: python scripts/check_release.py dist/0.2.0
+      - run: python scripts/release_manifest.py .build/release-inputs/internal-app-* --output "$RELEASE_DIR"
+      - run: python scripts/check_release.py "$RELEASE_DIR"
       - uses: actions/upload-artifact@v4
         with:
-          name: LastOrder-0.2.0-complete
-          path: dist/0.2.0/*
+          name: ${{ needs.prepare.outputs.artifact_name }}
+          path: |
+            ${{ env.RELEASE_DIR }}/LastOrder-${{ needs.prepare.outputs.version }}-macos-amd64.zip
+            ${{ env.RELEASE_DIR }}/LastOrder-${{ needs.prepare.outputs.version }}-macos-amd64.zip.sha256
+            ${{ env.RELEASE_DIR }}/LastOrder-${{ needs.prepare.outputs.version }}-macos-arm64.zip
+            ${{ env.RELEASE_DIR }}/LastOrder-${{ needs.prepare.outputs.version }}-macos-arm64.zip.sha256
+            ${{ env.RELEASE_DIR }}/LastOrder-${{ needs.prepare.outputs.version }}-windows-amd64.zip
+            ${{ env.RELEASE_DIR }}/LastOrder-${{ needs.prepare.outputs.version }}-windows-amd64.zip.sha256
+            ${{ env.RELEASE_DIR }}/LastOrder-${{ needs.prepare.outputs.version }}-android-arm64.apk
+            ${{ env.RELEASE_DIR }}/LastOrder-${{ needs.prepare.outputs.version }}-android-arm64.apk.sha256
+            ${{ env.RELEASE_DIR }}/LastOrder-${{ needs.prepare.outputs.version }}-android-amd64.apk
+            ${{ env.RELEASE_DIR }}/LastOrder-${{ needs.prepare.outputs.version }}-android-amd64.apk.sha256
+            ${{ env.RELEASE_DIR }}/SHA256SUMS
+            ${{ env.RELEASE_DIR }}/release.json
           if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+          overwrite: true

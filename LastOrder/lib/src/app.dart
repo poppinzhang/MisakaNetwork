@@ -190,22 +190,35 @@ class _ControlCenterState extends State<ControlCenter> {
     ],
   );
 
-  Widget aboutButton({bool compact = false}) {
-    if (compact) {
-      return IconButton(
+  Widget aboutVersion({bool inHeader = false}) => Tooltip(
+    message: '关于 LastOrder',
+    child: Material(
+      type: MaterialType.transparency,
+      child: InkWell(
         key: const ValueKey('about-button'),
-        tooltip: '关于',
-        onPressed: showProjectAbout,
-        icon: const Icon(LucideIcons.info, size: 18),
-      );
-    }
-    return TextButton.icon(
-      key: const ValueKey('about-button'),
-      onPressed: showProjectAbout,
-      icon: const Icon(LucideIcons.info, size: 16),
-      label: const Text('关于'),
-    );
-  }
+        onTap: showProjectAbout,
+        borderRadius: BorderRadius.circular(4),
+        child: Semantics(
+          button: true,
+          child: Padding(
+            padding: EdgeInsets.symmetric(vertical: inHeader ? 8 : 0),
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: Text(
+                'LASTORDER  /  $appVersion',
+                style: TextStyle(
+                  color: colors.onSurfaceVariant,
+                  fontSize: 10,
+                  letterSpacing: 1.5,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
 
   Future<bool> confirm(String title, String body) async =>
       await showDialog<bool>(
@@ -231,26 +244,12 @@ class _ControlCenterState extends State<ControlCenter> {
     listenable: c,
     builder: (context, _) => Scaffold(
       bottomNavigationBar: MediaQuery.sizeOf(context).width < 600
-          ? Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.only(left: 8),
-                  child: aboutButton(),
-                ),
-                NavigationBar(
-                  selectedIndex: page,
-                  onDestinationSelected: (index) =>
-                      setState(() => page = index),
-                  destinations: [
-                    for (var i = 0; i < titles.length; i++)
-                      NavigationDestination(
-                        icon: Icon(icons[i]),
-                        label: titles[i],
-                      ),
-                  ],
-                ),
+          ? NavigationBar(
+              selectedIndex: page,
+              onDestinationSelected: (index) => setState(() => page = index),
+              destinations: [
+                for (var i = 0; i < titles.length; i++)
+                  NavigationDestination(icon: Icon(icons[i]), label: titles[i]),
               ],
             )
           : null,
@@ -385,12 +384,12 @@ class _ControlCenterState extends State<ControlCenter> {
                               ),
                             ),
                           ),
-                          Padding(
-                            padding: EdgeInsets.all(wide ? 24 : 12),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                if (wide) ...[
+                          if (wide)
+                            Padding(
+                              padding: const EdgeInsets.all(24),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
                                   Row(
                                     children: [
                                       Icon(
@@ -409,20 +408,10 @@ class _ControlCenterState extends State<ControlCenter> {
                                     ],
                                   ),
                                   const SizedBox(height: 10),
-                                  Text(
-                                    'LASTORDER  /  $appVersion',
-                                    style: TextStyle(
-                                      color: colors.onSurfaceVariant,
-                                      fontSize: 10,
-                                      letterSpacing: 1.5,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 12),
+                                  aboutVersion(),
                                 ],
-                                aboutButton(compact: !wide),
-                              ],
+                              ),
                             ),
-                          ),
                         ],
                       ),
                     ),
@@ -431,9 +420,10 @@ class _ControlCenterState extends State<ControlCenter> {
                   child: Column(
                     children: [
                       Container(
-                        height: 78,
+                        constraints: const BoxConstraints(minHeight: 78),
                         padding: EdgeInsets.symmetric(
                           horizontal: constraints.maxWidth < 600 ? 16 : 32,
+                          vertical: 8,
                         ),
                         decoration: BoxDecoration(
                           color: colors.surfaceContainerLowest,
@@ -443,15 +433,23 @@ class _ControlCenterState extends State<ControlCenter> {
                         ),
                         child: Row(
                           children: [
-                            Text(
-                              titles[page],
-                              style: TextStyle(
-                                color: colors.onSurface,
-                                fontSize: 20,
-                                fontWeight: FontWeight.w700,
+                            Expanded(
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    titles[page],
+                                    style: TextStyle(
+                                      color: colors.onSurface,
+                                      fontSize: 20,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                  if (!wide) aboutVersion(inHeader: true),
+                                ],
                               ),
                             ),
-                            const Spacer(),
                             if (constraints.maxWidth > 700)
                               Text(
                                 'Sisters 每 5 秒同步',
@@ -573,12 +571,15 @@ class _ControlCenterState extends State<ControlCenter> {
       ],
     ),
   );
-  Widget panel(Widget child) => Card(
+  Widget panel(
+    Widget child, {
+    EdgeInsetsGeometry padding = const EdgeInsets.all(24),
+  }) => Card(
     shape: RoundedRectangleBorder(
       borderRadius: BorderRadius.circular(18),
       side: BorderSide(color: colors.outlineVariant),
     ),
-    child: Padding(padding: const EdgeInsets.all(24), child: child),
+    child: Padding(padding: padding, child: child),
   );
   Widget empty(
     IconData icon,
@@ -653,77 +654,111 @@ class _ControlCenterState extends State<ControlCenter> {
       children: [
         heading('CONTROL CENTER', '让每个节点，协同工作', '从账号登录到远程执行，在一个工作台中管理。'),
         LayoutBuilder(
-          builder: (context, constraints) => Wrap(
-            spacing: 16,
-            runSpacing: 16,
-            children: [
-              for (final entry in [
-                (
-                  LucideIcons.server,
-                  '在线 Sisters',
-                  '$online',
-                  '共 ${c.state.machines.length} 台机器',
-                ),
-                (
-                  LucideIcons.ticket,
-                  '抢票任务',
-                  '${c.state.tasks.length}',
-                  '可分发到多个节点',
-                ),
-                (LucideIcons.activity, '执行中 / 排队', '$active', '以最近一次同步为准'),
-                (
-                  LucideIcons.userRound,
-                  '登录账号',
-                  '${c.state.accounts.length}',
-                  'Cookie 保存于安全存储',
-                ),
-              ])
-                SizedBox(
-                  width: constraints.maxWidth >= 900
-                      ? (constraints.maxWidth - 48) / 4
-                      : constraints.maxWidth < 500
-                      ? constraints.maxWidth
-                      : (constraints.maxWidth - 16) / 2,
-                  child: panel(
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Icon(entry.$1, color: colors.primary, size: 19),
-                            const Spacer(),
-                            Text(
-                              entry.$2,
-                              style: TextStyle(
-                                color: colors.onSurfaceVariant,
-                                fontSize: 12,
+          builder: (context, constraints) {
+            final compact =
+                Theme.of(context).platform == TargetPlatform.android &&
+                constraints.maxWidth < 500;
+            final spacing = compact ? 12.0 : 16.0;
+            final columns = constraints.maxWidth >= 900
+                ? 4
+                : compact || constraints.maxWidth >= 500
+                ? 2
+                : 1;
+            return Wrap(
+              spacing: spacing,
+              runSpacing: spacing,
+              children: [
+                for (final entry in [
+                  (
+                    LucideIcons.server,
+                    '在线 Sisters',
+                    '$online',
+                    '共 ${c.state.machines.length} 台机器',
+                  ),
+                  (
+                    LucideIcons.ticket,
+                    '抢票任务',
+                    '${c.state.tasks.length}',
+                    '可分发到多个节点',
+                  ),
+                  (LucideIcons.activity, '执行中 / 排队', '$active', '以最近一次同步为准'),
+                  (
+                    LucideIcons.userRound,
+                    '登录账号',
+                    '${c.state.accounts.length}',
+                    'Cookie 保存于安全存储',
+                  ),
+                ])
+                  SizedBox(
+                    width:
+                        (constraints.maxWidth - spacing * (columns - 1)) /
+                        columns,
+                    child: panel(
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Icon(
+                                entry.$1,
+                                color: colors.primary,
+                                size: compact ? 16 : 19,
                               ),
+                              if (compact)
+                                const SizedBox(width: 8)
+                              else
+                                const Spacer(),
+                              if (compact)
+                                Expanded(
+                                  child: Text(
+                                    entry.$2,
+                                    textAlign: TextAlign.end,
+                                    style: TextStyle(
+                                      color: colors.onSurfaceVariant,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                )
+                              else
+                                Text(
+                                  entry.$2,
+                                  style: TextStyle(
+                                    color: colors.onSurfaceVariant,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                            ],
+                          ),
+                          SizedBox(height: compact ? 10 : 18),
+                          Text(
+                            entry.$3,
+                            style: TextStyle(
+                              fontSize: compact ? 30 : 36,
+                              fontWeight: FontWeight.w600,
+                              color: colors.onSurface,
                             ),
-                          ],
-                        ),
-                        const SizedBox(height: 18),
-                        Text(
-                          entry.$3,
-                          style: TextStyle(
-                            fontSize: 36,
-                            fontWeight: FontWeight.w600,
-                            color: colors.onSurface,
                           ),
-                        ),
-                        const SizedBox(height: 6),
-                        Text(
-                          entry.$4,
-                          style: TextStyle(
-                            color: colors.onSurfaceVariant,
-                            fontSize: 11,
+                          const SizedBox(height: 6),
+                          Text(
+                            entry.$4,
+                            style: TextStyle(
+                              color: colors.onSurfaceVariant,
+                              fontSize: 11,
+                            ),
                           ),
-                        ),
-                      ],
-                    ),
-                  ).animate().fadeIn(duration: 300.ms),
-                ),
-            ],
-          ),
+                        ],
+                      ),
+                      padding: compact
+                          ? const EdgeInsets.symmetric(
+                              horizontal: 14,
+                              vertical: 12,
+                            )
+                          : const EdgeInsets.all(24),
+                    ).animate().fadeIn(duration: 300.ms),
+                  ),
+              ],
+            );
+          },
         ),
         const SizedBox(height: 28),
         panel(
