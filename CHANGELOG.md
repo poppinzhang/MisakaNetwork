@@ -4,7 +4,7 @@
 
 ## 0.3.0 — 2026-11-14
 
-发布准备：统一版本 **0.3.0+10**，包含 macOS 独立加密存储与单主密钥保护、SSH 后台部署（TOFU）、腾讯云 / 阿里云 / 火山引擎按量云服务器接入与多可用区库存回退、联网凭证校验、仓库外统一模板工具、独立执行 ID 重新分发、抢票请求间隔（`100`–`60000` 毫秒）、多任务负载风险提示、付款码回显与订单合并、监控记录清理及桌面/手机卡片界面升级；待通过 GitHub Actions 完成全平台构建、核验并公开发布，详情见 [0.3.0 记录](docs/releases/0.3.0.md)。内嵌 biliTickerBuy 保持 **2.15.18**。
+交付状态：统一版本 **0.3.0+10** 已通过 GitHub Actions 构建所有已支持平台，并公开为 [正式 Release](https://github.com/poppinzhang/MisakaNetwork/releases/tag/0.3.0)（Latest，非 Pre-Release）；五种安装包及七份校验/清单文件均已核验，详情见 [0.3.0 记录](docs/releases/0.3.0.md)。内嵌 biliTickerBuy 保持 **2.15.18**。
 
 ### 功能
 
