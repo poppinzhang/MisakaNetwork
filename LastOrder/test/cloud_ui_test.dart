@@ -562,96 +562,26 @@ void main() {
   );
 
   testWidgets(
-    'template confirmation immediately adds independent creating machines',
+    'Aliyun creation requires an administrator template and offers no preview',
     (tester) async {
       final c = await openCloudApp(tester, credentials: [CloudProvider.aliyun]);
       await openCloudCreation(tester);
-      await chooseTemplate(tester);
       await tapVisible(
         tester,
-        find.byKey(const ValueKey('cloud-confirm-create')),
+        find.byKey(const ValueKey('cloud-select-provider-aliyun')),
       );
-      expect(find.byType(CloudCreateDialog), findsNothing);
-      expect(c.cloud.jobs, hasLength(1));
-      expect(c.cloud.jobs.single.phase, CloudMachinePhase.creating);
-      expect(find.text('创建云服务器'), findsOneWidget);
-      expect(find.byType(CloudMachineCard), findsOneWidget);
-      expect(c.state.machines, isEmpty);
-
-      await openCloudCreation(tester);
-      await chooseTemplate(tester, template: 'starter');
-      await tapVisible(
-        tester,
-        find.byKey(const ValueKey('cloud-confirm-create')),
-      );
-      expect(c.cloud.jobs, hasLength(2));
-      expect(c.cloud.jobs.last.phase, CloudMachinePhase.creating);
-      expect(c.cloud.jobs.map((job) => job.id).toSet(), hasLength(2));
-      expect(find.byType(CloudMachineCard), findsNWidgets(2));
-      expect((c.gateway as FakeGateway).statusRequests, isEmpty);
+      expect(find.textContaining('管理员尚未配置阿里云模板'), findsOneWidget);
+      expect(find.byKey(const ValueKey('cloud-preview-outcome')), findsNothing);
+      expect(find.text('轻量起步'), findsNothing);
       expect(
-        (c.helper as FakeHelper).requests.where(
-          (request) => request['action'] != 'verify_cloud_credential',
-        ),
-        isEmpty,
+        tester
+            .widget<FilledButton>(
+              find.byKey(const ValueKey('cloud-confirm-create')),
+            )
+            .onPressed,
+        isNull,
       );
-      expect(tester.takeException(), isNull);
-      await advancePreview(tester);
-      await advancePreview(tester);
-      expect(c.cloud.jobs.every((job) => !job.active), isTrue);
-    },
-  );
-
-  testWidgets(
-    'creation failure is visible and its failed machine can be deleted',
-    (tester) async {
-      final c = await openCloudApp(tester, credentials: [CloudProvider.aliyun]);
-      await openCloudCreation(tester);
-      await chooseTemplate(tester);
-      await tapVisible(
-        tester,
-        find.byKey(const ValueKey('cloud-preview-outcome')),
-      );
-      await tapVisible(tester, find.text('创建失败').last);
-      await tapVisible(
-        tester,
-        find.byKey(const ValueKey('cloud-confirm-create')),
-      );
-      await advancePreview(tester);
-      expect(c.cloud.jobs.single.phase, CloudMachinePhase.createFailed);
-      expect(find.textContaining('当前配置暂时无可用库存'), findsOneWidget);
-      expect(find.text('释放云服务器'), findsNothing);
-      await tapVisible(tester, find.text('删除失败机器'));
       expect(c.cloud.jobs, isEmpty);
-      expect(find.byType(CloudMachineCard), findsNothing);
-      expect(tester.takeException(), isNull);
-    },
-  );
-
-  testWidgets(
-    'release requires confirmation and can be cancelled before previewing release',
-    (tester) async {
-      final c = await openCloudApp(tester, credentials: [CloudProvider.aliyun]);
-      await c.cloud.startPreviewCreation(
-        CloudProvider.aliyun,
-        CloudTemplate.forProvider(CloudProvider.aliyun).first,
-      );
-      await goToPage(tester, '机器管理');
-      await advancePreview(tester);
-      await advancePreview(tester);
-      expect(c.cloud.jobs.single.phase, CloudMachinePhase.ready);
-      await tapVisible(tester, find.text('释放云服务器'));
-      expect(find.text('确认释放（预览）'), findsOneWidget);
-      await tapVisible(tester, find.text('保留服务器'));
-      expect(c.cloud.jobs.single.phase, CloudMachinePhase.ready);
-      await tapVisible(tester, find.text('释放云服务器'));
-      await tapVisible(tester, find.text('确认释放（预览）'));
-      expect(c.cloud.jobs.single.phase, CloudMachinePhase.releasing);
-      expect(find.text('正在演示释放，请稍候。'), findsOneWidget);
-      await tester.pump(const Duration(seconds: 2));
-      await tester.pump();
-      expect(c.cloud.jobs.single.phase, CloudMachinePhase.released);
-      expect(find.text('已释放'), findsOneWidget);
       expect(tester.takeException(), isNull);
     },
   );
@@ -677,16 +607,19 @@ void main() {
         await tapVisible(tester, find.text('去创建云服务器'));
         expect(find.byType(CloudCreateDialog), findsOneWidget);
         expect(tester.takeException(), isNull);
-        await chooseTemplate(tester);
-        expect(tester.takeException(), isNull);
         await tapVisible(
           tester,
-          find.byKey(const ValueKey('cloud-confirm-create')),
+          find.byKey(const ValueKey('cloud-select-provider-aliyun')),
         );
-        expect(find.byType(CloudMachineCard), findsOneWidget);
-        expect(tester.takeException(), isNull);
-        await advancePreview(tester);
-        await advancePreview(tester);
+        expect(find.textContaining('管理员尚未配置阿里云模板'), findsOneWidget);
+        expect(
+          tester
+              .widget<FilledButton>(
+                find.byKey(const ValueKey('cloud-confirm-create')),
+              )
+              .onPressed,
+          isNull,
+        );
         expect(tester.takeException(), isNull);
       },
     );

@@ -890,20 +890,18 @@ class _ControlCenterState extends State<ControlCenter> {
           (cloud) =>
               cloud.id == cloudId &&
               cloud.isReal &&
-              cloud.provider == CloudProvider.tencent,
+              machine.id == '${cloud.provider.name}-$cloudId',
         );
   }
 
   Widget cloudMachineCard(CloudMachine cloud) {
-    final machine = cloud.isReal && cloud.provider == CloudProvider.tencent
-        ? c.tencentMachine(cloud.id)
-        : null;
+    final machine = cloud.isReal ? c.cloudMachine(cloud.id) : null;
     final deployment = machine == null ? null : c.deployments[machine.id];
     return CloudMachineCard(
       key: ValueKey(cloud.id),
       machine: cloud,
       controller: c.cloud,
-      onDeploy: () => deployTencent(cloud.id),
+      onDeploy: () => deployCloud(cloud.id),
       sistersLinked: machine != null,
       sistersReady:
           machine?.canConnect == true && c.cloudMachineUsable(machine!),
@@ -1017,8 +1015,8 @@ class _ControlCenterState extends State<ControlCenter> {
     }
   }
 
-  Future<void> deployTencent(String id) async {
-    final existing = c.tencentMachine(id);
+  Future<void> deployCloud(String id) async {
+    final existing = c.cloudMachine(id);
     if (existing?.canConnect == true &&
         !await confirm(
           '重新部署 Sisters',
@@ -1026,7 +1024,7 @@ class _ControlCenterState extends State<ControlCenter> {
         )) {
       return;
     }
-    await action(() => c.startTencentDeployment(id));
+    await action(() => c.startCloudDeployment(id));
   }
 
   Widget responsiveCards(List<Widget> cards) => LayoutBuilder(
@@ -1949,7 +1947,7 @@ class _ControlCenterState extends State<ControlCenter> {
   Future<void> machineDialog({Machine? existing}) async {
     final cloudId = existing == null ? null : c.cloudIdForMachine(existing);
     if (cloudId != null) {
-      await deployTencent(cloudId);
+      await deployCloud(cloudId);
       return;
     }
     final warning = await showDialog<String>(
@@ -1978,7 +1976,7 @@ class _ControlCenterState extends State<ControlCenter> {
       });
     } else if (result == true) {
       setState(() => page = 1);
-      message('已添加预览机器，可继续添加其他机器。');
+      message('已添加创建任务，可在机器列表查看进度。');
     }
   }
 
@@ -2251,14 +2249,6 @@ class _MachineDialogState extends State<MachineDialog> {
                       : () => Navigator.pop(context, 'cloud-create'),
                   icon: const Icon(LucideIcons.cloud, size: 18),
                   label: const Text('云服务器创建'),
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                '交互预览 · 不创建真实资源',
-                style: TextStyle(
-                  fontSize: 11,
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
               ),
             ],

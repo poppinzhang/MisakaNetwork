@@ -19,6 +19,7 @@ final _template = CloudTemplate.tencent({
   'diskGb': 40,
   'architecture': 'x64',
   'os': 'Ubuntu 24.04 LTS',
+  'sshUsername': 'ubuntu',
   'regionLabel': '测试地域',
   'region': 'ap-guangzhou',
   'runInstances': {
@@ -66,7 +67,7 @@ class _UiController extends CloudController {
 
   bool deploymentLocked = false;
   @override
-  bool isDeployingTencent(String id) => deploymentLocked;
+  bool isDeployingCloud(String id) => deploymentLocked;
 
   int creates = 0;
   final releases = <String>[];
@@ -74,20 +75,23 @@ class _UiController extends CloudController {
   final retries = <String>[];
 
   @override
-  Future<CloudMachine> startTencentCreation(CloudTemplate template) async {
+  Future<CloudMachine> startCloudCreation(
+    CloudProvider provider,
+    CloudTemplate template,
+  ) async {
     expect(template.id, _template.id);
     creates++;
     return _machine(phase: CloudMachinePhase.creating);
   }
 
   @override
-  Future<void> requestTencentRelease(String id) async => releases.add(id);
+  Future<void> requestCloudRelease(String id) async => releases.add(id);
 
   @override
-  Future<void> refreshTencentMachine(String id) async => refreshes.add(id);
+  Future<void> refreshCloudMachine(String id) async => refreshes.add(id);
 
   @override
-  Future<void> retryTencentPreparation(String id) async => retries.add(id);
+  Future<void> retryCloudPreparation(String id) async => retries.add(id);
 }
 
 Future<_UiController> _controller({bool empty = false}) async {
@@ -161,7 +165,7 @@ void main() {
 
   for (final scale in [1.0, 2.0]) {
     testWidgets(
-      'Tencent creation discloses billing and fixed ubuntu access at scale $scale',
+      'Tencent creation discloses billing and template SSH access at scale $scale',
       (tester) async {
         final controller = await _controller();
         await _frame(

@@ -282,131 +282,36 @@ void main() {
     },
   );
 
-  testWidgets(
-    'creation runs independently, returns immediately and never enters real machines',
-    (tester) async {
-      final store = MemoryStore();
-      final helper = keyHelper();
-      final c = await readyController(store: store, helper: helper);
-      await saveCredential(c, CloudProvider.volcengine);
-      final template = CloudTemplate.forProvider(CloudProvider.volcengine)
-          .first;
-      final created = await Future.wait([
-        c.startPreviewCreation(CloudProvider.volcengine, template),
-        c.startPreviewCreation(CloudProvider.volcengine, template),
-      ]);
-      expect(created.map((job) => job.id).toSet().length, 2);
-      expect(created.map((job) => job.name).toSet().length, 2);
-      expect(
-        c.jobs.every((job) => job.phase == CloudMachinePhase.creating),
-        isTrue,
-      );
-      expect(store.state.machines, isEmpty);
-      await tester.pump(const Duration(seconds: 3));
-      expect(
-        c.jobs.every((job) => job.phase == CloudMachinePhase.deploying),
-        isTrue,
-      );
-      await tester.pump(const Duration(seconds: 3));
-      expect(
-        c.jobs.every((job) => job.phase == CloudMachinePhase.ready),
-        isTrue,
-      );
-      expect(
-        helper.requests.where((r) => r['action'] != 'verify_cloud_credential'),
-        [
-          {'action': 'generate_cloud_ssh_key'},
-        ],
-      );
-      expect(store.state.machines, isEmpty);
-    },
-  );
-
-  testWidgets('failure outcomes, deletion and release remain local previews', (
-    tester,
-  ) async {
+  test('all providers reject simulated creation and an empty catalog cannot purchase', () async {
     final c = await readyController();
-    await saveCredential(c, CloudProvider.aliyun);
-    final template = CloudTemplate.forProvider(CloudProvider.aliyun).first;
-    final creationFailure = await c.startPreviewCreation(
-      CloudProvider.aliyun,
-      template,
-      outcome: CloudPreviewOutcome.createFailure,
-    );
-    final deploymentFailure = await c.startPreviewCreation(
-      CloudProvider.aliyun,
-      template,
-      outcome: CloudPreviewOutcome.deployFailure,
-    );
-    await tester.pump(const Duration(seconds: 3));
-    expect(c.jobs.first.phase, CloudMachinePhase.createFailed);
-    expect(c.jobs.first.error, contains('演示'));
-    await c.removeMachine(creationFailure.id);
-    await tester.pump(const Duration(seconds: 3));
-    expect(c.jobs.single.phase, CloudMachinePhase.deployFailed);
-    await c.requestPreviewRelease(deploymentFailure.id);
-    expect(c.jobs.single.phase, CloudMachinePhase.releasing);
-    await tester.pump(const Duration(seconds: 2));
-    expect(c.jobs.single.phase, CloudMachinePhase.released);
-    await c.removeMachine(deploymentFailure.id);
-    expect(c.jobs, isEmpty);
-  });
-
-  testWidgets(
-    'failed creation save creates no job and later progress save failure is visible',
-    (tester) async {
-      final store = MemoryStore();
-      final c = await readyController(store: store);
-      await saveCredential(c, CloudProvider.volcengine);
-      final template = CloudTemplate.forProvider(CloudProvider.volcengine)
-          .first;
-      store.failWrite.add(CloudController.workspaceKey);
+    for (final provider in CloudProvider.values) {
+      await saveCredential(c, provider);
+      final template = CloudTemplate.forProvider(provider).first;
       await expectLater(
-        c.startPreviewCreation(CloudProvider.volcengine, template),
+        c.startPreviewCreation(provider, template),
         throwsA(isA<UserError>()),
       );
-      expect(c.jobs, isEmpty);
-      store.failWrite.clear();
-      await c.startPreviewCreation(CloudProvider.volcengine, template);
-      store.failWrite.add(CloudController.workspaceKey);
-      await tester.pump(const Duration(seconds: 3));
-      expect(c.jobs.single.phase, CloudMachinePhase.interrupted);
-      expect(c.jobs.single.error, contains('无法保存'));
-    },
-  );
-
-  testWidgets('restart interrupts active previews and does not resume timers', (
-    tester,
-  ) async {
-    final store = MemoryStore();
-    final first = await readyController(store: store);
-    await saveCredential(first, CloudProvider.volcengine);
-    await first.startPreviewCreation(
-      CloudProvider.volcengine,
-      CloudTemplate.forProvider(CloudProvider.volcengine).first,
-    );
-    final nextStore = MemoryStore()..secrets.addAll(store.secrets);
-    final restored = await readyController(store: nextStore);
-    expect(restored.jobs.single.phase, CloudMachinePhase.interrupted);
-    await tester.pump(const Duration(seconds: 10));
-    expect(restored.jobs.single.phase, CloudMachinePhase.interrupted);
-    final saved =
-        jsonDecode(nextStore.secrets[CloudController.workspaceKey]!) as Map;
-    expect((saved['jobs'] as List).single['phase'], 'interrupted');
+      await expectLater(
+        c.startCloudCreation(provider, template),
+        throwsA(isA<UserError>()),
+      );
+      expect(c.templatesFor(provider), isEmpty);
+    }
+    expect(c.jobs, isEmpty);
   });
 
   test('creation requires verified credentials, a ready key and matching provider template', () async {
     final c = await readyController();
-    final template = CloudTemplate.forProvider(CloudProvider.volcengine).first;
+    final template = CloudTemplate.forProvider(CloudProvider.aliyun).first;
     await expectLater(
-      c.startPreviewCreation(CloudProvider.volcengine, template),
+      c.startPreviewCreation(CloudProvider.aliyun, template),
       throwsA(isA<UserError>()),
     );
-    await saveCredential(c, CloudProvider.volcengine);
+    await saveCredential(c, CloudProvider.aliyun);
     await expectLater(
       c.startPreviewCreation(
-        CloudProvider.volcengine,
-        CloudTemplate.forProvider(CloudProvider.aliyun).first,
+        CloudProvider.aliyun,
+        CloudTemplate.forProvider(CloudProvider.tencent).first,
       ),
       throwsA(isA<UserError>()),
     );
@@ -420,9 +325,9 @@ void main() {
               }
             : {},
     );
-    await saveCredential(failedKey, CloudProvider.volcengine);
+    await saveCredential(failedKey, CloudProvider.aliyun);
     await expectLater(
-      failedKey.startPreviewCreation(CloudProvider.volcengine, template),
+      failedKey.startPreviewCreation(CloudProvider.aliyun, template),
       throwsA(isA<UserError>()),
     );
   });
@@ -443,7 +348,7 @@ void main() {
   });
 
   testWidgets(
-    'preview jobs are excluded from real gateway refresh and persisted machines',
+    'rejected preview entry never enters real gateway or persisted machines',
     (tester) async {
       final store = MemoryStore()
         ..state = SavedState(machines: [machine('existing')]);
@@ -452,14 +357,15 @@ void main() {
       addTearDown(c.dispose);
       await c.initialize(poll: false);
       await c.cloud.initialize();
-      await saveCredential(c.cloud, CloudProvider.volcengine);
-      await c.cloud.startPreviewCreation(
-        CloudProvider.volcengine,
-        CloudTemplate.forProvider(CloudProvider.volcengine).first,
+      await saveCredential(c.cloud, CloudProvider.aliyun);
+      expect(c.cloud.jobs, isEmpty);
+      await expectLater(
+        c.cloud.startPreviewCreation(
+          CloudProvider.aliyun,
+          CloudTemplate.forProvider(CloudProvider.aliyun).first,
+        ),
+        throwsA(isA<UserError>()),
       );
-      await tester.pump(const Duration(seconds: 3));
-      await tester.pump(const Duration(seconds: 3));
-      expect(c.cloud.jobs.single.phase, CloudMachinePhase.ready);
       await c.refresh();
       expect(gateway.statusRequests.map((m) => m.id), ['existing']);
       expect(store.state.machines.map((m) => m.id), ['existing']);
@@ -470,11 +376,20 @@ void main() {
     (tester) async {
       final originalStore = MemoryStore();
       final original = await readyController(store: originalStore);
-      await saveCredential(original, CloudProvider.volcengine);
-      await original.startPreviewCreation(
-        CloudProvider.volcengine,
-        CloudTemplate.forProvider(CloudProvider.volcengine).first,
-      );
+      await saveCredential(original, CloudProvider.aliyun);
+      final stored = jsonDecode(
+        originalStore.secrets[CloudController.workspaceKey]!,
+      ) as Map<String, dynamic>;
+      stored['jobs'] = [
+        CloudMachine(
+          id: 'legacy-preview',
+          name: '旧预览',
+          provider: CloudProvider.aliyun,
+          template: CloudTemplate.forProvider(CloudProvider.aliyun).first,
+          phase: CloudMachinePhase.creating,
+        ).toJson(),
+      ];
+      originalStore.secrets[CloudController.workspaceKey] = jsonEncode(stored);
       final store = _CloudWriteGateStore()
         ..secrets.addAll(originalStore.secrets);
       final restored = CloudController(
@@ -487,16 +402,16 @@ void main() {
       await store.writeStarted.future;
       expect(restored.initialized, isFalse);
       await expectLater(
-        saveCredential(restored, CloudProvider.aliyun),
+        saveCredential(restored, CloudProvider.tencent),
         throwsA(isA<UserError>()),
       );
       store.writeAllowed.complete();
       await initialization;
       expect(restored.initialized, isTrue);
       expect(restored.jobs.single.phase, CloudMachinePhase.interrupted);
-      await saveCredential(restored, CloudProvider.aliyun);
+      await saveCredential(restored, CloudProvider.tencent);
       expect(restored.credentials.length, 2);
-      await original.removeMachine(original.jobs.single.id);
+      await restored.removeMachine(restored.jobs.single.id);
     },
   );
 }

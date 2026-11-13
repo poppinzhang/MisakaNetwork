@@ -24,6 +24,7 @@ class DeployHarness {
   String cloudState = 'RUNNING', cloudIp = '192.0.2.20';
   Completer<void>? describeGate, deploymentGate;
   int describeCalls = 0;
+  String sshUsername = 'ubuntu';
 
   List<Map<String, dynamic>> get deployments => helper.requests
       .where((request) => request['action'] == 'deploy')
@@ -50,7 +51,9 @@ class DeployHarness {
           id: resourceId,
           name: '测试云服务器',
           provider: CloudProvider.tencent,
-          template: CloudTemplate.tencent(templateData()),
+          template: CloudTemplate.tencent(
+            templateData()..['sshUsername'] = sshUsername,
+          ),
           phase: CloudMachinePhase.created,
           isReal: true,
           createSubmitted: true,
@@ -78,8 +81,11 @@ class DeployHarness {
         case 'init_pki':
           return {};
         case 'deploy':
-          expectSync(request['username'], 'ubuntu');
-          expectSync(request['enable_linger_with_sudo'], isTrue);
+          expectSync(request['username'], sshUsername);
+          expectSync(
+            request['enable_linger_with_sudo'],
+            sshUsername == 'ubuntu' ? isTrue : isNull,
+          );
           expectSync(request['port'], 22);
           expectSync(request['grpc_port'], 20001);
           expectSync(request['private_key'], privateKey);
@@ -107,7 +113,9 @@ class DeployHarness {
       gateway: gateway,
       runtime: FakeRuntime(),
       helper: helper,
-      cloudTemplateLoader: () async => [CloudTemplate.tencent(templateData())],
+      cloudTemplateLoader: () async => [
+        CloudTemplate.tencent(templateData()..['sshUsername'] = sshUsername),
+      ],
     );
     await controller.initialize(poll: false);
     await controller.cloud.initialize();
@@ -122,6 +130,25 @@ class DeployHarness {
 }
 
 void main() {
+  test('tencent deployment uses the saved template login account', () async {
+    final h = DeployHarness()..sshUsername = 'custom-user';
+    await h.init();
+    addTearDown(() => h.controller.dispose());
+    await h.controller.startCloudDeployment(resourceId);
+    await settleUntil(() => h.controller.deploying == 0);
+    expect(h.deployments.single['username'], 'custom-user');
+    expect(h.deployments.single['enable_linger_with_sudo'], isNull);
+    expect(
+      h.controller.cloudMachine(resourceId)!.deploymentUsername,
+      'custom-user',
+    );
+    await h.restart();
+    expect(
+      h.controller.cloudMachine(resourceId)!.deploymentUsername,
+      'custom-user',
+    );
+  });
+
   Future<DeployHarness> harness() async {
     final h = DeployHarness();
     await h.init();

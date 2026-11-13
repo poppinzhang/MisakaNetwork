@@ -22,8 +22,10 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/MisakaNetwork/MisakaNetwork/internal/cloud/aliyun"
 	"github.com/MisakaNetwork/MisakaNetwork/internal/cloud/credentials"
 	"github.com/MisakaNetwork/MisakaNetwork/internal/cloud/tencent"
+	"github.com/MisakaNetwork/MisakaNetwork/internal/cloud/volcengine"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -69,6 +71,8 @@ func (c *stallConn) Write(p []byte) (int, error) {
 type Request struct {
 	Action               string             `json:"action"`
 	Cloud                *tencent.Input     `json:"cloud,omitempty"`
+	Aliyun               *aliyun.Input      `json:"aliyun,omitempty"`
+	Volcengine           *volcengine.Input  `json:"volcengine,omitempty"`
 	CloudCredential      *credentials.Input `json:"cloud_credential,omitempty"`
 	Directory            string             `json:"directory,omitempty"`
 	Host                 string             `json:"host,omitempty"`
@@ -112,8 +116,26 @@ var errHostKeyMismatch = errors.New("SSH 主机指纹不匹配，已拒绝连接
 
 func Handle(r Request) Response {
 	switch r.Action {
+	case "aliyun_zones", "aliyun_prepare", "aliyun_create", "aliyun_describe", "aliyun_release", "aliyun_recover", "aliyun_network_lookup", "aliyun_network_create":
+		if r.Aliyun == nil || r.Cloud != nil || r.Volcengine != nil || r.CloudCredential != nil {
+			return Response{Error: "缺少阿里云操作参数或混用了云厂商参数"}
+		}
+		v, e := aliyun.Execute(r.Action, *r.Aliyun)
+		if e != nil {
+			return Response{Error: e.Error()}
+		}
+		return Response{OK: true, Result: v}
+	case "volcengine_zones", "volcengine_prepare", "volcengine_create", "volcengine_describe", "volcengine_release", "volcengine_recover", "volcengine_network_lookup", "volcengine_network_create":
+		if r.Volcengine == nil || r.Cloud != nil || r.Aliyun != nil || r.CloudCredential != nil {
+			return Response{Error: "缺少火山引擎操作参数或混用了云厂商参数"}
+		}
+		v, e := volcengine.Execute(r.Action, *r.Volcengine)
+		if e != nil {
+			return Response{Error: e.Error()}
+		}
+		return Response{OK: true, Result: v}
 	case "verify_cloud_credential":
-		if r.CloudCredential == nil {
+		if r.CloudCredential == nil || r.Cloud != nil || r.Volcengine != nil || r.Aliyun != nil {
 			return Response{Error: "缺少云凭证验证参数"}
 		}
 		v, e := credentials.Verify(*r.CloudCredential)
@@ -122,7 +144,7 @@ func Handle(r Request) Response {
 		}
 		return Response{OK: true, Result: v}
 	case "tencent_prepare", "tencent_create", "tencent_describe", "tencent_release", "tencent_recover", "tencent_network_lookup", "tencent_network_create", "tencent_zones":
-		if r.Cloud == nil {
+		if r.Cloud == nil || r.Volcengine != nil || r.Aliyun != nil || r.CloudCredential != nil {
 			return Response{Error: "缺少腾讯云操作参数"}
 		}
 		v, e := tencent.Execute(r.Action, *r.Cloud)

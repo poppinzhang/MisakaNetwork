@@ -1,11 +1,7 @@
 import 'cloud_templates.dart';
 
-/// Fixed access settings for the Tencent CVM creation workflow.
-/// They are application policy, never administrator template parameters.
+/// Fixed ports and ingress rules shared by the cloud deployment workflows.
 abstract final class TencentAccessPolicy {
-  // The catalog accepts only Ubuntu public images. Tencent injects the key
-  // into the image's default login account; it does not enable root SSH.
-  static const sshUsername = 'ubuntu';
   static const sshPort = 22;
   static const sistersPort = 20001;
   static const ingressCidr = '0.0.0.0/0';
@@ -15,6 +11,29 @@ abstract final class TencentAccessPolicy {
 enum CloudProvider { tencent, aliyun, volcengine }
 
 extension CloudProviderDetails on CloudProvider {
+  bool get supportsResources => true;
+  bool validRegion(String region) => RegExp(
+    this != CloudProvider.tencent
+        ? r'^[a-z]{2}-[a-z]+(?:-[a-z0-9]+)*$'
+        : r'^[a-z]{2}-[a-z]+(?:-[a-z]+)*$',
+  ).hasMatch(region);
+  RegExp zonePattern(String region) {
+    final suffix = this != CloudProvider.tencent
+        ? RegExp(r'[0-9]$').hasMatch(region)
+              ? '[a-z]'
+              : '-[a-z]'
+        : '-[1-9][0-9]*';
+    return RegExp('^${RegExp.escape(region)}$suffix\$');
+  }
+
+  bool validInstanceId(Object? value) =>
+      value is String &&
+      RegExp(
+        this != CloudProvider.tencent
+            ? r'^i-[a-zA-Z0-9]+$'
+            : r'^ins-[a-zA-Z0-9]+$',
+      ).hasMatch(value);
+
   String get displayName => switch (this) {
     CloudProvider.tencent => '腾讯云',
     CloudProvider.aliyun => '阿里云',
@@ -69,14 +88,59 @@ class CloudTemplate {
     required this.memoryGb,
     this.diskGb = 40,
     this.architecture = 'x64',
-    this.os = 'Ubuntu 24.04 LTS',
+    this.os = 'Linux',
     this.regionLabel = '地域待配置',
     this.tencent,
+    this.volcengine,
+    this.aliyun,
   });
   final String id, name, description, architecture, os, regionLabel;
   final int cpu, memoryGb, diskGb;
   final Map<String, dynamic>? tencent;
-  bool get isReal => tencent != null;
+  final Map<String, dynamic>? volcengine;
+  final Map<String, dynamic>? aliyun;
+  Map<String, dynamic>? get configuration => tencent ?? volcengine ?? aliyun;
+  bool belongsTo(CloudProvider provider) =>
+      [tencent, volcengine, aliyun].where((value) => value != null).length ==
+          1 &&
+      switch (provider) {
+        CloudProvider.tencent => tencent != null,
+        CloudProvider.volcengine => volcengine != null,
+        CloudProvider.aliyun => aliyun != null,
+      };
+  bool get isReal => configuration != null;
+  String get sshUsername => configuration?['sshUsername'] as String? ?? '';
+  String get zone =>
+      tencent?['runInstances']['Placement']['Zone'] as String? ??
+      volcengine?['runInstances']['ZoneId'] as String? ??
+      aliyun?['runInstances']['ZoneId'] as String? ??
+      '';
+
+  factory CloudTemplate.volcengine(Map<String, dynamic> value) => CloudTemplate(
+    id: value['id'] as String,
+    name: value['name'] as String,
+    description: value['description'] as String,
+    cpu: value['cpu'] as int,
+    memoryGb: value['memoryGb'] as int,
+    diskGb: value['diskGb'] as int,
+    architecture: value['architecture'] as String,
+    os: value['os'] as String,
+    regionLabel: value['regionLabel'] as String,
+    volcengine: value,
+  );
+
+  factory CloudTemplate.aliyun(Map<String, dynamic> value) => CloudTemplate(
+    id: value['id'] as String,
+    name: value['name'] as String,
+    description: value['description'] as String,
+    cpu: value['cpu'] as int,
+    memoryGb: value['memoryGb'] as int,
+    diskGb: value['diskGb'] as int,
+    architecture: value['architecture'] as String,
+    os: value['os'] as String,
+    regionLabel: value['regionLabel'] as String,
+    aliyun: value,
+  );
 
   factory CloudTemplate.tencent(Map<String, dynamic> value) => CloudTemplate(
     id: value['id'] as String,
@@ -128,6 +192,8 @@ class CloudTemplate {
     'os': os,
     'regionLabel': regionLabel,
     'tencent': ?tencent,
+    'volcengine': ?volcengine,
+    'aliyun': ?aliyun,
   };
   factory CloudTemplate.fromJson(Map<String, dynamic> value) => CloudTemplate(
     id: value['id'] as String,
@@ -139,6 +205,16 @@ class CloudTemplate {
     architecture: value['architecture'] as String,
     os: value['os'] as String,
     regionLabel: value['regionLabel'] as String,
+    aliyun: value['aliyun'] == null
+        ? null
+        : AliyunTemplateCatalog.validateTemplate(
+            Map<String, dynamic>.from(value['aliyun'] as Map),
+          ),
+    volcengine: value['volcengine'] == null
+        ? null
+        : VolcengineTemplateCatalog.validateTemplate(
+            Map<String, dynamic>.from(value['volcengine'] as Map),
+          ),
     tencent: value['tencent'] == null
         ? null
         : TencentTemplateCatalog.validateTemplate(
@@ -174,6 +250,8 @@ class CloudMachine {
     this.isReal = false,
     this.createSubmitted = false,
     this.instanceId = '',
+    this.eipId = '',
+    this.releaseSubmitted = false,
     this.publicIp = '',
     this.region = '',
     this.requestId = '',
@@ -187,8 +265,9 @@ class CloudMachine {
     this.unavailableZones = const [],
   });
   final String id, name, error;
-  final bool isReal, createSubmitted;
+  final bool isReal, createSubmitted, releaseSubmitted;
   final String instanceId,
+      eipId,
       publicIp,
       region,
       requestId,
@@ -200,9 +279,8 @@ class CloudMachine {
       subnetId,
       selectedZone;
   final List<String> unavailableZones;
-  String get effectiveZone => selectedZone.isNotEmpty
-      ? selectedZone
-      : template.tencent?['runInstances']['Placement']['Zone'] as String? ?? '';
+  String get effectiveZone =>
+      selectedZone.isNotEmpty ? selectedZone : template.zone;
   bool get canRemove =>
       !isReal ||
       phase == CloudMachinePhase.released ||
@@ -211,7 +289,7 @@ class CloudMachine {
   // association with task and payment reports. Previews have no API result.
   bool get releaseConfirmed =>
       isReal &&
-      provider == CloudProvider.tencent &&
+      provider.supportsResources &&
       phase == CloudMachinePhase.released;
   final CloudProvider provider;
   final CloudTemplate template;
@@ -244,6 +322,8 @@ class CloudMachine {
     String? error,
     bool? createSubmitted,
     String? instanceId,
+    String? eipId,
+    bool? releaseSubmitted,
     String? publicIp,
     String? requestId,
     String? securityGroupId,
@@ -263,6 +343,8 @@ class CloudMachine {
     isReal: isReal,
     createSubmitted: createSubmitted ?? this.createSubmitted,
     instanceId: instanceId ?? this.instanceId,
+    eipId: eipId ?? this.eipId,
+    releaseSubmitted: releaseSubmitted ?? this.releaseSubmitted,
     publicIp: publicIp ?? this.publicIp,
     region: region,
     requestId: requestId ?? this.requestId,
@@ -287,6 +369,8 @@ class CloudMachine {
     'isReal': isReal,
     'createSubmitted': createSubmitted,
     'instanceId': instanceId,
+    'eipId': eipId,
+    'releaseSubmitted': releaseSubmitted,
     'publicIp': publicIp,
     'region': region,
     'requestId': requestId,
@@ -311,6 +395,8 @@ class CloudMachine {
     isReal: value['isReal'] as bool? ?? false,
     createSubmitted: value['createSubmitted'] as bool? ?? false,
     instanceId: value['instanceId'] as String? ?? '',
+    eipId: value['eipId'] as String? ?? '',
+    releaseSubmitted: value['releaseSubmitted'] as bool? ?? false,
     publicIp: value['publicIp'] as String? ?? '',
     region: value['region'] as String? ?? '',
     requestId: value['requestId'] as String? ?? '',

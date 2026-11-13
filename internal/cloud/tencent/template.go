@@ -23,6 +23,7 @@ type Template struct {
 	DiskGB       int        `json:"diskGb"`
 	Architecture string     `json:"architecture"`
 	OS           string     `json:"os"`
+	SSHUsername  string     `json:"sshUsername"`
 	RegionLabel  string     `json:"regionLabel"`
 	Region       string     `json:"region"`
 	RunInstances Parameters `json:"runInstances"`
@@ -70,7 +71,7 @@ func (t Template) Validate() error {
 	p := t.RunInstances
 	if !matches(`^[a-z][a-z0-9-]{0,63}$`, t.ID) || !textOK(t.Name, 80) || !textOK(t.Description, 500) || !textOK(t.RegionLabel, 80) ||
 		t.CPU < 1 || t.CPU > 1024 || t.MemoryGB < 1 || t.MemoryGB > 1024 || t.DiskGB < 20 || t.DiskGB > 4096 ||
-		(t.Architecture != "x64" && t.Architecture != "arm64") || t.OS != "Ubuntu 24.04 LTS" || !regionPattern.MatchString(t.Region) ||
+		(t.Architecture != "x64" && t.Architecture != "arm64") || !textOK(t.OS, 128) || !matches(`^[a-z_][a-z0-9_-]{0,31}$`, t.SSHUsername) || !regionPattern.MatchString(t.Region) ||
 		!matches(`^`+regexp.QuoteMeta(t.Region)+`-[1-9][0-9]*$`, p.Placement.Zone) || !matches(`^[A-Z][A-Za-z0-9]*\.[A-Z0-9]+$`, p.InstanceType) ||
 		!matches(`^img-[a-z0-9]+$`, p.ImageID) ||
 		p.SystemDisk.DiskSize != t.DiskGB || !p.InternetAccessible.PublicIpAssigned || p.InternetAccessible.InternetChargeType != "TRAFFIC_POSTPAID_BY_HOUR" ||

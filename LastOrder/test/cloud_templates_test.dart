@@ -13,6 +13,7 @@ Map<String, dynamic> validTencentTemplate() => {
   'diskGb': 40,
   'architecture': 'x64',
   'os': 'Ubuntu 24.04 LTS',
+  'sshUsername': 'ubuntu',
   'regionLabel': '模拟地域',
   'region': 'ap-guangzhou',
   'runInstances': {
@@ -45,7 +46,7 @@ void main() {
   test(
     'loads exact packaged asset and permits an empty unconfigured catalog',
     () async {
-      final bundle = _TemplateBundle('{"schemaVersion":3,"templates":[]}');
+      final bundle = _TemplateBundle('{"schemaVersion":4,"templates":[]}');
       expect(await TencentTemplateCatalog.load(bundle: bundle), isEmpty);
       expect(bundle.requestedKey, TencentTemplateCatalog.assetPath);
       // Administrators may fill the real asset before packaging; loading it
@@ -77,7 +78,7 @@ void main() {
       value['runInstances']['InstanceType'] = instanceType;
       final parsed = TencentTemplateCatalog.parse(
         jsonEncode({
-          'schemaVersion': 3,
+          'schemaVersion': 4,
           'templates': [value],
         }),
       );
@@ -107,7 +108,7 @@ void main() {
       expect(
         () => TencentTemplateCatalog.parse(
           jsonEncode({
-            'schemaVersion': 3,
+            'schemaVersion': 4,
             'templates': [value],
           }),
         ),
@@ -121,14 +122,15 @@ void main() {
     for (final catalog in [
       {'schemaVersion': 1, 'templates': []},
       {'schemaVersion': 2, 'templates': []},
-      {'schemaVersion': 3, 'templates': [], 'secret': 'no'},
-      {'schemaVersion': 3, 'templates': {}},
+      {'schemaVersion': 3, 'templates': []},
+      {'schemaVersion': 4, 'templates': [], 'secret': 'no'},
+      {'schemaVersion': 4, 'templates': {}},
       {
-        'schemaVersion': 3,
+        'schemaVersion': 4,
         'templates': List.filled(101, validTencentTemplate()),
       },
       {
-        'schemaVersion': 3,
+        'schemaVersion': 4,
         'templates': [validTencentTemplate(), validTencentTemplate()],
       },
     ]) {
@@ -172,7 +174,6 @@ void main() {
 
   test('fixed access fields cannot be supplied or overridden by templates', () {
     for (final entry in {
-      'sshUsername': ['root', 'ubuntu', 'user;command'],
       'sshCidr': ['0.0.0.0/0', '203.0.113.8/32'],
       'grpcCidr': ['0.0.0.0/0', '203.0.113.0/24'],
     }.entries) {
@@ -195,7 +196,7 @@ void main() {
       (t) => t['cpu'] = 2.5,
       (t) => t['memoryGb'] = 0,
       (t) => t['architecture'] = 'riscv',
-      (t) => t['os'] = 'Ubuntu 22.04 LTS',
+      (t) => t['os'] = '',
       (t) => t['runInstances']['Placement']['Zone'] = 'ap-beijing-1',
       (t) => t['runInstances']['SystemDisk']['DiskSize'] = 60,
       (t) =>

@@ -1,9 +1,9 @@
 {
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "templates": [
     {
-      "id": "shanghai-ubuntu-2c2g",
-      "name": "上海 S5.MEDIUM2 Linux",
+      "id": "t-shanghai-ubuntu-2c2g",
+      "name": "上海 2核2G Linux 服务器",
       "description": "小规格 Linux 云实例，价格实惠，适合作为抢票工作节点。",
       "cpu": 2,
       "memoryGb": 2,
@@ -27,7 +27,8 @@
           "InternetMaxBandwidthOut": 5,
           "PublicIpAssigned": true
         }
-      }
+      },
+      "sshUsername": "ubuntu"
     }
   ]
 }

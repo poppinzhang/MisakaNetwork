@@ -20,7 +20,7 @@ const fixtureToken = "51e14a42-4cd8-4e90-b1f3-1ce5f3652d90"
 
 func fixtureTemplate() Template {
 	var t Template
-	json.Unmarshal([]byte(`{"id":"test-template","name":"测试模板","description":"离线测试配置","cpu":2,"memoryGb":4,"diskGb":40,"architecture":"x64","os":"Ubuntu 24.04 LTS","regionLabel":"测试地域","region":"ap-guangzhou","runInstances":{"Placement":{"Zone":"ap-guangzhou-7"},"InstanceType":"S5.MEDIUM4","ImageId":"img-fixture","SystemDisk":{"DiskType":"CLOUD_SSD","DiskSize":40},"InternetAccessible":{"InternetChargeType":"TRAFFIC_POSTPAID_BY_HOUR","InternetMaxBandwidthOut":5,"PublicIpAssigned":true}}}`), &t)
+	json.Unmarshal([]byte(`{"id":"test-template","name":"测试模板","description":"离线测试配置","cpu":2,"memoryGb":4,"diskGb":40,"architecture":"x64","os":"Ubuntu 24.04 LTS","sshUsername":"ubuntu","regionLabel":"测试地域","region":"ap-guangzhou","runInstances":{"Placement":{"Zone":"ap-guangzhou-7"},"InstanceType":"S5.MEDIUM4","ImageId":"img-fixture","SystemDisk":{"DiskType":"CLOUD_SSD","DiskSize":40},"InternetAccessible":{"InternetChargeType":"TRAFFIC_POSTPAID_BY_HOUR","InternetMaxBandwidthOut":5,"PublicIpAssigned":true}}}`), &t)
 	return t
 }
 
@@ -92,7 +92,7 @@ func TestTemplateRejectsUnsafeAndInconsistentParameters(t *testing.T) {
 		"bandwidth-limit":   func(t *Template) { t.RunInstances.InternetAccessible.InternetMaxBandwidthOut = 101 },
 		"public-ip":         func(t *Template) { t.RunInstances.InternetAccessible.PublicIpAssigned = false },
 		"architecture":      func(t *Template) { t.Architecture = "i386" },
-		"os":                func(t *Template) { t.OS = "Ubuntu 22.04 LTS" },
+		"os":                func(t *Template) { t.OS = "" },
 		"name-controls":     func(t *Template) { t.Name = "test\n" },
 	}
 	for name, change := range changes {
@@ -145,11 +145,10 @@ func TestTemplatePreservesMixedCaseInstanceFamilies(t *testing.T) {
 	}
 }
 
-func TestTemplateRejectsRemovedLoginAndSourceFields(t *testing.T) {
+func TestTemplateRejectsRemovedSourceFields(t *testing.T) {
 	for field, values := range map[string][]string{
-		"sshUsername": {"root", "ubuntu", "root;command"},
-		"sshCidr":     {"0.0.0.0/0", "192.0.2.0/24"},
-		"grpcCidr":    {"0.0.0.0/0", "198.51.100.0/24"},
+		"sshCidr":  {"0.0.0.0/0", "192.0.2.0/24"},
+		"grpcCidr": {"0.0.0.0/0", "198.51.100.0/24"},
 	} {
 		for _, value := range values {
 			t.Run(field+"="+value, func(t *testing.T) {
@@ -371,8 +370,8 @@ func TestSecurityRulesRejectDriftAndUseFixedSources(t *testing.T) {
 	}
 }
 
-func TestImagePreflightRejectsWrongOSArchitectureAndPrivateImages(t *testing.T) {
-	for _, change := range []map[string]any{{"OsName": "Ubuntu 22.04"}, {"ImageType": "PRIVATE_IMAGE"}, {"Architecture": "arm"}, {"ImageState": "CREATING"}, {"ImageSize": 80}, {"ImageId": "img-other"}} {
+func TestImagePreflightRejectsNonLinuxArchitectureStateSizeAndDataDisks(t *testing.T) {
+	for _, change := range []map[string]any{{"OsName": "Windows Server 2025"}, {"Platform": "FreeBSD"}, {"Architecture": "arm"}, {"ImageState": "CREATING"}, {"ImageSize": 80}, {"ImageSize": 0}, {"ImageId": "img-other"}, {"SnapshotSet": []map[string]any{{"DiskUsage": "DATA_DISK"}}}} {
 		api := &fakeAPI{t: t, respond: func(c callRecord) (any, error) {
 			out := imageResponse()
 			image := out["ImageSet"].([]any)[0].(map[string]any)

@@ -605,7 +605,7 @@ void main() {
   );
 
   for (final entry in {
-    'sshUsername': 'ubuntu',
+    'sshUsername': 'user;command',
     'sshCidr': '203.0.113.8/32',
     'grpcCidr': '203.0.113.0/24',
   }.entries) {

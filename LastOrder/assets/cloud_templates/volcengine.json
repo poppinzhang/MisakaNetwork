@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 2,
+  "templates": [
+    {
+      "id": "v-shanghai-ubuntu-2c2g",
+      "name": "上海 2核2G Linux 服务器",
+      "description": "小规格 Linux 云实例，价格实惠，适合作为抢票工作节点。",
+      "cpu": 2,
+      "memoryGb": 2,
+      "diskGb": 20,
+      "architecture": "x64",
+      "os": "Ubuntu 24.04 LTS",
+      "regionLabel": "华东2(上海)",
+      "region": "cn-shanghai",
+      "runInstances": {
+        "ZoneId": "cn-shanghai-a",
+        "InstanceTypeId": "ecs.e-c1m1.large",
+        "ImageId": "image-ydeyv75w64m05jldmzkm",
+        "Volumes": [
+          {
+            "VolumeType": "ESSD_PL0",
+            "Size": 20
+          }
+        ],
+        "EipAddress": {
+          "ChargeType": "PayByTraffic",
+          "BandwidthMbps": 5,
+          "ISP": "BGP",
+          "ReleaseWithInstance": true
+        }
+      },
+      "sshUsername": "root"
+    }
+  ]
+}

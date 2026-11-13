@@ -10,14 +10,15 @@ import 'cloud_templates.dart';
 import 'models.dart';
 import 'services.dart';
 
-/// Tencent resource operations use the embedded helper. Other providers remain
-/// local previews. Cloud resources and linked Sisters deployments have separate
+/// Cloud resource operations use the embedded helper. Cloud resources and linked Sisters deployments have separate
 /// lifecycles; deployment leases prevent releasing a node mid-installation.
 class CloudController extends ChangeNotifier {
   CloudController({
     required this.store,
     required this.helper,
     this.templateLoader,
+    this.volcengineTemplateLoader,
+    this.aliyunTemplateLoader,
     this.cloudPollInterval = const Duration(seconds: 5),
     this.credentialVerificationTimeout = const Duration(seconds: 35),
     this.preparationPollInterval = const Duration(seconds: 2),
@@ -28,14 +29,23 @@ class CloudController extends ChangeNotifier {
   static const workspaceKey = 'cloud.preview.v1';
   static const sshIdentityKey = 'cloud.ssh-identity.v1';
   final Future<List<CloudTemplate>> Function()? templateLoader;
+  final Future<List<CloudTemplate>> Function()? volcengineTemplateLoader;
+  final Future<List<CloudTemplate>> Function()? aliyunTemplateLoader;
   final Duration cloudPollInterval;
   final Duration credentialVerificationTimeout;
   final Duration preparationPollInterval;
   final int preparationPollAttempts;
   final _deploymentLocks = <String>{};
-  bool isDeployingTencent(String id) => _deploymentLocks.contains(id);
+  bool isDeployingCloud(String id) => _deploymentLocks.contains(id);
   List<CloudTemplate> _tencentTemplates = [];
-  String? templateError;
+  List<CloudTemplate> _volcengineTemplates = [];
+  List<CloudTemplate> _aliyunTemplates = [];
+  String? volcengineTemplateError, aliyunTemplateError, templateError;
+  String? templateErrorFor(CloudProvider provider) => switch (provider) {
+    CloudProvider.tencent => templateError,
+    CloudProvider.volcengine => volcengineTemplateError,
+    CloudProvider.aliyun => aliyunTemplateError,
+  };
   final Set<String> _realBusy = {};
   final Map<String, int> _pollAttempts = {};
   Future<void> _preparation = Future<void>.value();
@@ -95,10 +105,12 @@ class CloudController extends ChangeNotifier {
             CloudMachine.fromJson(Map<String, dynamic>.from(item as Map)),
         ];
         for (final job in jobs.where((job) => job.isReal)) {
-          final zonePattern = RegExp(
-            '^${RegExp.escape(job.region)}-[1-9][0-9]*\$',
-          );
-          if (job.region != job.template.tencent?['region'] ||
+          final zonePattern = job.provider.zonePattern(job.region);
+          if (!job.provider.supportsResources ||
+              !job.template.belongsTo(job.provider) ||
+              job.region != job.template.configuration?['region'] ||
+              (job.eipId.isNotEmpty &&
+                  !RegExp(r'^eip-[a-zA-Z0-9]+$').hasMatch(job.eipId)) ||
               !zonePattern.hasMatch(job.effectiveZone) ||
               job.unavailableZones.length > 101 ||
               job.unavailableZones.toSet().length !=
@@ -220,7 +232,7 @@ class CloudController extends ChangeNotifier {
     }
   }
 
-  Future<String> tencentDeploymentPrivateKey() async {
+  Future<String> cloudDeploymentPrivateKey() async {
     try {
       final stored = await store.readSecret(sshIdentityKey);
       if (_disposed || stored == null) throw const FormatException();
@@ -236,13 +248,14 @@ class CloudController extends ChangeNotifier {
     }
   }
 
-  Future<CloudMachine> beginTencentDeployment(String id) async {
+  Future<CloudMachine> beginCloudDeployment(String id) async {
     _requireInitialized();
     final job = _requireJob(id);
     if (_disposed ||
         !job.isReal ||
-        job.provider != CloudProvider.tencent ||
+        !job.provider.supportsResources ||
         job.phase != CloudMachinePhase.created ||
+        (job.provider == CloudProvider.volcengine && job.releaseSubmitted) ||
         job.instanceId.isEmpty ||
         _deploymentLocks.contains(id) ||
         !_realBusy.add(id)) {
@@ -253,8 +266,8 @@ class CloudController extends ChangeNotifier {
     try {
       late Map<String, dynamic> result;
       try {
-        result = await helper.call({
-          'action': 'tencent_describe',
+        result = await _callCloud(job.provider, {
+          'action': '${job.provider.name}_describe',
           'cloud': _cloudRequest(job),
         });
       } catch (_) {
@@ -269,12 +282,16 @@ class CloudController extends ChangeNotifier {
           InternetAddress.tryParse(ip) == null) {
         throw const UserError('云服务器尚未运行或公网地址未就绪，请先查询云端状态；未开始 SSH 部署。');
       }
-      final current = job.copyWith(publicIp: ip, error: '');
+      final current = job.copyWith(
+        publicIp: ip,
+        eipId: _responseEip(job, result),
+        error: '',
+      );
       await _saveReal(current);
       if (_disposed) throw const UserError('应用已关闭，部署已中断。');
       return current;
     } catch (error) {
-      endTencentDeployment(id);
+      endCloudDeployment(id);
       if (error is UserError) rethrow;
       throw const UserError('无法核实云服务器状态，尚未开始部署，请检查网络和凭证后重试。');
     } finally {
@@ -282,10 +299,33 @@ class CloudController extends ChangeNotifier {
     }
   }
 
-  void endTencentDeployment(String id) {
+  void endCloudDeployment(String id) {
     _deploymentLocks.remove(id);
     _notify();
   }
+
+  bool isDeployingTencent(String id) => isDeployingCloud(id);
+  Future<String> tencentDeploymentPrivateKey() => cloudDeploymentPrivateKey();
+  Future<CloudMachine> beginTencentDeployment(String id) =>
+      beginCloudDeployment(id);
+  void endTencentDeployment(String id) => endCloudDeployment(id);
+  Future<CloudMachine> startTencentCreation(CloudTemplate template) =>
+      startCloudCreation(CloudProvider.tencent, template);
+  Future<void> retryTencentPreparation(String id) => retryCloudPreparation(id);
+  Future<void> refreshTencentMachine(String id) => refreshCloudMachine(id);
+  Future<void> requestTencentRelease(String id) => requestCloudRelease(id);
+
+  Future<Map<String, dynamic>> _callCloud(
+    CloudProvider provider,
+    Map<String, dynamic> request,
+  ) => helper.call(
+    {
+      ...request,
+      if (provider != CloudProvider.tencent) provider.name: request['cloud'],
+    }..removeWhere(
+      (key, _) => provider != CloudProvider.tencent && key == 'cloud',
+    ),
+  );
 
   static String? validateCredentialValue(String value, String label) {
     final normalized = value.trim();
@@ -319,7 +359,7 @@ class CloudController extends ChangeNotifier {
     }
     if (_hasResources(provider) &&
         _credentials[provider]?.accessKeyId != accessKeyId.trim()) {
-      throw const UserError('请先释放或核实该账号创建的云资源，再更换 SecretId。');
+      throw UserError('请先释放或核实该账号创建的云资源，再更换 ${provider.credentialIdLabel}。');
     }
     try {
       final result = await helper
@@ -376,8 +416,8 @@ class CloudController extends ChangeNotifier {
     CloudPreviewOutcome outcome = CloudPreviewOutcome.success,
   }) => _serialize(() async {
     _requireInitialized();
-    if (provider == CloudProvider.tencent) {
-      throw const UserError('腾讯云请使用真实创建入口，不能创建演示节点。');
+    if (provider.supportsResources) {
+      throw const UserError('请使用真实创建入口，不能创建演示节点。');
     }
     if (credentialFor(provider)?.onlineVerified != true) {
       throw const UserError('请先提交该云厂商的凭证并通过联网验证。');
@@ -474,9 +514,11 @@ class CloudController extends ChangeNotifier {
   });
 
   List<CloudTemplate> templatesFor(CloudProvider provider) =>
-      provider == CloudProvider.tencent
-      ? List.unmodifiable(_tencentTemplates)
-      : CloudTemplate.forProvider(provider);
+      List.unmodifiable(switch (provider) {
+        CloudProvider.tencent => _tencentTemplates,
+        CloudProvider.volcengine => _volcengineTemplates,
+        CloudProvider.aliyun => _aliyunTemplates,
+      });
 
   Future<void> _loadTemplates() async {
     try {
@@ -495,62 +537,99 @@ class CloudController extends ChangeNotifier {
       _tencentTemplates = [];
       templateError = '腾讯云配置模板无法读取或格式无效，请联系管理员重新打包。';
     }
+    try {
+      final loaded = volcengineTemplateLoader != null
+          ? await volcengineTemplateLoader!()
+          : templateLoader != null
+          ? <CloudTemplate>[]
+          : (await VolcengineTemplateCatalog.load())
+                .map(CloudTemplate.volcengine)
+                .toList();
+      _volcengineTemplates = [
+        for (final item in loaded)
+          CloudTemplate.volcengine(
+            VolcengineTemplateCatalog.validateTemplate(item.volcengine!),
+          ),
+      ];
+    } catch (_) {
+      _volcengineTemplates = [];
+      volcengineTemplateError = '火山引擎配置模板无法读取或格式无效，请联系管理员重新打包。';
+    }
+    try {
+      final loaded = aliyunTemplateLoader != null
+          ? await aliyunTemplateLoader!()
+          : templateLoader != null
+          ? <CloudTemplate>[]
+          : (await AliyunTemplateCatalog.load())
+                .map(CloudTemplate.aliyun)
+                .toList();
+      _aliyunTemplates = [
+        for (final item in loaded)
+          CloudTemplate.aliyun(
+            AliyunTemplateCatalog.validateTemplate(item.aliyun!),
+          ),
+      ];
+    } catch (_) {
+      _aliyunTemplates = [];
+      aliyunTemplateError = '阿里云配置模板无法读取或格式无效，请联系管理员重新打包。';
+    }
   }
 
   bool _hasResources(CloudProvider provider) =>
       _jobs.any(
         (job) => job.provider == provider && job.isReal && !job.canRemove,
       ) ||
-      (provider == CloudProvider.tencent &&
+      (provider.supportsResources &&
           _networks.any(
             (network) =>
+                network.provider == provider &&
                 network.credentialId == _credentials[provider]?.accessKeyId &&
                 network.pending,
           ));
 
-  Future<CloudMachine> startTencentCreation(CloudTemplate template) =>
-      _serialize(() async {
-        _requireInitialized();
-        final credential = _credentials[CloudProvider.tencent];
-        if (credential == null || !credential.onlineVerified) {
-          throw const UserError('请先提交腾讯云凭证并通过联网验证。');
-        }
-        if (!sshReady) throw const UserError('请先完成 SSH 登录密钥准备。');
-        final canonical = _tencentTemplates
-            .where((item) => item.id == template.id)
-            .firstOrNull;
-        if (canonical == null ||
-            jsonEncode(canonical.toJson()) != jsonEncode(template.toJson())) {
-          throw const UserError('模板不属于当前应用，请重新选择。');
-        }
-        final token = const Uuid().v4();
-        final job = CloudMachine(
-          id: token,
-          name: 'MisakaNetwork-$token',
-          provider: CloudProvider.tencent,
-          template: CloudTemplate.tencent(
-            TencentTemplateCatalog.validateTemplate(canonical.tencent!),
-          ),
-          phase: CloudMachinePhase.creating,
-          isReal: true,
-          region: canonical.tencent!['region'] as String,
-          credentialId: credential.accessKeyId,
-          clientToken: token,
-          selectedZone:
-              canonical.tencent!['runInstances']['Placement']['Zone'] as String,
-        );
-        final next = [..._jobs, job];
-        await _persist(_credentials, next);
-        _jobs = next;
-        _notify();
-        unawaited(_createTencent(job.id));
-        return job;
-      });
+  Future<CloudMachine> startCloudCreation(
+    CloudProvider provider,
+    CloudTemplate template,
+  ) => _serialize(() async {
+    _requireInitialized();
+    if (!provider.supportsResources) throw const UserError('该云厂商尚未接入资源创建。');
+    final credential = _credentials[provider];
+    if (credential == null || !credential.onlineVerified) {
+      throw const UserError('请先提交该云厂商凭证并通过联网验证。');
+    }
+    if (!sshReady) throw const UserError('请先完成 SSH 登录密钥准备。');
+    final canonical = templatesFor(provider)
+        .where((item) => item.id == template.id)
+        .firstOrNull;
+    if (canonical == null ||
+        jsonEncode(canonical.toJson()) != jsonEncode(template.toJson())) {
+      throw const UserError('模板不属于当前应用，请重新选择。');
+    }
+    final token = const Uuid().v4();
+    final job = CloudMachine(
+      id: token,
+      name: 'MisakaNetwork-$token',
+      provider: provider,
+      template: CloudTemplate.fromJson(canonical.toJson()),
+      phase: CloudMachinePhase.creating,
+      isReal: true,
+      region: canonical.configuration!['region'] as String,
+      credentialId: credential.accessKeyId,
+      clientToken: token,
+      selectedZone: canonical.zone,
+    );
+    final next = [..._jobs, job];
+    await _persist(_credentials, next);
+    _jobs = next;
+    _notify();
+    unawaited(_createCloud(job.id));
+    return job;
+  });
 
   Map<String, dynamic> _cloudRequest(CloudMachine job) {
     final credential = _credentials[job.provider];
     if (credential == null || credential.accessKeyId != job.credentialId) {
-      throw const UserError('请恢复创建此实例时使用的腾讯云凭证。');
+      throw const UserError('请恢复创建此实例时使用的云凭证。');
     }
     return {
       'secret_id': credential.accessKeyId,
@@ -558,10 +637,29 @@ class CloudController extends ChangeNotifier {
       'region': job.region,
       'client_token': job.clientToken,
       if (job.instanceId.isNotEmpty) 'instance_id': job.instanceId,
+      if (job.provider == CloudProvider.volcengine) ...{
+        if (job.eipId.isNotEmpty) 'eip_id': job.eipId,
+        'release_submitted': job.releaseSubmitted,
+      },
     };
   }
 
   Map<String, dynamic> _executionTemplate(CloudMachine job) {
+    if (job.provider == CloudProvider.aliyun) {
+      final template = AliyunTemplateCatalog.validateTemplate(
+        job.template.aliyun!,
+      );
+      template['runInstances']['ZoneId'] = job.effectiveZone;
+      return AliyunTemplateCatalog.validateTemplate(template);
+    }
+
+    if (job.provider == CloudProvider.volcengine) {
+      final template = VolcengineTemplateCatalog.validateTemplate(
+        job.template.volcengine!,
+      );
+      template['runInstances']['ZoneId'] = job.effectiveZone;
+      return VolcengineTemplateCatalog.validateTemplate(template);
+    }
     final template = TencentTemplateCatalog.validateTemplate(
       job.template.tencent!,
     );
@@ -569,13 +667,13 @@ class CloudController extends ChangeNotifier {
     return TencentTemplateCatalog.validateTemplate(template);
   }
 
-  Future<List<String>> _alternativeTencentZones(CloudMachine job) async {
-    final result = await helper.call({
-      'action': 'tencent_zones',
-      'cloud': {..._cloudRequest(job), 'template': job.template.tencent},
+  Future<List<String>> _alternativeCloudZones(CloudMachine job) async {
+    final result = await _callCloud(job.provider, {
+      'action': '${job.provider.name}_zones',
+      'cloud': {..._cloudRequest(job), 'template': job.template.configuration},
     });
     final zones = result['zones'];
-    final pattern = RegExp('^${RegExp.escape(job.region)}-[1-9][0-9]*\$');
+    final pattern = job.provider.zonePattern(job.region);
     if (zones is! List ||
         zones.length > 100 ||
         zones.any((zone) => zone is! String || !pattern.hasMatch(zone))) {
@@ -586,34 +684,83 @@ class CloudController extends ChangeNotifier {
 
   // Serializing preparation within this app avoids competing helpers creating
   // the same reusable networks, security group and public key simultaneously.
-  Future<Map<String, dynamic>> _prepareTencent(CloudMachine job) async {
+  Future<Map<String, dynamic>> _prepareCloud(CloudMachine job) async {
     final previous = _preparation;
     final done = Completer<void>();
     _preparation = done.future;
     await previous;
     try {
       if (_disposed) throw const UserError('应用已关闭。');
-      final vpc = await _ensureTencentNetwork(job, 'vpc');
-      final subnet = await _ensureTencentNetwork(
+      final vpc = await _preparationStep(
         job,
-        'subnet',
-        vpcId: vpc.vpcId,
+        '共享 VPC 准备',
+        () => _ensureCloudNetwork(job, 'vpc'),
       );
-      final prepared = await helper.call({
-        'action': 'tencent_prepare',
-        'cloud': {
-          ..._cloudRequest(job),
-          'template': _executionTemplate(job),
-          'public_key': sshPublicKey,
-        },
-      });
+      final subnet = await _preparationStep(
+        job,
+        '共享子网准备',
+        () => _ensureCloudNetwork(job, 'subnet', vpcId: vpc.vpcId),
+      );
+      final prepared = await _preparationStep(
+        job,
+        '镜像、公钥与安全组检查',
+        () => _callCloud(job.provider, {
+          'action': '${job.provider.name}_prepare',
+          'cloud': {
+            ..._cloudRequest(job),
+            'template': _executionTemplate(job),
+            'public_key': sshPublicKey,
+            if (job.provider != CloudProvider.tencent) 'vpc_id': vpc.vpcId,
+          },
+        }),
+      );
       return {...prepared, 'vpc_id': vpc.vpcId, 'subnet_id': subnet.subnetId};
     } finally {
       done.complete();
     }
   }
 
-  Future<void> retryTencentPreparation(String id) => _serialize(() async {
+  Future<T> _preparationStep<T>(
+    CloudMachine job,
+    String stage,
+    Future<T> Function() operation,
+  ) async {
+    try {
+      return await operation();
+    } on UserError catch (error) {
+      // Only exact, fixed helper messages may reach the persisted UI. Never
+      // display upstream text, appended details, credentials or exception dumps.
+      final stages = switch (job.provider) {
+        CloudProvider.volcengine => _volcenginePreparationStages,
+        CloudProvider.aliyun => _aliyunPreparationStages,
+        CloudProvider.tencent => null,
+      };
+      final reasons = switch (job.provider) {
+        CloudProvider.volcengine => _volcenginePreparationReasons,
+        CloudProvider.aliyun => _aliyunPreparationReasons,
+        CloudProvider.tencent => null,
+      };
+      if (stages != null && reasons != null && stage == '镜像、公钥与安全组检查') {
+        final separator = error.message.indexOf('：');
+        if (separator > 0) {
+          final specificStage = stages.lookup(
+            error.message.substring(0, separator),
+          );
+          final specificReason = reasons.lookup(
+            error.message.substring(separator + 1),
+          );
+          if (specificStage != null && specificReason != null) {
+            throw _CloudPreparationError(specificStage, specificReason);
+          }
+        }
+      }
+      final reason = reasons?.lookup(error.message);
+      if (reason != null) throw _CloudPreparationError(stage, reason);
+      rethrow;
+    }
+  }
+
+  Future<void> retryCloudPreparation(String id) => _serialize(() async {
     _requireInitialized();
     final job = _requireJob(id);
     if (!job.isReal ||
@@ -634,10 +781,10 @@ class CloudController extends ChangeNotifier {
     await _persist(_credentials, next);
     _jobs = next;
     _notify();
-    unawaited(_createTencent(id));
+    unawaited(_createCloud(id));
   });
 
-  Future<_CloudNetworkRecord> _ensureTencentNetwork(
+  Future<_CloudNetworkRecord> _ensureCloudNetwork(
     CloudMachine job,
     String kind, {
     String vpcId = '',
@@ -646,6 +793,7 @@ class CloudController extends ChangeNotifier {
     var record =
         _networks.where((item) => item.matches(job, kind, zone)).firstOrNull ??
         _CloudNetworkRecord(
+          provider: job.provider,
           credentialId: job.credentialId,
           region: job.region,
           kind: kind,
@@ -668,8 +816,8 @@ class CloudController extends ChangeNotifier {
     };
     late Map<String, dynamic> lookup;
     try {
-      lookup = await helper.call({
-        'action': 'tencent_network_lookup',
+      lookup = await _callCloud(job.provider, {
+        'action': '${job.provider.name}_network_lookup',
         'cloud': request(),
       });
       if (lookup['found'] is! bool) throw const FormatException();
@@ -678,7 +826,7 @@ class CloudController extends ChangeNotifier {
       if (!_disposed && (record.pending || record.resourceId.isNotEmpty)) {
         record = record.copyWith(pending: true);
         await _saveNetwork(record);
-        return _waitTencentNetwork(record, request);
+        return _waitCloudNetwork(record, request);
       }
       rethrow;
     }
@@ -696,10 +844,11 @@ class CloudController extends ChangeNotifier {
       await _saveNetwork(resolved);
       return resolved;
     }
+    record = await _pinPendingNetwork(record, lookup);
     if (record.pending || record.resourceId.isNotEmpty) {
       record = record.copyWith(pending: true);
       await _saveNetwork(record);
-      return _waitTencentNetwork(record, request);
+      return _waitCloudNetwork(record, request);
     }
     if (kind == 'subnet') {
       final cidr = lookup['subnet_cidr'];
@@ -715,8 +864,8 @@ class CloudController extends ChangeNotifier {
     if (_disposed) throw const _CloudNetworkError();
     Map<String, dynamic> result;
     try {
-      result = await helper.call({
-        'action': 'tencent_network_create',
+      result = await _callCloud(job.provider, {
+        'action': '${job.provider.name}_network_create',
         'cloud': {
           ...request(),
           if (kind == 'subnet') 'subnet_cidr': record.subnetCidr,
@@ -725,7 +874,7 @@ class CloudController extends ChangeNotifier {
     } catch (_) {
       // The write intent is already durable. Recover with Describe only,
       // including when the create response itself was lost.
-      return _waitTencentNetwork(record, request);
+      return _waitCloudNetwork(record, request);
     }
     if (_disposed) throw const _CloudNetworkError();
     if (result['state'] == 'rejected') {
@@ -743,7 +892,7 @@ class CloudController extends ChangeNotifier {
         record = known.copyWith(pending: true);
         await _saveNetwork(record);
       }
-      return _waitTencentNetwork(record, request);
+      return _waitCloudNetwork(record, request);
     }
     if (result['state'] != 'ready') throw const _CloudNetworkError();
     final resolved = record.resolve(result);
@@ -755,7 +904,25 @@ class CloudController extends ChangeNotifier {
     return resolved;
   }
 
-  Future<_CloudNetworkRecord> _waitTencentNetwork(
+  Future<_CloudNetworkRecord> _pinPendingNetwork(
+    _CloudNetworkRecord record,
+    Map<String, dynamic> result,
+  ) async {
+    final knownId = result[record.kind == 'vpc' ? 'vpc_id' : 'subnet_id'];
+    if (knownId == null || knownId == '') return record;
+    final resolved = record.resolve(result);
+    if ((record.vpcId.isNotEmpty && record.vpcId != resolved.vpcId) ||
+        (record.subnetId.isNotEmpty && record.subnetId != resolved.subnetId) ||
+        (record.subnetCidr.isNotEmpty &&
+            record.subnetCidr != resolved.subnetCidr)) {
+      throw const _CloudNetworkError();
+    }
+    final pinned = resolved.copyWith(pending: true);
+    await _saveNetwork(pinned);
+    return pinned;
+  }
+
+  Future<_CloudNetworkRecord> _waitCloudNetwork(
     _CloudNetworkRecord record,
     Map<String, dynamic> Function() request,
   ) async {
@@ -765,9 +932,14 @@ class CloudController extends ChangeNotifier {
       if (_disposed) throw const _CloudNetworkError();
       late Map<String, dynamic> result;
       try {
-        result = await helper.call({
-          'action': 'tencent_network_lookup',
-          'cloud': request(),
+        result = await _callCloud(record.provider, {
+          'action': '${record.provider.name}_network_lookup',
+          'cloud': {
+            ...request(),
+            if (record.vpcId.isNotEmpty) 'vpc_id': record.vpcId,
+            if (record.subnetId.isNotEmpty) 'subnet_id': record.subnetId,
+            if (record.subnetCidr.isNotEmpty) 'subnet_cidr': record.subnetCidr,
+          },
         });
       } catch (_) {
         // Newly created resources may be visible before their tags or usable
@@ -776,7 +948,10 @@ class CloudController extends ChangeNotifier {
         continue;
       }
       if (_disposed) throw const _CloudNetworkError();
-      if (result['found'] == false) continue;
+      if (result['found'] == false) {
+        record = await _pinPendingNetwork(record, result);
+        continue;
+      }
       if (result['found'] != true) throw const _CloudNetworkError();
       final resolved = record.resolve(result);
       if ((record.vpcId.isNotEmpty && record.vpcId != resolved.vpcId) ||
@@ -817,7 +992,7 @@ class CloudController extends ChangeNotifier {
     _networks = next;
   });
 
-  Future<void> _createTencent(String id) async {
+  Future<void> _createCloud(String id) async {
     _realBusy.add(id);
     var purchaseSubmitted = false;
     try {
@@ -825,8 +1000,11 @@ class CloudController extends ChangeNotifier {
       List<String>? alternatives;
       while (!_disposed) {
         if (job.unavailableZones.contains(job.effectiveZone)) {
+          if (job.unavailableZones.length >= 101) {
+            throw const _CloudZoneError();
+          }
           try {
-            alternatives ??= await _alternativeTencentZones(job);
+            alternatives ??= await _alternativeCloudZones(job);
           } catch (_) {
             throw const _CloudZoneError(queryFailed: true);
           }
@@ -847,7 +1025,7 @@ class CloudController extends ChangeNotifier {
           await _saveReal(job);
           if (_disposed) return;
         }
-        final prepared = await _prepareTencent(job);
+        final prepared = await _prepareCloud(job);
         if (_disposed) return;
         final group = prepared['security_group_id'];
         final key = prepared['key_id'];
@@ -856,9 +1034,15 @@ class CloudController extends ChangeNotifier {
         if (group is! String ||
             !RegExp(r'^sg-[a-zA-Z0-9]+$').hasMatch(group) ||
             key is! String ||
-            !RegExp(r'^skey-[a-zA-Z0-9]+$').hasMatch(key) ||
+            !(job.provider != CloudProvider.tencent
+                    ? RegExp(r'^[a-zA-Z0-9_-]{1,64}$')
+                    : RegExp(r'^skey-[a-zA-Z0-9]+$'))
+                .hasMatch(key) ||
             !_CloudNetworkRecord.validId(vpcId, 'vpc') ||
-            !_CloudNetworkRecord.validId(subnetId, 'subnet')) {
+            !_CloudNetworkRecord.validId(
+              subnetId,
+              job.provider == CloudProvider.aliyun ? 'vsw' : 'subnet',
+            )) {
           throw const FormatException();
         }
         // Durably record the exact zone, subnet, token and intent for EACH
@@ -873,8 +1057,8 @@ class CloudController extends ChangeNotifier {
         await _saveReal(job);
         if (_disposed) return;
         purchaseSubmitted = true;
-        final result = await helper.call({
-          'action': 'tencent_create',
+        final result = await _callCloud(job.provider, {
+          'action': '${job.provider.name}_create',
           'cloud': {
             ..._cloudRequest(job),
             'template': _executionTemplate(job),
@@ -887,7 +1071,10 @@ class CloudController extends ChangeNotifier {
         });
         if (_disposed) return;
         if (result['state'] == 'unavailable' &&
-            (result['instance_id'] == null || result['instance_id'] == '')) {
+            (result['instance_id'] == null || result['instance_id'] == '') &&
+            (job.provider != CloudProvider.volcengine ||
+                result['eip_id'] == null ||
+                result['eip_id'] == '')) {
           final rejected = job.copyWith(
             createSubmitted: false,
             unavailableZones: [...job.unavailableZones, job.effectiveZone],
@@ -904,12 +1091,13 @@ class CloudController extends ChangeNotifier {
                 result['state'] != '' &&
                 result['state'] != 'created') ||
             instanceId is! String ||
-            !RegExp(r'^ins-[a-zA-Z0-9]+$').hasMatch(instanceId)) {
+            !job.provider.validInstanceId(instanceId)) {
           throw const FormatException();
         }
         await _saveReal(
           job.copyWith(
             instanceId: instanceId,
+            eipId: _responseEip(job, result),
             requestId: result['request_id'] as String? ?? '',
           ),
         );
@@ -921,6 +1109,7 @@ class CloudController extends ChangeNotifier {
         final job = _requireJob(id);
         final networkPending = _networks.any(
           (record) =>
+              record.provider == job.provider &&
               record.credentialId == job.credentialId &&
               record.region == job.region &&
               record.pending,
@@ -932,13 +1121,15 @@ class CloudController extends ChangeNotifier {
                 ? CloudMachinePhase.unknown
                 : CloudMachinePhase.createFailed,
             error: purchaseSubmitted
-                ? '创建结果尚未确认，可能已经产生费用。请刷新查询；不要重复创建，必要时到腾讯云控制台核对。'
+                ? '创建结果尚未确认，可能已经产生费用。请刷新查询；不要重复创建，必要时到云控制台核对。'
                 : error is _CloudZoneError
                 ? error.message
                 : error is _CloudNetworkError
                 ? error.message
                 : networkPending
                 ? const _CloudNetworkError().message
+                : error is _CloudPreparationError
+                ? error.message
                 : '创建准备失败，尚未提交购买。请检查凭证权限、模板与网络后重试准备；已准备的共享 VPC、子网、安全组和公钥会保留。',
           ),
         );
@@ -983,7 +1174,19 @@ class CloudController extends ChangeNotifier {
     }
   }
 
-  Future<void> refreshTencentMachine(String id) async {
+  String _responseEip(CloudMachine job, Map<String, dynamic> result) {
+    if (job.provider != CloudProvider.volcengine) return '';
+    final value = result['eip_id'];
+    if (value == null || value == '') return job.eipId;
+    if (value is! String ||
+        !RegExp(r'^eip-[a-zA-Z0-9]+$').hasMatch(value) ||
+        (job.eipId.isNotEmpty && job.eipId != value)) {
+      throw const FormatException();
+    }
+    return value;
+  }
+
+  Future<void> refreshCloudMachine(String id) async {
     _requireInitialized();
     if (_disposed || !_realBusy.add(id)) return;
     _timers.remove(id)?.cancel();
@@ -991,10 +1194,10 @@ class CloudController extends ChangeNotifier {
       final job = _requireJob(id);
       if (!job.isReal || job.phase == CloudMachinePhase.released) return;
       if (!job.createSubmitted) return;
-      final result = await helper.call({
+      final result = await _callCloud(job.provider, {
         'action': job.instanceId.isEmpty
-            ? 'tencent_recover'
-            : 'tencent_describe',
+            ? '${job.provider.name}_recover'
+            : '${job.provider.name}_describe',
         'cloud': _cloudRequest(job),
       });
       if (_disposed) return;
@@ -1005,16 +1208,18 @@ class CloudController extends ChangeNotifier {
         await _saveReal(
           job.copyWith(
             phase:
-                job.instanceId.isNotEmpty &&
+                job.provider != CloudProvider.volcengine &&
+                    job.instanceId.isNotEmpty &&
                     (job.phase == CloudMachinePhase.releasing ||
                         job.phase == CloudMachinePhase.releaseFailed)
                 ? CloudMachinePhase.released
                 : CloudMachinePhase.unknown,
             error:
-                job.instanceId.isEmpty ||
+                job.provider == CloudProvider.volcengine ||
+                    job.instanceId.isEmpty ||
                     (job.phase != CloudMachinePhase.releasing &&
                         job.phase != CloudMachinePhase.releaseFailed)
-                ? '暂未查询到创建结果，仍需到腾讯云控制台核实；请勿重复购买。'
+                ? '暂未查询到创建结果，仍需到云控制台核实；请勿重复购买。'
                 : '云端已查不到此实例；请在控制台核对账单及自行添加的附属资源。',
           ),
         );
@@ -1022,32 +1227,51 @@ class CloudController extends ChangeNotifier {
       }
       final found = result['instance_id'];
       if (found is! String ||
-          !RegExp(r'^ins-[a-zA-Z0-9]+$').hasMatch(found) ||
+          !job.provider.validInstanceId(found) ||
           (job.instanceId.isNotEmpty && found != job.instanceId)) {
         throw const FormatException();
       }
       final state = result['state'];
+      final eipId = _responseEip(job, result);
+      if (job.provider == CloudProvider.volcengine &&
+          state == 'TERMINATED' &&
+          (!job.releaseSubmitted ||
+              job.eipId.isEmpty ||
+              result['eip_id'] != job.eipId)) {
+        throw const FormatException();
+      }
       final releasing =
+          (job.provider == CloudProvider.volcengine && job.releaseSubmitted) ||
           job.phase == CloudMachinePhase.releasing ||
           job.phase == CloudMachinePhase.releaseFailed;
       final phase = switch (state) {
         'TERMINATED' => CloudMachinePhase.released,
         'RUNNING' || 'STOPPED'
-            when job.phase == CloudMachinePhase.releaseFailed =>
+            when job.phase == CloudMachinePhase.releaseFailed ||
+                (job.provider == CloudProvider.volcengine &&
+                    job.releaseSubmitted) =>
           CloudMachinePhase.releaseFailed,
         'RUNNING' when !releasing => CloudMachinePhase.created,
         'STOPPED' when !releasing => CloudMachinePhase.created,
         'LAUNCH_FAILED' => CloudMachinePhase.createFailed,
+        'EIP_RELEASE_PENDING' => CloudMachinePhase.releaseFailed,
         _ =>
           releasing ? CloudMachinePhase.releasing : CloudMachinePhase.creating,
       };
       await _saveReal(
         job.copyWith(
           instanceId: found,
-          publicIp: result['public_ip'] as String? ?? '',
+          eipId: eipId,
+          publicIp: (result['public_ip'] as String? ?? '').isNotEmpty
+              ? result['public_ip'] as String
+              : releasing
+              ? job.publicIp
+              : '',
           phase: phase,
           requestId: result['request_id'] as String? ?? job.requestId,
-          error: state == 'LAUNCH_FAILED'
+          error: state == 'EIP_RELEASE_PENDING'
+              ? '实例已不存在，公网 IP 尚未确认释放（$eipId）。请到火山引擎控制台核对并释放该公网 IP，再刷新查询；管理记录和凭证将保留。'
+              : state == 'LAUNCH_FAILED'
               ? '云端报告创建失败，请释放或到控制台核实资源与费用。'
               : phase == CloudMachinePhase.releaseFailed
               ? '实例仍在运行或停止状态，尚未确认释放。请核对后重试释放。'
@@ -1060,9 +1284,13 @@ class CloudController extends ChangeNotifier {
       } else {
         _pollAttempts.remove(id);
       }
-    } catch (_) {
+    } catch (error) {
       if (!_disposed) {
         final job = _requireJob(id);
+        final reason =
+            job.provider == CloudProvider.aliyun && error is UserError
+            ? _aliyunQueryReasons.lookup(error.message)
+            : null;
         await _saveRealError(
           job.copyWith(
             phase: job.phase == CloudMachinePhase.releasing
@@ -1070,7 +1298,9 @@ class CloudController extends ChangeNotifier {
                 : job.phase == CloudMachinePhase.creating
                 ? CloudMachinePhase.unknown
                 : job.phase,
-            error: '无法确认云端状态，请检查网络与凭证权限后刷新；现有资源可能继续计费。',
+            error: reason == null
+                ? '无法确认云端状态，请检查网络与凭证权限后刷新；现有资源可能继续计费。'
+                : '无法确认云端状态。$reason。处理后请刷新查询；现有资源可能继续计费。',
           ),
         );
       }
@@ -1079,11 +1309,14 @@ class CloudController extends ChangeNotifier {
     }
   }
 
-  Future<void> requestTencentRelease(String id) async {
+  Future<void> requestCloudRelease(String id) async {
     _requireInitialized();
     final job = _requireJob(id);
     if (_deploymentLocks.contains(id)) {
       throw const UserError('Sisters 正在部署，请等待部署结束后再释放云服务器。');
+    }
+    if (job.provider == CloudProvider.volcengine && job.eipId.isEmpty) {
+      throw const UserError('公网 IP 关联尚未核实，请先查询云端状态后再释放。');
     }
     if (!job.isReal ||
         job.instanceId.isEmpty ||
@@ -1095,14 +1328,18 @@ class CloudController extends ChangeNotifier {
     try {
       _cloudRequest(job);
       await _saveReal(
-        job.copyWith(phase: CloudMachinePhase.releasing, error: ''),
+        job.copyWith(
+          phase: CloudMachinePhase.releasing,
+          releaseSubmitted: true,
+          error: '',
+        ),
       );
       _timers.remove(id)?.cancel();
       if (_disposed) {
         _realBusy.remove(id);
         return;
       }
-      unawaited(_releaseTencent(id));
+      unawaited(_releaseCloud(id));
     } catch (_) {
       if (!_disposed) {
         await _saveRealError(
@@ -1114,11 +1351,11 @@ class CloudController extends ChangeNotifier {
     }
   }
 
-  Future<void> _releaseTencent(String id) async {
+  Future<void> _releaseCloud(String id) async {
     try {
       final job = _requireJob(id);
-      final result = await helper.call({
-        'action': 'tencent_release',
+      final result = await _callCloud(job.provider, {
+        'action': '${job.provider.name}_release',
         'cloud': _cloudRequest(job),
       });
       if (_disposed) return;
@@ -1129,12 +1366,19 @@ class CloudController extends ChangeNotifier {
       );
       _pollAttempts.remove(id);
       _scheduleRealPoll(id);
-    } catch (_) {
+    } catch (error) {
       if (!_disposed) {
+        final job = _requireJob(id);
+        final reason =
+            job.provider == CloudProvider.aliyun && error is UserError
+            ? _aliyunReleaseReasons.lookup(error.message)
+            : null;
         await _saveRealError(
-          _requireJob(id).copyWith(
+          job.copyWith(
             phase: CloudMachinePhase.releaseFailed,
-            error: '释放结果尚未确认。请刷新查询；若实例仍在，请检查权限、释放保护、额外磁盘或独立公网 IP 后重试。资源可能继续计费。',
+            error: reason == null
+                ? '释放结果尚未确认。请刷新查询；若实例仍在，请检查权限、释放保护、额外磁盘或独立公网 IP 后重试。资源可能继续计费。'
+                : '释放尚未确认。$reason。处理后请刷新查询，资源可能继续计费。',
           ),
         );
       }
@@ -1164,7 +1408,7 @@ class CloudController extends ChangeNotifier {
     _timers.remove(id)?.cancel();
     _timers[id] = Timer(cloudPollInterval, () {
       _timers.remove(id);
-      unawaited(refreshTencentMachine(id));
+      unawaited(refreshCloudMachine(id));
     });
   }
 
@@ -1329,6 +1573,179 @@ class _StoredCredential {
   }
 }
 
+// These are fixed public errors from internal/cloud/volcengine, not arbitrary
+// provider responses. Unrecognized messages deliberately keep the generic UI.
+const _volcenginePreparationStages = <String>{
+  'SSH 公钥检查',
+  '镜像检查',
+  '共享 VPC 复核',
+  'SSH 公钥准备',
+  '安全组准备',
+};
+
+const _volcenginePreparationReasons = <String>{
+  '火山引擎身份或权限校验失败，请检查访问密钥及授权',
+  '火山引擎配额或请求频率受限，请查询确认后重试',
+  '火山引擎账户余额不足',
+  '火山引擎拒绝了资源参数，请核对模板和云端状态',
+  '火山引擎请求未成功，请查询确认操作结果',
+  '火山引擎请求参数无效',
+  '火山引擎 API 凭据格式无效',
+  '火山引擎网络请求未完成，结果可能未知，请查询核对',
+  '火山引擎服务域名解析失败，结果可能未知，请查询核对',
+  '火山引擎网络请求超时，结果可能未知，请查询核对',
+  '火山引擎 TLS 服务器证书验证失败，结果可能未知，请查询核对',
+  '火山引擎 TLS 服务器域名验证失败，结果可能未知，请查询核对',
+  '火山引擎网络访问被系统权限阻止，结果可能未知，请查询核对',
+  '火山引擎网络连接被拒绝，结果可能未知，请查询核对',
+  '火山引擎网络或目标主机不可达，结果可能未知，请查询核对',
+  '火山引擎网络连接中断，结果可能未知，请查询核对',
+  '火山引擎网络请求已取消，结果可能未知，请查询核对',
+  '火山引擎响应异常，请查询确认',
+  '火山引擎响应格式异常，请查询确认',
+  '火山引擎响应相互矛盾，请查询确认',
+  '火山引擎响应字段异常，请查询确认',
+  '火山引擎查询响应缺少资源列表，请重新查询',
+  '火山引擎查询资源列表格式异常，请重新查询',
+  '火山引擎查询分页结果不完整，请重新查询',
+  '火山引擎模板无效，请检查地域、镜像、系统盘与按流量公网 IP 配置',
+  '模板镜像不存在或无权访问',
+  '模板镜像必须是可用的 Linux 镜像，架构与系统盘须匹配',
+  '模板镜像不允许附带数据盘',
+  'SSH 公钥必须是有效的 OpenSSH RSA 公钥',
+  'SSH 公钥无效',
+  'SSH 公钥必须至少为 RSA 2048 位',
+  '云资源仍在准备中，请稍后重试查询确认',
+  '云资源准备未完成，请重试查询确认',
+  '云资源准备缺少已确认的 VPC',
+  '同名云密钥不唯一，请在控制台核对',
+  '同名云密钥的归属或指纹不匹配',
+  'SSH 密钥导入响应异常，请在控制台核对',
+  '安全组规则与固定策略不匹配，请在控制台核对',
+  '安全组归属或配置与项目不匹配',
+  '安全组查询响应不完整',
+  '同名安全组不唯一，请在控制台核对',
+  '安全组创建结果与查询不符',
+  '火山引擎网络查询结果不完整，请重新查询',
+  '同名共享网络的归属或配置不匹配，请在火山引擎控制台核对',
+  '共享网络尚未就绪，请稍后查询确认',
+  '共享 VPC 内没有可用的子网地址段',
+  '共享子网可用地址不足或未确认',
+};
+
+// Exact fixed helper messages only; never accept provider error text or appended details.
+const _aliyunPreparationStages = <String>{
+  'SSH 公钥检查',
+  '共享 VPC 复核',
+  '镜像检查',
+  'SSH 公钥准备',
+  '安全组准备',
+  '云资源准备',
+};
+
+const _aliyunCommonReasons = <String>{
+  '阿里云身份或权限校验失败，请检查 API 密钥及授权',
+  '阿里云配额或请求频率受限，请稍后查询结果',
+  '阿里云账户余额不足',
+  '阿里云拒绝了资源参数，请检查模板与云端资源',
+  '阿里云请求未成功，请在控制台核对操作结果后重试查询',
+  '阿里云请求参数无效',
+  '阿里云请求标识生成失败',
+  '阿里云网络请求未完成，操作结果可能未知，请重新查询或到控制台核对',
+  '阿里云服务域名解析失败，操作结果可能未知，请重新查询或到控制台核对',
+  '阿里云网络请求超时，操作结果可能未知，请重新查询或到控制台核对',
+  '阿里云 TLS 服务器域名验证失败，操作结果可能未知，请重新查询或到控制台核对',
+  '阿里云 TLS 服务器证书验证失败，操作结果可能未知，请重新查询或到控制台核对',
+  '阿里云网络访问被系统权限阻止，操作结果可能未知，请重新查询或到控制台核对',
+  '阿里云网络连接被拒绝，操作结果可能未知，请重新查询或到控制台核对',
+  '阿里云网络或目标主机不可达，操作结果可能未知，请重新查询或到控制台核对',
+  '阿里云网络连接中断，操作结果可能未知，请重新查询或到控制台核对',
+  '阿里云网络请求已取消，操作结果可能未知，请重新查询或到控制台核对',
+  '阿里云响应异常，操作结果可能未知，请查询确认',
+  '阿里云响应读取失败，操作结果可能未知，请查询确认',
+  '阿里云响应超过大小限制，操作结果可能未知，请查询确认',
+  '阿里云 HTTP 响应状态异常，操作结果可能未知，请查询确认',
+  '阿里云响应字段格式异常，操作结果可能未知，请查询确认',
+  '阿里云安全组规则查询响应读取失败，操作结果可能未知，请查询确认',
+  '阿里云安全组规则查询响应超过大小限制，操作结果可能未知，请查询确认',
+  '阿里云安全组规则查询 HTTP 响应状态异常，操作结果可能未知，请查询确认',
+  '阿里云安全组规则查询响应字段格式异常，操作结果可能未知，请查询确认',
+  '阿里云安全组规则优先级字段格式异常，操作结果可能未知，请查询确认',
+  '阿里云安全组规则列表字段格式异常，操作结果可能未知，请查询确认',
+  '阿里云安全组分页标记字段格式异常，操作结果可能未知，请查询确认',
+  '阿里云安全组归属字段格式异常，操作结果可能未知，请查询确认',
+  '阿里云安全组规则内容字段格式异常，操作结果可能未知，请查询确认',
+  '阿里云响应缺少有效请求标识或格式异常，请查询确认操作结果',
+  '阿里云创建响应矛盾，请查询确认操作结果',
+  '阿里云服务响应异常，操作结果可能未知，请查询确认',
+  '阿里云 API 凭据格式无效',
+  '阿里云分页查询结果不完整或格式异常，请重新查询',
+  '阿里云分页查询结果重复，请重新查询',
+  '阿里云分页查询模式异常，请重新查询',
+};
+
+const _aliyunPreparationReasons = <String>{
+  ..._aliyunCommonReasons,
+  '云资源准备未完成，请重试查询确认',
+  '阿里云模板无效，请检查模板字段、地域、镜像、网络和按量计费配置',
+  '阿里云网络查询结果不完整或格式异常，请重新查询',
+  '共享网络尚未可见，请稍后查询确认',
+  '同名共享网络的归属或配置不匹配，请在阿里云控制台核对',
+  '共享子网可用地址不足或尚未确认，请在阿里云控制台核对',
+  '共享 VPC 内没有可用的子网地址段，请在阿里云控制台核对',
+  '共享网络操作记录无效',
+  'SSH 公钥必须是有效的 OpenSSH RSA 公钥',
+  'SSH 公钥无效',
+  'SSH 公钥必须至少为 RSA 2048 位',
+  '模板镜像不存在或无权访问',
+  '模板镜像必须是可用的 Linux 镜像，架构与系统盘大小必须匹配',
+  '模板镜像不允许附带数据盘',
+  '模板镜像必须仅包含一块系统盘，不允许附带数据盘',
+  '模板镜像缺少磁盘映射信息，无法确认单系统盘配置',
+  '模板镜像磁盘类型无法确认，已停止创建',
+  '模板镜像系统盘映射与容量不匹配',
+  '云资源仍在准备中，尚未提交服务器购买；请稍后重试查询确认',
+  '云资源与创建响应标识不匹配，请在控制台核对',
+  '同名云资源不唯一，请在控制台核对',
+  '同名云 SSH 密钥内容不匹配，已停止创建',
+  '云 SSH 密钥导入结果异常，请在控制台核对',
+  '同名安全组包含模板以外的规则，请在控制台核对',
+  '同名安全组规则已改变，请在控制台核对',
+  '安全组规则响应不完整或归属不匹配，已停止操作',
+  '安全组分页响应异常，已停止操作',
+  '安全组规则未完成，请重试准备操作',
+  '同名安全组不是本应用的匹配配置，已停止创建',
+  '安全组创建结果异常，请在控制台核对',
+};
+
+const _aliyunQueryReasons = <String>{
+  ..._aliyunCommonReasons,
+  '阿里云实例标识或操作记录无效',
+  '实例查询结果不唯一，请在阿里云控制台核对',
+  '云服务器与本地创建记录不匹配，已停止操作',
+  '云服务器状态格式异常',
+};
+
+const _aliyunReleaseReasons = <String>{
+  ..._aliyunCommonReasons,
+  '阿里云实例标识或操作记录无效',
+  '实例查询结果不唯一，请在阿里云控制台核对',
+  '云服务器与本地创建记录不匹配，已停止操作',
+  '仅允许释放本应用创建的普通按量 VPC 云服务器',
+  '云服务器关联了独立弹性公网 IP，请先在阿里云控制台核对和处理',
+  '云服务器磁盘不符合随实例释放的单系统盘配置，请先在阿里云控制台核对和处理',
+  '云服务器网卡配置已改变或不完整，请先在阿里云控制台核对和处理',
+  '云服务器仍在变更状态，请稍后查询再释放',
+};
+
+class _CloudPreparationError implements Exception {
+  const _CloudPreparationError(this.stage, this.reason);
+  final String stage, reason;
+  String get message =>
+      '创建准备失败，尚未提交购买。$stage：$reason。'
+      '处理后可重试准备；已准备的共享 VPC、子网、安全组和公钥会保留。';
+}
+
 class _CloudZoneError implements Exception {
   const _CloudZoneError({this.queryFailed = false});
   final bool queryFailed;
@@ -1341,8 +1758,8 @@ class _CloudNetworkError implements Exception {
   const _CloudNetworkError({this.rejected = false});
   final bool rejected;
   String get message => rejected
-      ? '腾讯云拒绝了网络创建，尚未提交服务器购买。请检查网络创建权限与配额后重试准备。'
-      : '共享网络创建结果待核实，尚未提交服务器购买。重试准备只会先查询找回网络；未确认前不会重复创建，请到腾讯云控制台核对。';
+      ? '云端拒绝了网络创建，尚未提交服务器购买。请检查网络创建权限与配额后重试准备。'
+      : '共享网络创建结果待核实，尚未提交服务器购买。重试准备只会先查询找回网络；未确认前不会重复创建，请到云控制台核对。';
 }
 
 class _CloudNetworkRecord {
@@ -1350,6 +1767,7 @@ class _CloudNetworkRecord {
     required this.credentialId,
     required this.region,
     required this.kind,
+    this.provider = CloudProvider.tencent,
     this.zone = '',
     this.vpcId = '',
     this.subnetId = '',
@@ -1357,10 +1775,13 @@ class _CloudNetworkRecord {
     this.pending = false,
   });
   final String credentialId, region, kind, zone, vpcId, subnetId, subnetCidr;
+  final CloudProvider provider;
   final bool pending;
-  String get identity => jsonEncode([credentialId, region, kind, zone]);
+  String get identity =>
+      jsonEncode([provider.name, credentialId, region, kind, zone]);
   String get resourceId => kind == 'vpc' ? vpcId : subnetId;
   bool matches(CloudMachine job, String requestedKind, String requestedZone) =>
+      provider == job.provider &&
       credentialId == job.credentialId &&
       region == job.region &&
       kind == requestedKind &&
@@ -1376,6 +1797,7 @@ class _CloudNetworkRecord {
 
   _CloudNetworkRecord copyWith({bool? pending, String? subnetCidr}) =>
       _CloudNetworkRecord(
+        provider: provider,
         credentialId: credentialId,
         region: region,
         kind: kind,
@@ -1388,11 +1810,15 @@ class _CloudNetworkRecord {
   _CloudNetworkRecord resolve(Map<String, dynamic> value) {
     if (!validId(value['vpc_id'], 'vpc') ||
         (kind == 'subnet' &&
-            (!validId(value['subnet_id'], 'subnet') ||
+            (!validId(
+                  value['subnet_id'],
+                  provider == CloudProvider.aliyun ? 'vsw' : 'subnet',
+                ) ||
                 !validSubnetCidr(value['subnet_cidr'])))) {
       throw const FormatException();
     }
     return _CloudNetworkRecord(
+      provider: provider,
       credentialId: credentialId,
       region: region,
       kind: kind,
@@ -1404,6 +1830,7 @@ class _CloudNetworkRecord {
   }
 
   Map<String, dynamic> toJson() => {
+    'provider': provider.name,
     'credentialId': credentialId,
     'region': region,
     'kind': kind,
@@ -1415,6 +1842,9 @@ class _CloudNetworkRecord {
   };
   factory _CloudNetworkRecord.fromJson(Map<String, dynamic> value) {
     final record = _CloudNetworkRecord(
+      provider: CloudProvider.values.byName(
+        value['provider'] as String? ?? 'tencent',
+      ),
       credentialId: value['credentialId'] as String,
       region: value['region'] as String,
       kind: value['kind'] as String,
@@ -1429,10 +1859,15 @@ class _CloudNetworkRecord {
               'SecretId',
             ) !=
             null ||
-        !RegExp(r'^[a-z]{2}-[a-z]+(?:-[a-z]+)*$').hasMatch(record.region) ||
+        !record.provider.supportsResources ||
+        !record.provider.validRegion(record.region) ||
         !['vpc', 'subnet'].contains(record.kind) ||
         (record.vpcId.isNotEmpty && !validId(record.vpcId, 'vpc')) ||
-        (record.subnetId.isNotEmpty && !validId(record.subnetId, 'subnet')) ||
+        (record.subnetId.isNotEmpty &&
+            !validId(
+              record.subnetId,
+              record.provider == CloudProvider.aliyun ? 'vsw' : 'subnet',
+            )) ||
         (record.subnetCidr.isNotEmpty && !validSubnetCidr(record.subnetCidr)) ||
         (record.kind == 'vpc' &&
             (record.zone.isNotEmpty ||
@@ -1440,7 +1875,8 @@ class _CloudNetworkRecord {
                 record.subnetCidr.isNotEmpty)) ||
         (record.kind == 'subnet' &&
             (!validId(record.vpcId, 'vpc') ||
-                !RegExp('^${RegExp.escape(record.region)}-[1-9][0-9]*\$')
+                !record.provider
+                    .zonePattern(record.region)
                     .hasMatch(record.zone) ||
                 (record.subnetId.isNotEmpty && record.subnetCidr.isEmpty)))) {
       throw const FormatException();

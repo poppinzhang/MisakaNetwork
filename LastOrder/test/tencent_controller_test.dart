@@ -17,6 +17,7 @@ Map<String, dynamic> templateData() => {
   'diskGb': 50,
   'architecture': 'x64',
   'os': 'Ubuntu 24.04 LTS',
+  'sshUsername': 'ubuntu',
   'regionLabel': '广州',
   'region': 'ap-guangzhou',
   'runInstances': {

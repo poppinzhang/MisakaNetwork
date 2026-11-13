@@ -9,10 +9,13 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:last_order/src/app.dart';
 import 'package:last_order/src/cloud_models.dart';
+import 'package:last_order/src/cloud_controller.dart';
+import 'package:last_order/src/controller.dart';
 import 'package:last_order/src/models.dart';
 import 'package:material_ui/material_ui.dart';
 
 import 'fakes.dart';
+import 'aliyun_controller_test.dart' show Harness, templateData;
 
 void main() {
   final fontPath = Platform.environment['CLOUD_PREVIEW_FONT'];
@@ -38,7 +41,18 @@ void main() {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
-    final c = controller(helper: FakeHelper()..cloudSshReady = true);
+    final h = Harness();
+    await h.init();
+    h.c.dispose();
+    h.store.secrets.remove(CloudController.workspaceKey);
+    final c = AppController(
+      store: h.store,
+      helper: h.helper,
+      gateway: FakeGateway(),
+      runtime: FakeRuntime(),
+      cloudTemplateLoader: () async => [],
+      aliyunTemplateLoader: () async => [CloudTemplate.aliyun(templateData())],
+    );
     await c.initialize(poll: false);
     await c.cloud.initialize();
     addTearDown(c.dispose);
@@ -95,36 +109,28 @@ void main() {
     await capture('02-providers-desktop');
     await tester.tap(find.text('创建').first);
     await tester.pumpAndSettle();
-    await tester.tap(
-      find.byKey(const ValueKey('cloud-template-aliyun-balanced')),
-    );
+    await tester.tap(find.byKey(const ValueKey('cloud-template-test-aliyun')));
     await tester.pumpAndSettle();
     await capture('03-templates-desktop');
     await tester.tap(find.byTooltip('关闭云服务器创建'));
     await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('机器管理'));
     await tester.pumpAndSettle();
-    await c.cloud.startPreviewCreation(
+    h.failAction = 'aliyun_prepare';
+    await c.cloud.startCloudCreation(
       CloudProvider.aliyun,
-      CloudTemplate.forProvider(CloudProvider.aliyun)[0],
-      outcome: CloudPreviewOutcome.createFailure,
-    );
-    await tester.pump(const Duration(seconds: 3));
-    await tester.pump();
-    await c.cloud.startPreviewCreation(
-      CloudProvider.aliyun,
-      CloudTemplate.forProvider(CloudProvider.aliyun)[1],
-    );
-    await tester.pump(const Duration(seconds: 3));
-    await tester.pump();
-    await c.cloud.startPreviewCreation(
-      CloudProvider.aliyun,
-      CloudTemplate.forProvider(CloudProvider.aliyun)[2],
+      c.cloud.templatesFor(CloudProvider.aliyun).single,
     );
     await tester.pump();
-    await capture('04-machines-desktop');
-    await tester.pump(const Duration(seconds: 6));
+    h.failAction = null;
+    final created = await c.cloud.startCloudCreation(
+      CloudProvider.aliyun,
+      c.cloud.templatesFor(CloudProvider.aliyun).single,
+    );
+    await tester.pump();
+    await c.cloud.refreshCloudMachine(created.id);
     await tester.pumpAndSettle();
+    await capture('04-machines-desktop');
     await c.setThemeMode(AppThemeMode.dark);
     await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('公有云部署'));

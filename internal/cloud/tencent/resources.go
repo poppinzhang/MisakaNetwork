@@ -66,6 +66,7 @@ func preflightImage(ctx context.Context, api caller, t Template) error {
 		ImageSet   []struct {
 			ImageId, OsName, ImageType, Architecture, ImageState, Platform string
 			ImageSize                                                      int
+			SnapshotSet                                                    []struct{ DiskUsage string }
 		}
 	}
 	if err := api.call(ctx, "cvm", "DescribeImages", t.Region, map[string]any{"ImageIds": []string{t.RunInstances.ImageID}}, &out); err != nil {
@@ -79,10 +80,23 @@ func preflightImage(ctx context.Context, api caller, t Template) error {
 	if t.Architecture == "arm64" {
 		arch = "arm"
 	}
-	if i.ImageId != t.RunInstances.ImageID || i.ImageType != "PUBLIC_IMAGE" || i.ImageState != "NORMAL" || i.Architecture != arch || !strings.EqualFold(i.Platform, "Ubuntu") || !matches(`(?i)\bubuntu(?:\s+server)?\s+24\.04(?:\D|$)`, i.OsName) || i.ImageSize < 1 || i.ImageSize > t.DiskGB {
-		return errors.New("模板镜像必须是可用的 Ubuntu 24.04 官方镜像，架构与系统盘大小必须匹配")
+	if i.ImageId != t.RunInstances.ImageID || i.ImageState != "NORMAL" || i.Architecture != arch || knownNonLinuxImage(i.Platform, i.OsName) || i.ImageSize < 1 || i.ImageSize > t.DiskGB {
+		return errors.New("模板镜像必须可用且不能是已知的非 Linux 系统，架构与系统盘大小必须匹配")
+	}
+	for _, snapshot := range i.SnapshotSet {
+		if len(i.SnapshotSet) != 1 || snapshot.DiskUsage != "SYSTEM_DISK" {
+			return errors.New("模板镜像不允许附带数据盘")
+		}
 	}
 	return nil
+}
+
+// Tencent's Image has Platform and OsName, but no OSType field. Do not
+// maintain a distribution allowlist: custom/new Linux images must stay usable.
+// Unknown metadata is finally checked by SSH uname/getconf before deployment.
+// https://cloud.tencent.com/document/api/213/15753#Image
+func knownNonLinuxImage(platform, name string) bool {
+	return matches(`(?i)(?:windows|freebsd|openbsd|netbsd|dragonfly|macos|mac os|darwin|solaris)`, platform+" "+name)
 }
 
 func publicKey(value string) (ssh.PublicKey, error) {

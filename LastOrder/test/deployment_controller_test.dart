@@ -310,7 +310,16 @@ void main() {
       expect(c.state.machines.single.deploymentError, contains('与已保存记录不一致'));
       expect(c.state.machines.single.canConnect, isFalse);
       expect(c.state.machines.single.fingerprint, hostFingerprint);
-      expect(await key.exists(), isFalse);
+      // The deployment becomes inactive before asynchronous import cleanup.
+      final cleanupDeadline = DateTime.now().add(const Duration(seconds: 2));
+      while (await key.exists() && DateTime.now().isBefore(cleanupDeadline)) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+      expect(
+        await key.exists(),
+        isFalse,
+        reason: 'Imported key copy was not removed after deployment cleanup',
+      );
       expect(
         helper.requests.where((r) => r['action'] == 'deploy'),
         hasLength(2),

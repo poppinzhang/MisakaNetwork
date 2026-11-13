@@ -20,6 +20,10 @@ import (
 )
 
 func cloudAuthSSHFixture(t *testing.T, publicKey string) (string, ssh.PublicKey, *atomic.Int32, <-chan error) {
+	return cloudAuthSSHFixtureForUser(t, publicKey, "ubuntu")
+}
+
+func cloudAuthSSHFixtureForUser(t *testing.T, publicKey, username string) (string, ssh.PublicKey, *atomic.Int32, <-chan error) {
 	t.Helper()
 	key, _, _, _, err := ssh.ParseAuthorizedKey([]byte(publicKey))
 	if err != nil {
@@ -41,7 +45,7 @@ func cloudAuthSSHFixture(t *testing.T, publicKey string) (string, ssh.PublicKey,
 	attempts := new(atomic.Int32)
 	server := &ssh.ServerConfig{PublicKeyCallback: func(metadata ssh.ConnMetadata, actual ssh.PublicKey) (*ssh.Permissions, error) {
 		attempts.Add(1)
-		if metadata.User() != "ubuntu" || !bytes.Equal(actual.Marshal(), key.Marshal()) {
+		if metadata.User() != username || !bytes.Equal(actual.Marshal(), key.Marshal()) {
 			return nil, errors.New("server-private-test-value")
 		}
 		return nil, nil
@@ -63,6 +67,28 @@ func cloudAuthSSHFixture(t *testing.T, publicKey string) (string, ssh.PublicKey,
 		finished <- handshakeErr
 	}()
 	return listener.Addr().String(), signer.PublicKey(), attempts, finished
+}
+
+func TestVolcengineRootKeyAuthenticatesWithoutSudoOrKeyFile(t *testing.T) {
+	identity, err := GenerateCloudSSHKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	address, hostKey, _, finished := cloudAuthSSHFixtureForUser(t, identity.PublicKey, "root")
+	auth, err := deploymentAuth(Request{Username: "root", PrivateKey: identity.PrivateKey})
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, err := ssh.Dial("tcp", address, &ssh.ClientConfig{
+		User: "root", Auth: auth, HostKeyCallback: hostCallback(ssh.FingerprintSHA256(hostKey)), Timeout: 5 * time.Second,
+	})
+	if err != nil {
+		t.Fatal("Volcengine root login rejected the in-memory key")
+	}
+	client.Close()
+	if err := <-finished; err != nil {
+		t.Fatal("server did not accept the stored cloud identity")
+	}
 }
 
 func TestCloudDeploymentPrivateKeyAuthenticatesWithoutFile(t *testing.T) {

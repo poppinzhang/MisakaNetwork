@@ -70,11 +70,15 @@ class AppController extends ChangeNotifier {
     required this.runtime,
     required this.helper,
     Future<List<CloudTemplate>> Function()? cloudTemplateLoader,
+    Future<List<CloudTemplate>> Function()? volcengineTemplateLoader,
+    Future<List<CloudTemplate>> Function()? aliyunTemplateLoader,
   }) {
     cloud = CloudController(
       store: store,
       helper: helper,
       templateLoader: cloudTemplateLoader,
+      volcengineTemplateLoader: volcengineTemplateLoader,
+      aliyunTemplateLoader: aliyunTemplateLoader,
     )..addListener(_cloudChanged);
   }
   final StateStore store;
@@ -1191,14 +1195,44 @@ class AppController extends ChangeNotifier {
       .where((machine) => machine.id == 'tencent-$cloudId')
       .firstOrNull;
 
-  String? cloudIdForMachine(Machine machine) =>
-      machine.id.startsWith('tencent-') ? machine.id.substring(8) : null;
+  CloudMachine? cloudResource(String cloudId) =>
+      cloud.jobs.where((job) => job.id == cloudId && job.isReal).firstOrNull;
+
+  Machine? cloudMachine(String cloudId) {
+    final resource = cloudResource(cloudId);
+    if (resource == null) return null;
+    return state.machines
+        .where((machine) => machine.id == '${resource.provider.name}-$cloudId')
+        .firstOrNull;
+  }
+
+  String? cloudIdForMachine(Machine machine) {
+    for (final prefix in ['tencent-', 'volcengine-', 'aliyun-']) {
+      if (machine.id.startsWith(prefix)) {
+        return machine.id.substring(prefix.length);
+      }
+    }
+    return null;
+  }
+
+  String _cloudLogin(CloudMachine resource) {
+    final username = resource.template.sshUsername;
+    if (!RegExp(r'^[a-z_][a-z0-9_-]{0,31}$').hasMatch(username)) {
+      throw const UserError('云模板缺少有效的 SSH 登录用户，请联系管理员核对模板。');
+    }
+    return username;
+  }
 
   bool isReleasedCloudMachine(Machine machine) {
     final id = cloudIdForMachine(machine);
     return cloud.initialized &&
         id != null &&
-        cloud.jobs.any((job) => job.id == id && job.releaseConfirmed);
+        cloud.jobs.any(
+          (job) =>
+              job.id == id &&
+              machine.id == '${job.provider.name}-$id' &&
+              job.releaseConfirmed,
+        );
   }
 
   // Keep saved machines for monitoring, dispatch history and payment reports;
@@ -1214,21 +1248,26 @@ class AppController extends ChangeNotifier {
     return cloud.initialized &&
         resource != null &&
         resource.isReal &&
+        machine.id == '${resource.provider.name}-$id' &&
         resource.phase == CloudMachinePhase.created &&
         resource.instanceId.isNotEmpty &&
         resource.publicIp.isNotEmpty &&
         deploymentHostKey(resource.publicIp) == deploymentHostKey(machine.host);
   }
 
-  Future<void> startTencentDeployment(String cloudId) async {
+  Future<void> startTencentDeployment(String cloudId) =>
+      startCloudDeployment(cloudId);
+
+  Future<void> startCloudDeployment(String cloudId) async {
     if (!initialized || disposed) throw const UserError('配置尚未加载，无法部署。');
-    final resource = await cloud.beginTencentDeployment(cloudId);
+    final resource = await cloud.beginCloudDeployment(cloudId);
     _cloudDeploymentStarts.add(cloudId);
     var transferred = false;
     try {
-      final privateKey = await cloud.tencentDeploymentPrivateKey();
+      final privateKey = await cloud.cloudDeploymentPrivateKey();
       if (disposed) throw const UserError('应用已关闭，部署已中断。');
-      final existing = tencentMachine(cloudId);
+      final existing = cloudMachine(cloudId);
+      final username = _cloudLogin(resource);
       if (existing != null &&
           deploymentHostKey(existing.host) !=
               deploymentHostKey(resource.publicIp)) {
@@ -1245,7 +1284,7 @@ class AppController extends ChangeNotifier {
             (existing.deploymentError.startsWith('SSH 认证失败') ||
                 existing.deploymentError.startsWith('SSH 认证被拒绝') ||
                 existing.deploymentError.startsWith('未确认 SSH 主机指纹'));
-        if ((login.isNotEmpty && login != TencentAccessPolicy.sshUsername) ||
+        if ((login.isNotEmpty && login != username) ||
             (login.isEmpty && !stoppedBeforeLogin)) {
           throw const UserError(
             '旧连接使用其他或未记录的 SSH 账号，不能直接切换账号部署。请先停止旧账号下的 Sisters、核对任务，再移除本地连接并重新部署；不会自动停止或迁移旧服务。',
@@ -1259,17 +1298,19 @@ class AppController extends ChangeNotifier {
         existing: existing,
         cloudId: cloudId,
         request: {
-          'username': TencentAccessPolicy.sshUsername,
+          'username': username,
           'port': TencentAccessPolicy.sshPort,
           'private_key': privateKey,
-          'enable_linger_with_sudo': true,
+          if (resource.provider == CloudProvider.tencent &&
+              username == 'ubuntu')
+            'enable_linger_with_sudo': true,
         },
       );
       // The background job owns the lease until deployment finishes.
       transferred = true;
     } finally {
       _cloudDeploymentStarts.remove(cloudId);
-      if (!transferred) cloud.endTencentDeployment(cloudId);
+      if (!transferred) cloud.endCloudDeployment(cloudId);
     }
   }
 
@@ -1294,12 +1335,18 @@ class AppController extends ChangeNotifier {
     if (name.isEmpty || host.isEmpty || port < 1 || port > 65535) {
       throw const UserError('请填写有效的机器名称、主机地址和端口。');
     }
-    final id =
-        existing?.id ??
-        (cloudId == null ? const Uuid().v4() : 'tencent-$cloudId');
-    if ((id.startsWith('tencent-') || cloudId != null) &&
+    final resource = cloudId == null ? null : cloudResource(cloudId);
+    final cloudMachineId = resource == null
+        ? null
+        : '${resource.provider.name}-$cloudId';
+    final id = existing?.id ?? cloudMachineId ?? const Uuid().v4();
+    if ((id.startsWith('tencent-') ||
+            id.startsWith('volcengine-') ||
+            id.startsWith('aliyun-') ||
+            cloudId != null) &&
         (cloudId == null ||
-            id != 'tencent-$cloudId' ||
+            resource == null ||
+            id != cloudMachineId ||
             !_cloudDeploymentStarts.contains(cloudId))) {
       throw const UserError('请从云服务器卡片使用内置密钥部署 Sisters。');
     }
@@ -1336,11 +1383,9 @@ class AppController extends ChangeNotifier {
       serverName: host,
       fingerprint: fingerprint,
       deploymentPending: true,
-      // Persist only the fixed cloud login policy, never a manually entered
+      // Persist the cloud template login account, never a manually entered
       // SSH account from an ordinary deployment.
-      deploymentUsername: cloudId == null
-          ? ''
-          : TencentAccessPolicy.sshUsername,
+      deploymentUsername: resource == null ? '' : _cloudLogin(resource),
     );
     final job = _DeploymentJob(
       pending,
@@ -1353,7 +1398,9 @@ class AppController extends ChangeNotifier {
           'private_key_passphrase',
         ])
           if (request.containsKey(key)) key: request[key],
-        if (cloudId != null) 'enable_linger_with_sudo': true,
+        if (resource?.provider == CloudProvider.tencent &&
+            request['username'] == 'ubuntu')
+          'enable_linger_with_sudo': true,
         'host': host,
         'port': sshPort,
         'grpc_port': port,
@@ -1548,7 +1595,7 @@ class AppController extends ChangeNotifier {
     _deploymentJobs.remove(id);
     deploying--;
     job.request.clear();
-    if (job.cloudId != null) cloud.endTencentDeployment(job.cloudId!);
+    if (job.cloudId != null) cloud.endCloudDeployment(job.cloudId!);
     final keep = {
       for (final machine in state.machines) ...[
         machine.caCert,
@@ -1619,7 +1666,7 @@ class AppController extends ChangeNotifier {
     _accountTimer?.cancel();
     for (final job in _deploymentJobs.values.toList()) {
       job.request.clear();
-      if (job.cloudId != null) cloud.endTencentDeployment(job.cloudId!);
+      if (job.cloudId != null) cloud.endCloudDeployment(job.cloudId!);
     }
     super.dispose();
   }
