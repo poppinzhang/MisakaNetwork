@@ -12,6 +12,9 @@ import (
 func TestTencentMobileEnvelopeRejectsInvalidCloudRequestWithoutFiles(t *testing.T) {
 	root := t.TempDir()
 	for _, request := range []string{
+		`{"action":"tencent_zones","cloud":{"secret_id":"fixture","secret_key":"sensitive-secret","endpoint":"https://example.invalid"}}`,
+		`{"action":"tencent_network_lookup","cloud":{"secret_id":"invalid\nheader","secret_key":"sensitive-secret"}}`,
+		`{"action":"tencent_network_create","cloud":{"secret_id":"fixture","secret_key":"sensitive-secret","endpoint":"https://example.invalid"}}`,
 		`{"action":"tencent_describe","cloud":{"secret_id":"invalid\nheader","secret_key":"sensitive-secret"}}`,
 		`{"action":"tencent_create","cloud":{"secret_id":"fixture","secret_key":"sensitive-secret","endpoint":"https://example.invalid"}}`,
 		`{"action":"tencent_prepare","cloud":{"secret_id":"fixture","secret_key":"sensitive-secret","template":{"id":"fixture","runInstances":{"UserData":"sensitive-secret"}}}}`,

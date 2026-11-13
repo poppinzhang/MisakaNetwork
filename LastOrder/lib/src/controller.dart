@@ -12,7 +12,7 @@ import 'services.dart';
 import 'cloud_controller.dart';
 import 'cloud_models.dart';
 
-enum DeploymentPhase { deploying, awaitingConfirmation, failed, succeeded }
+enum DeploymentPhase { deploying, failed, succeeded }
 
 class MachineDeployment {
   const MachineDeployment({
@@ -26,16 +26,20 @@ class MachineDeployment {
   final int percent;
   final String stage, fingerprint;
   final String? error;
-  bool get active => phase == DeploymentPhase.deploying || awaitingConfirmation;
-  bool get awaitingConfirmation =>
-      phase == DeploymentPhase.awaitingConfirmation;
+  bool get active => phase == DeploymentPhase.deploying;
 }
 
 class _DeploymentJob {
-  _DeploymentJob(this.machine, this.request, this.importedFiles);
+  _DeploymentJob(
+    this.machine,
+    this.request,
+    this.importedFiles, {
+    this.cloudId,
+  });
   Machine machine;
   final Map<String, dynamic> request;
   final List<String> importedFiles;
+  final String? cloudId;
 }
 
 /// Compare addresses independently of SSH/gRPC ports. Canonicalize literal
@@ -71,7 +75,7 @@ class AppController extends ChangeNotifier {
       store: store,
       helper: helper,
       templateLoader: cloudTemplateLoader,
-    )..addListener(_notify);
+    )..addListener(_cloudChanged);
   }
   final StateStore store;
   late final CloudController cloud;
@@ -90,6 +94,7 @@ class AppController extends ChangeNotifier {
   final Map<String, MachineDeployment> deployments = {};
   final Map<String, _DeploymentJob> _deploymentJobs = {};
   final Map<String, int> _deploymentRevisions = {};
+  final Set<String> _cloudDeploymentStarts = {};
   Future<void>? _pkiInitialization;
   Future<void> _credentialPrune = Future<void>.value();
   int _credentialImportHolds = 0;
@@ -307,6 +312,18 @@ class AppController extends ChangeNotifier {
     if (!disposed) notifyListeners();
   }
 
+  void _cloudChanged() {
+    for (final machine in state.machines) {
+      if (cloudIdForMachine(machine) != null && !cloudMachineUsable(machine)) {
+        // Keep last task/order reports for user review, but never display the
+        // last successful poll as a currently usable released cloud server.
+        lastSeen.remove(machine.id);
+        connectionErrors[machine.id] = '关联云服务器不可用、释放中或记录待核实；已暂停连接和任务分发。';
+      }
+    }
+    _notify();
+  }
+
   Future<void> _save(
     SavedState Function() build, {
     bool retainOnFailure = false,
@@ -389,7 +406,7 @@ class AppController extends ChangeNotifier {
   /// deployment restarts the remote service and cancels its running tasks.
   void requireUniqueMachineName(String name, {String? id}) {
     if ([
-      ...state.machines,
+      ...currentMachines,
       ..._deploymentJobs.values.map((job) => job.machine),
     ].any((m) => m.id != id && m.name == name)) {
       throw const UserError('机器名称已存在，请使用不同的名称。');
@@ -399,7 +416,7 @@ class AppController extends ChangeNotifier {
   void requireUniqueDeploymentHost(String host, {String? id}) {
     final key = deploymentHostKey(host);
     if ([
-      ...state.machines,
+      ...currentMachines,
       ..._deploymentJobs.values.map((job) => job.machine),
     ].any((m) => m.id != id && deploymentHostKey(m.host) == key)) {
       throw const UserError('该 IP 或主机地址已在机器列表中，请使用原机器的「重新部署」。');
@@ -430,6 +447,9 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> addMachine(Machine machine) async {
+    if (cloudIdForMachine(machine) != null) {
+      throw const UserError('云服务器连接请通过「部署 Sisters」更新。');
+    }
     if (isDeploying(machine.id)) {
       throw const UserError('该机器正在部署，请等待部署结束。');
     }
@@ -521,25 +541,30 @@ class AppController extends ChangeNotifier {
   Future<void> _refresh() async {
     try {
       await Future.wait(
-        state.machines.where((m) => m.canConnect && !isDeploying(m.id)).map((
-          m,
-        ) async {
-          try {
-            final s = await gateway.status(m);
-            if (!state.machines.any((v) => identical(v, m)) ||
-                isDeploying(m.id)) {
-              return;
-            }
-            _cacheStatus(m.id, s);
-            connectionErrors.remove(m.id);
-            lastSeen[m.id] = DateTime.now();
-          } catch (e) {
-            if (state.machines.any((v) => identical(v, m)) &&
-                !isDeploying(m.id)) {
-              connectionErrors[m.id] = readableError(e);
-            }
-          }
-        }),
+        state.machines
+            .where(
+              (m) =>
+                  m.canConnect && cloudMachineUsable(m) && !isDeploying(m.id),
+            )
+            .map((m) async {
+              try {
+                final s = await gateway.status(m);
+                if (!state.machines.any((v) => identical(v, m)) ||
+                    isDeploying(m.id) ||
+                    !cloudMachineUsable(m)) {
+                  return;
+                }
+                _cacheStatus(m.id, s);
+                connectionErrors.remove(m.id);
+                lastSeen[m.id] = DateTime.now();
+              } catch (e) {
+                if (state.machines.any((v) => identical(v, m)) &&
+                    !isDeploying(m.id) &&
+                    cloudMachineUsable(m)) {
+                  connectionErrors[m.id] = readableError(e);
+                }
+              }
+            }),
       );
       // Also covers submissions whose response was lost before it was recorded.
       try {
@@ -970,7 +995,9 @@ class AppController extends ChangeNotifier {
       final current = state.machines
           .where((m) => m.id == machine.id)
           .firstOrNull;
-      if (isDeploying(machine.id) ||
+      if (!cloudMachineUsable(machine)) {
+        errors[machine.name] = '关联云服务器不可用或正在释放，请先核对云端状态。';
+      } else if (isDeploying(machine.id) ||
           !machine.canConnect ||
           (current != null && !current.canConnect)) {
         errors[machine.name] = '该机器部署尚未完成，请部署成功后再分发任务。';
@@ -1014,6 +1041,9 @@ class AppController extends ChangeNotifier {
       }
 
       void requireMachineReady(Machine machine) {
+        if (!cloudMachineUsable(machine)) {
+          throw const UserError('关联云服务器不可用或正在释放，本次未继续分发。');
+        }
         if (revisions[machine.id] != (_deploymentRevisions[machine.id] ?? 0)) {
           throw const UserError('该机器的部署状态已变化，请重新选择后再分发任务。');
         }
@@ -1137,9 +1167,14 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> cancel(Machine m, String id) async {
+    if (!cloudMachineUsable(m)) {
+      throw const UserError('关联云服务器不可用或正在释放，请先核对云端状态。');
+    }
     final revision = _deploymentRevisions[m.id] ?? 0;
     final result = await gateway.cancel(m, id);
-    if (revision != (_deploymentRevisions[m.id] ?? 0) || isDeploying(m.id)) {
+    if (revision != (_deploymentRevisions[m.id] ?? 0) ||
+        isDeploying(m.id) ||
+        !cloudMachineUsable(m)) {
       return;
     }
     if (result.id != id) {
@@ -1148,6 +1183,94 @@ class AppController extends ChangeNotifier {
     _cacheTaskStatus(m.id, result);
     await _recordDispatches();
     await refresh();
+  }
+
+  /// The stable ID binds the cloud resource to its saved Sisters connection,
+  /// including failed deployments and restarts, without copying SSH secrets.
+  Machine? tencentMachine(String cloudId) => state.machines
+      .where((machine) => machine.id == 'tencent-$cloudId')
+      .firstOrNull;
+
+  String? cloudIdForMachine(Machine machine) =>
+      machine.id.startsWith('tencent-') ? machine.id.substring(8) : null;
+
+  bool isReleasedCloudMachine(Machine machine) {
+    final id = cloudIdForMachine(machine);
+    return cloud.initialized &&
+        id != null &&
+        cloud.jobs.any((job) => job.id == id && job.releaseConfirmed);
+  }
+
+  // Keep saved machines for monitoring, dispatch history and payment reports;
+  // only the active machine list drops API-confirmed released instances.
+  List<Machine> get currentMachines => List.unmodifiable(
+    state.machines.where((machine) => !isReleasedCloudMachine(machine)),
+  );
+
+  bool cloudMachineUsable(Machine machine) {
+    final id = cloudIdForMachine(machine);
+    if (id == null) return true;
+    final resource = cloud.jobs.where((job) => job.id == id).firstOrNull;
+    return cloud.initialized &&
+        resource != null &&
+        resource.isReal &&
+        resource.phase == CloudMachinePhase.created &&
+        resource.instanceId.isNotEmpty &&
+        resource.publicIp.isNotEmpty &&
+        deploymentHostKey(resource.publicIp) == deploymentHostKey(machine.host);
+  }
+
+  Future<void> startTencentDeployment(String cloudId) async {
+    if (!initialized || disposed) throw const UserError('配置尚未加载，无法部署。');
+    final resource = await cloud.beginTencentDeployment(cloudId);
+    _cloudDeploymentStarts.add(cloudId);
+    var transferred = false;
+    try {
+      final privateKey = await cloud.tencentDeploymentPrivateKey();
+      if (disposed) throw const UserError('应用已关闭，部署已中断。');
+      final existing = tencentMachine(cloudId);
+      if (existing != null &&
+          deploymentHostKey(existing.host) !=
+              deploymentHostKey(resource.publicIp)) {
+        throw const UserError('云服务器公网地址已改变，请先核对并移除旧的 Sisters 连接记录，再重新部署。');
+      }
+      if (existing != null) {
+        final login = existing.deploymentUsername;
+        final hasCredentials =
+            existing.caCert.isNotEmpty ||
+            existing.clientCert.isNotEmpty ||
+            existing.clientKey.isNotEmpty;
+        final stoppedBeforeLogin =
+            !hasCredentials &&
+            (existing.deploymentError.startsWith('SSH 认证失败') ||
+                existing.deploymentError.startsWith('SSH 认证被拒绝') ||
+                existing.deploymentError.startsWith('未确认 SSH 主机指纹'));
+        if ((login.isNotEmpty && login != TencentAccessPolicy.sshUsername) ||
+            (login.isEmpty && !stoppedBeforeLogin)) {
+          throw const UserError(
+            '旧连接使用其他或未记录的 SSH 账号，不能直接切换账号部署。请先停止旧账号下的 Sisters、核对任务，再移除本地连接并重新部署；不会自动停止或迁移旧服务。',
+          );
+        }
+      }
+      await startDeployment(
+        name: existing?.name ?? resource.name,
+        host: resource.publicIp,
+        port: TencentAccessPolicy.sistersPort,
+        existing: existing,
+        cloudId: cloudId,
+        request: {
+          'username': TencentAccessPolicy.sshUsername,
+          'port': TencentAccessPolicy.sshPort,
+          'private_key': privateKey,
+          'enable_linger_with_sudo': true,
+        },
+      );
+      // The background job owns the lease until deployment finishes.
+      transferred = true;
+    } finally {
+      _cloudDeploymentStarts.remove(cloudId);
+      if (!transferred) cloud.endTencentDeployment(cloudId);
+    }
   }
 
   /// Persist the visible placeholder before starting any remote work. The
@@ -1160,6 +1283,7 @@ class AppController extends ChangeNotifier {
     required Map<String, dynamic> request,
     Machine? existing,
     List<String> importedFiles = const [],
+    String? cloudId,
   }) async {
     if (!initialized || disposed) throw const UserError('配置尚未加载，无法部署。');
     name = name.trim();
@@ -1170,7 +1294,15 @@ class AppController extends ChangeNotifier {
     if (name.isEmpty || host.isEmpty || port < 1 || port > 65535) {
       throw const UserError('请填写有效的机器名称、主机地址和端口。');
     }
-    final id = existing?.id ?? const Uuid().v4();
+    final id =
+        existing?.id ??
+        (cloudId == null ? const Uuid().v4() : 'tencent-$cloudId');
+    if ((id.startsWith('tencent-') || cloudId != null) &&
+        (cloudId == null ||
+            id != 'tencent-$cloudId' ||
+            !_cloudDeploymentStarts.contains(cloudId))) {
+      throw const UserError('请从云服务器卡片使用内置密钥部署 Sisters。');
+    }
     if (isDeploying(id)) throw const UserError('该机器正在部署，请等待部署结束。');
     final previous = state.machines.where((m) => m.id == id).firstOrNull;
     if (existing != null && previous == null) {
@@ -1184,8 +1316,9 @@ class AppController extends ChangeNotifier {
     }
     if ((request['username'] as String? ?? '').trim().isEmpty ||
         ((request['password'] as String? ?? '').isEmpty &&
-            (request['private_key_path'] as String? ?? '').isEmpty)) {
-      throw const UserError('请填写 SSH 用户和密码或私钥路径。');
+            (request['private_key_path'] as String? ?? '').isEmpty &&
+            (request['private_key'] as String? ?? '').isEmpty)) {
+      throw const UserError('请填写 SSH 用户和密码或私钥。');
     }
     final fingerprint =
         previous != null &&
@@ -1203,22 +1336,34 @@ class AppController extends ChangeNotifier {
       serverName: host,
       fingerprint: fingerprint,
       deploymentPending: true,
+      // Persist only the fixed cloud login policy, never a manually entered
+      // SSH account from an ordinary deployment.
+      deploymentUsername: cloudId == null
+          ? ''
+          : TencentAccessPolicy.sshUsername,
     );
-    final job = _DeploymentJob(pending, {
-      for (final key in [
-        'username',
-        'password',
-        'private_key_path',
-        'private_key_passphrase',
-      ])
-        if (request.containsKey(key)) key: request[key],
-      'host': host,
-      'port': sshPort,
-      'grpc_port': port,
-      'host_key_fingerprint': fingerprint,
-      'server_name': host,
-      'remote_directory': '.local/share/misaka',
-    }, List.of(importedFiles));
+    final job = _DeploymentJob(
+      pending,
+      {
+        for (final key in [
+          'username',
+          'password',
+          'private_key_path',
+          'private_key',
+          'private_key_passphrase',
+        ])
+          if (request.containsKey(key)) key: request[key],
+        if (cloudId != null) 'enable_linger_with_sudo': true,
+        'host': host,
+        'port': sshPort,
+        'grpc_port': port,
+        'host_key_fingerprint': fingerprint,
+        'server_name': host,
+        'remote_directory': '.local/share/misaka',
+      },
+      List.of(importedFiles),
+      cloudId: cloudId,
+    );
     _deploymentJobs[id] = job;
     _deploymentRevisions[id] = (_deploymentRevisions[id] ?? 0) + 1;
     deployments[id] = const MachineDeployment();
@@ -1254,61 +1399,22 @@ class AppController extends ChangeNotifier {
     unawaited(_continueDeployment(job));
   }
 
-  Future<void> confirmDeployment(String id) async {
-    if (disposed) throw const UserError('应用已关闭，部署已中断。');
-    final job = _deploymentJobs[id];
-    final deployment = deployments[id];
-    if (job == null || deployment == null || !deployment.awaitingConfirmation) {
-      throw const UserError('该机器当前无需确认 SSH 指纹。');
-    }
-    job.request['host_key_fingerprint'] = deployment.fingerprint;
-    job.machine = job.machine.copyWith(fingerprint: deployment.fingerprint);
-    deployments[id] = MachineDeployment(
-      percent: deployment.percent,
-      stage: '连接已确认的主机',
-      fingerprint: deployment.fingerprint,
-    );
-    _notify();
-    try {
-      await _save(
-        () => _next(
-          machines: [
-            for (final m in state.machines) m.id == id ? job.machine : m,
-          ],
-        ),
-      );
-    } catch (e) {
-      await _failDeployment(job, readableError(e));
-      return;
-    }
-    unawaited(_continueDeployment(job));
-  }
-
-  Future<void> rejectDeployment(String id) async {
-    final job = _deploymentJobs[id];
-    if (job == null || !(deployments[id]?.awaitingConfirmation ?? false)) {
-      throw const UserError('仅等待指纹确认的部署可以取消。');
-    }
-    await _failDeployment(job, '未确认 SSH 主机指纹，部署已取消。');
-  }
-
   Future<void> _continueDeployment(_DeploymentJob job) async {
     final id = job.machine.id;
     try {
-      final result = await _invokeDeploy(
-        job.request,
-        onProgress: (progress) {
-          if (disposed || !identical(_deploymentJobs[id], job)) return;
-          final previous = deployments[id]?.percent ?? 0;
-          final percent = progress.percent.clamp(previous, 99);
-          deployments[id] = MachineDeployment(
-            percent: percent,
-            stage: progress.percent >= 100 ? '保存机器连接' : progress.stage,
-            fingerprint: job.machine.fingerprint,
-          );
-          _notify();
-        },
-      );
+      void onProgress(DeploymentProgress progress) {
+        if (disposed || !identical(_deploymentJobs[id], job)) return;
+        final previous = deployments[id]?.percent ?? 0;
+        final percent = progress.percent.clamp(previous, 99);
+        deployments[id] = MachineDeployment(
+          percent: percent,
+          stage: progress.percent >= 100 ? '保存机器连接' : progress.stage,
+          fingerprint: job.machine.fingerprint,
+        );
+        _notify();
+      }
+
+      var result = await _invokeDeploy(job.request, onProgress: onProgress);
       if (disposed) {
         await _releaseDeployment(job);
         return;
@@ -1317,17 +1423,40 @@ class AppController extends ChangeNotifier {
         final fingerprint = result['fingerprint'];
         if (job.machine.fingerprint.isNotEmpty ||
             fingerprint is! String ||
-            !fingerprint.startsWith('SHA256:')) {
-          throw const UserError('SSH 指纹仍未通过验证，部署已停止。');
+            !RegExp(r'^SHA256:[A-Za-z0-9+/]{42}[AEIMQUYcgkosw048]$')
+                .hasMatch(fingerprint)) {
+          throw const UserError('无法验证服务器身份，部署已停止。');
         }
+        // Trust on first use: pin the discovered host before authenticating.
+        // The helper aborts discovery before authentication; the next call
+        // verifies this exact pin and never accepts a replacement automatically.
+        final pinned = job.machine.copyWith(fingerprint: fingerprint);
         deployments[id] = MachineDeployment(
-          phase: DeploymentPhase.awaitingConfirmation,
           percent: deployments[id]?.percent ?? 0,
-          stage: '等待确认 SSH 主机指纹',
-          fingerprint: fingerprint,
+          stage: '保存服务器身份',
         );
         _notify();
-        return;
+        try {
+          await _save(
+            () => _next(
+              machines: [
+                for (final m in state.machines) m.id == id ? pinned : m,
+              ],
+            ),
+          );
+        } catch (_) {
+          throw const UserError('服务器身份未能保存，部署已停止。请检查本地存储后重试。');
+        }
+        job.machine = pinned;
+        job.request['host_key_fingerprint'] = fingerprint;
+        result = await _invokeDeploy(job.request, onProgress: onProgress);
+        if (disposed) {
+          await _releaseDeployment(job);
+          return;
+        }
+        if (result['needs_confirmation'] == true) {
+          throw const UserError('服务器身份与已保存记录不一致，部署已停止。');
+        }
       }
       String credential(String key) {
         final value = result[key];
@@ -1347,6 +1476,7 @@ class AppController extends ChangeNotifier {
         clientKey: credential('client_key'),
         serverName: result['server_name'] as String? ?? job.machine.host,
         fingerprint: job.machine.fingerprint,
+        deploymentUsername: job.machine.deploymentUsername,
       );
       try {
         await _save(
@@ -1418,6 +1548,7 @@ class AppController extends ChangeNotifier {
     _deploymentJobs.remove(id);
     deploying--;
     job.request.clear();
+    if (job.cloudId != null) cloud.endTencentDeployment(job.cloudId!);
     final keep = {
       for (final machine in state.machines) ...[
         machine.caCert,
@@ -1482,15 +1613,13 @@ class AppController extends ChangeNotifier {
   @override
   void dispose() {
     disposed = true;
-    cloud.removeListener(_notify);
+    cloud.removeListener(_cloudChanged);
     cloud.dispose();
     _timer?.cancel();
     _accountTimer?.cancel();
     for (final job in _deploymentJobs.values.toList()) {
       job.request.clear();
-      if (deployments[job.machine.id]?.awaitingConfirmation ?? false) {
-        unawaited(_releaseDeployment(job));
-      }
+      if (job.cloudId != null) cloud.endTencentDeployment(job.cloudId!);
     }
     super.dispose();
   }

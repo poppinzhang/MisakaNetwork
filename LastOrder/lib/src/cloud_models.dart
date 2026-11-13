@@ -1,4 +1,17 @@
-/// Saving credentials checks local syntax, not cloud identity or permissions.
+import 'cloud_templates.dart';
+
+/// Fixed access settings for the Tencent CVM creation workflow.
+/// They are application policy, never administrator template parameters.
+abstract final class TencentAccessPolicy {
+  // The catalog accepts only Ubuntu public images. Tencent injects the key
+  // into the image's default login account; it does not enable root SSH.
+  static const sshUsername = 'ubuntu';
+  static const sshPort = 22;
+  static const sistersPort = 20001;
+  static const ingressCidr = '0.0.0.0/0';
+}
+
+/// Each provider owns one credential, saved after a read-only cloud check.
 enum CloudProvider { tencent, aliyun, volcengine }
 
 extension CloudProviderDetails on CloudProvider {
@@ -36,13 +49,14 @@ extension CloudProviderDetails on CloudProvider {
 class CloudCredential {
   const CloudCredential({
     required this.provider,
-    required this.alias,
     required this.maskedId,
     required this.checkedAt,
+    this.onlineVerified = false,
   });
   final CloudProvider provider;
-  final String alias, maskedId;
+  final String maskedId;
   final DateTime checkedAt;
+  final bool onlineVerified;
   bool get locallyChecked => true;
 }
 
@@ -127,7 +141,9 @@ class CloudTemplate {
     regionLabel: value['regionLabel'] as String,
     tencent: value['tencent'] == null
         ? null
-        : Map<String, dynamic>.from(value['tencent'] as Map),
+        : TencentTemplateCatalog.validateTemplate(
+            Map<String, dynamic>.from(value['tencent'] as Map),
+          ),
   );
 }
 
@@ -165,6 +181,10 @@ class CloudMachine {
     this.clientToken = '',
     this.securityGroupId = '',
     this.keyId = '',
+    this.vpcId = '',
+    this.subnetId = '',
+    this.selectedZone = '',
+    this.unavailableZones = const [],
   });
   final String id, name, error;
   final bool isReal, createSubmitted;
@@ -175,11 +195,24 @@ class CloudMachine {
       credentialId,
       clientToken,
       securityGroupId,
-      keyId;
+      keyId,
+      vpcId,
+      subnetId,
+      selectedZone;
+  final List<String> unavailableZones;
+  String get effectiveZone => selectedZone.isNotEmpty
+      ? selectedZone
+      : template.tencent?['runInstances']['Placement']['Zone'] as String? ?? '';
   bool get canRemove =>
       !isReal ||
       phase == CloudMachinePhase.released ||
       (phase == CloudMachinePhase.createFailed && !createSubmitted);
+  // Confirmed resources leave the active list but keep their historical
+  // association with task and payment reports. Previews have no API result.
+  bool get releaseConfirmed =>
+      isReal &&
+      provider == CloudProvider.tencent &&
+      phase == CloudMachinePhase.released;
   final CloudProvider provider;
   final CloudTemplate template;
   final CloudMachinePhase phase;
@@ -215,6 +248,11 @@ class CloudMachine {
     String? requestId,
     String? securityGroupId,
     String? keyId,
+    String? vpcId,
+    String? subnetId,
+    String? selectedZone,
+    String? clientToken,
+    List<String>? unavailableZones,
   }) => CloudMachine(
     id: id,
     name: name,
@@ -229,9 +267,15 @@ class CloudMachine {
     region: region,
     requestId: requestId ?? this.requestId,
     credentialId: credentialId,
-    clientToken: clientToken,
+    clientToken: clientToken ?? this.clientToken,
     securityGroupId: securityGroupId ?? this.securityGroupId,
     keyId: keyId ?? this.keyId,
+    vpcId: vpcId ?? this.vpcId,
+    subnetId: subnetId ?? this.subnetId,
+    selectedZone: selectedZone ?? this.selectedZone,
+    unavailableZones: List.unmodifiable(
+      unavailableZones ?? this.unavailableZones,
+    ),
   );
   Map<String, dynamic> toJson() => {
     'id': id,
@@ -250,6 +294,10 @@ class CloudMachine {
     'clientToken': clientToken,
     'securityGroupId': securityGroupId,
     'keyId': keyId,
+    'vpcId': vpcId,
+    'subnetId': subnetId,
+    'selectedZone': selectedZone,
+    'unavailableZones': unavailableZones,
   };
   factory CloudMachine.fromJson(Map<String, dynamic> value) => CloudMachine(
     id: value['id'] as String,
@@ -270,5 +318,11 @@ class CloudMachine {
     clientToken: value['clientToken'] as String? ?? '',
     securityGroupId: value['securityGroupId'] as String? ?? '',
     keyId: value['keyId'] as String? ?? '',
+    vpcId: value['vpcId'] as String? ?? '',
+    subnetId: value['subnetId'] as String? ?? '',
+    selectedZone: value['selectedZone'] as String? ?? '',
+    unavailableZones: List<String>.unmodifiable(
+      value['unavailableZones'] as List? ?? const [],
+    ),
   );
 }

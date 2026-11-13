@@ -16,6 +16,12 @@ const testIdentity = {
 
 FakeHelper keyHelper() => FakeHelper()
   ..handler = (request, _) async {
+    if (request['action'] == 'verify_cloud_credential') {
+      return {
+        'verified': true,
+        'provider': (request['cloud_credential'] as Map)['provider'],
+      };
+    }
     expect(request, {'action': 'generate_cloud_ssh_key'});
     return testIdentity;
   };
@@ -39,7 +45,6 @@ Future<void> saveCredential(
   CloudProvider provider,
 ) => controller.saveCredential(
   provider,
-  alias: '${provider.displayName}演示账号',
   accessKeyId: 'ExampleAccessId12345',
   accessKeySecret: 'ExampleSecret12345',
 );
@@ -94,13 +99,14 @@ void main() {
       final credential = c.credentialFor(CloudProvider.tencent)!;
       expect(credential.maskedId, 'Exam••••2345');
       expect(credential.locallyChecked, isTrue);
+      expect(credential.onlineVerified, isTrue);
       expect(store.state.encode(), isNot(contains('ExampleAccessId')));
       expect(store.state.encode(), isNot(contains('ExampleSecret')));
       expect(store.state.encode(), isNot(contains('PRIVATE KEY')));
       final restored = await readyController(store: store);
       expect(
-        restored.credentialFor(CloudProvider.tencent)!.alias,
-        credential.alias,
+        restored.credentialFor(CloudProvider.tencent)!.maskedId,
+        credential.maskedId,
       );
       await restored.removeCredential(CloudProvider.tencent);
       expect(restored.credentialFor(CloudProvider.tencent), isNull);
@@ -112,7 +118,7 @@ void main() {
   );
 
   test(
-    'credential writes are serialized and failed replacement retains old value',
+    'credential writes are serialized and failed deletion retains old value',
     () async {
       final store = MemoryStore();
       final c = await readyController(store: store);
@@ -121,22 +127,23 @@ void main() {
           saveCredential(c, provider),
       ]);
       expect(c.credentials.length, 3);
+      final original = store.secrets[CloudController.workspaceKey];
       store.failWrite.add(CloudController.workspaceKey);
       await expectLater(
         c.saveCredential(
           CloudProvider.tencent,
-          alias: '替换',
           accessKeyId: 'NewAccessId',
           accessKeySecret: 'NewSecret',
         ),
         throwsA(isA<UserError>()),
       );
-      expect(c.credentialFor(CloudProvider.tencent)!.alias, '腾讯云演示账号');
+      expect(c.credentialFor(CloudProvider.tencent)!.maskedId, 'Exam••••2345');
       await expectLater(
         c.removeCredential(CloudProvider.tencent),
         throwsA(isA<UserError>()),
       );
       expect(c.credentials.length, 3);
+      expect(store.secrets[CloudController.workspaceKey], original);
     },
   );
 
@@ -218,22 +225,24 @@ void main() {
     expect(c.credentials.length, 1);
   });
 
-  test('input limits reject oversized pasted values and aliases', () async {
-    expect(
-      CloudController.validateCredentialValue('a' * 2049, 'ID'),
-      contains('2048'),
-    );
-    final c = await readyController();
-    await expectLater(
-      c.saveCredential(
-        CloudProvider.tencent,
-        alias: 'a' * 41,
-        accessKeyId: 'ExampleId',
-        accessKeySecret: 'ExampleSecret',
-      ),
-      throwsA(isA<UserError>()),
-    );
-  });
+  test(
+    'input limits reject oversized pasted credentials before verification',
+    () async {
+      expect(
+        CloudController.validateCredentialValue('a' * 2049, 'ID'),
+        contains('2048'),
+      );
+      final c = await readyController();
+      await expectLater(
+        c.saveCredential(
+          CloudProvider.tencent,
+          accessKeyId: 'a' * 2049,
+          accessKeySecret: 'ExampleSecret',
+        ),
+        throwsA(isA<UserError>()),
+      );
+    },
+  );
 
   test(
     'disposing while initialization reads does not generate or persist keys',
@@ -303,9 +312,12 @@ void main() {
         c.jobs.every((job) => job.phase == CloudMachinePhase.ready),
         isTrue,
       );
-      expect(helper.requests, [
-        {'action': 'generate_cloud_ssh_key'},
-      ]);
+      expect(
+        helper.requests.where((r) => r['action'] != 'verify_cloud_credential'),
+        [
+          {'action': 'generate_cloud_ssh_key'},
+        ],
+      );
       expect(store.state.machines, isEmpty);
     },
   );
@@ -383,7 +395,7 @@ void main() {
     expect((saved['jobs'] as List).single['phase'], 'interrupted');
   });
 
-  test('creation requires local credentials, a ready key and matching provider template', () async {
+  test('creation requires verified credentials, a ready key and matching provider template', () async {
     final c = await readyController();
     final template = CloudTemplate.forProvider(CloudProvider.volcengine).first;
     await expectLater(
@@ -399,7 +411,14 @@ void main() {
       throwsA(isA<UserError>()),
     );
     final failedKey = await readyController(
-      helper: FakeHelper()..handler = (_, _) async => {},
+      helper: FakeHelper()
+        ..handler = (request, _) async =>
+            request['action'] == 'verify_cloud_credential'
+            ? {
+                'verified': true,
+                'provider': (request['cloud_credential'] as Map)['provider'],
+              }
+            : {},
     );
     await saveCredential(failedKey, CloudProvider.volcengine);
     await expectLater(

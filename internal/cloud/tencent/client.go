@@ -28,6 +28,10 @@ type Input struct {
 	InstanceName    string          `json:"instance_name,omitempty"`
 	Region          string          `json:"region,omitempty"`
 	InstanceID      string          `json:"instance_id,omitempty"`
+	NetworkKind     string          `json:"network_kind,omitempty"`
+	VpcID           string          `json:"vpc_id,omitempty"`
+	SubnetID        string          `json:"subnet_id,omitempty"`
+	SubnetCIDR      string          `json:"subnet_cidr,omitempty"`
 }
 
 type caller interface {
@@ -93,7 +97,8 @@ func (e *apiError) Error() string {
 }
 
 func (c *client) call(ctx context.Context, service, action, region string, input, result any) error {
-	if (service != "cvm" && service != "vpc") || !regionPattern.MatchString(region) {
+	if (service != "cvm" && service != "vpc" && service != "sts") ||
+		(service == "sts" && action != "GetCallerIdentity") || !regionPattern.MatchString(region) {
 		return errors.New("腾讯云请求参数无效")
 	}
 	body, err := json.Marshal(input)
@@ -110,6 +115,9 @@ func (c *client) call(ctx context.Context, service, action, region string, input
 	req.Header.Set("Content-Type", "application/json; charset=utf-8")
 	req.Header.Set("X-TC-Action", action)
 	req.Header.Set("X-TC-Version", "2017-03-12")
+	if service == "sts" {
+		req.Header.Set("X-TC-Version", "2018-08-13")
+	}
 	req.Header.Set("X-TC-Region", region)
 	req.Header.Set("X-TC-Timestamp", strconv.FormatInt(now.Unix(), 10))
 	req.Header.Set("Authorization", authorization(c.secretID, c.secretKey, service, action, body, now))
@@ -124,17 +132,23 @@ func (c *client) call(ctx context.Context, service, action, region string, input
 	}
 	var envelope struct{ Response json.RawMessage }
 	var status struct {
-		Error     *struct{ Code string }
-		RequestID string `json:"RequestId"`
+		Error       *struct{ Code string }
+		RequestID   string          `json:"RequestId"`
+		InstanceIDs json.RawMessage `json:"InstanceIdSet"`
 	}
 	if json.Unmarshal(data, &envelope) != nil || len(envelope.Response) == 0 || json.Unmarshal(envelope.Response, &status) != nil {
 		return errors.New("腾讯云响应格式异常，请查询确认操作结果")
 	}
-	if status.Error != nil {
-		return &apiError{code: status.Error.Code}
-	}
 	if !matches(`^[a-zA-Z0-9-]{1,128}$`, status.RequestID) {
 		return errors.New("腾讯云响应缺少有效请求标识，请查询确认操作结果")
+	}
+	if status.Error != nil {
+		// A purchase error with a success payload is not proof that no instance
+		// was created. Never authorize another zone from a conflicting response.
+		if action == "RunInstances" && len(status.InstanceIDs) != 0 {
+			return errors.New("腾讯云创建响应矛盾，请查询确认操作结果")
+		}
+		return &apiError{code: status.Error.Code}
 	}
 	if err := json.Unmarshal(envelope.Response, result); err != nil {
 		return errors.New("腾讯云响应格式异常，请查询确认操作结果")
@@ -157,13 +171,22 @@ func Execute(action string, in Input) (any, error) {
 
 func execute(ctx context.Context, api caller, action string, in Input) (any, error) {
 	switch action {
-	case "tencent_prepare", "tencent_create":
+	case "tencent_prepare", "tencent_create", "tencent_network_lookup", "tencent_network_create", "tencent_zones":
 		t, err := parseTemplate(in.Template)
 		if err != nil {
 			return nil, err
 		}
 		if action == "tencent_prepare" {
 			return prepare(ctx, api, t, in.PublicKey)
+		}
+		if action == "tencent_zones" {
+			return availableZones(ctx, api, t)
+		}
+		if action == "tencent_network_lookup" {
+			return lookupNetwork(ctx, api, t, in)
+		}
+		if action == "tencent_network_create" {
+			return createNetwork(ctx, api, t, in), nil
 		}
 		return create(ctx, api, t, in)
 	case "tencent_describe", "tencent_release", "tencent_recover":

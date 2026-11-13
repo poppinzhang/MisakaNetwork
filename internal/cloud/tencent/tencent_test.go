@@ -20,13 +20,13 @@ const fixtureToken = "51e14a42-4cd8-4e90-b1f3-1ce5f3652d90"
 
 func fixtureTemplate() Template {
 	var t Template
-	json.Unmarshal([]byte(`{"id":"test-template","name":"测试模板","description":"离线测试配置","cpu":2,"memoryGb":4,"diskGb":40,"architecture":"x64","os":"Ubuntu 24.04 LTS","regionLabel":"测试地域","region":"ap-guangzhou","sshUsername":"ubuntu","sshCidr":"192.0.2.0/24","grpcCidr":"198.51.100.0/24","runInstances":{"Placement":{"Zone":"ap-guangzhou-7"},"InstanceType":"S5.MEDIUM4","ImageId":"img-fixture","SystemDisk":{"DiskType":"CLOUD_SSD","DiskSize":40},"VirtualPrivateCloud":{"VpcId":"vpc-fixture","SubnetId":"subnet-fixture"},"InternetAccessible":{"InternetChargeType":"TRAFFIC_POSTPAID_BY_HOUR","InternetMaxBandwidthOut":5,"PublicIpAssigned":true}}}`), &t)
+	json.Unmarshal([]byte(`{"id":"test-template","name":"测试模板","description":"离线测试配置","cpu":2,"memoryGb":4,"diskGb":40,"architecture":"x64","os":"Ubuntu 24.04 LTS","regionLabel":"测试地域","region":"ap-guangzhou","runInstances":{"Placement":{"Zone":"ap-guangzhou-7"},"InstanceType":"S5.MEDIUM4","ImageId":"img-fixture","SystemDisk":{"DiskType":"CLOUD_SSD","DiskSize":40},"InternetAccessible":{"InternetChargeType":"TRAFFIC_POSTPAID_BY_HOUR","InternetMaxBandwidthOut":5,"PublicIpAssigned":true}}}`), &t)
 	return t
 }
 
 func fixtureInput() Input {
 	raw, _ := json.Marshal(fixtureTemplate())
-	return Input{SecretID: "fixture-id", SecretKey: "fixture-secret", Template: raw, ClientToken: fixtureToken, SecurityGroupID: "sg-fixture", KeyID: "skey-fixture", InstanceName: "测试云服务器", Region: "ap-guangzhou", InstanceID: "ins-fixture"}
+	return Input{SecretID: "fixture-id", SecretKey: "fixture-secret", Template: raw, ClientToken: fixtureToken, SecurityGroupID: "sg-fixture", KeyID: "skey-fixture", InstanceName: "测试云服务器", Region: "ap-guangzhou", InstanceID: "ins-fixture", VpcID: "vpc-fixture", SubnetID: "subnet-fixture"}
 }
 
 type callRecord struct {
@@ -63,8 +63,8 @@ func (f *fakeAPI) call(_ context.Context, service, action, region string, in, ou
 func imageResponse() map[string]any {
 	return map[string]any{"TotalCount": 1, "ImageSet": []any{map[string]any{"ImageId": "img-fixture", "OsName": "Ubuntu Server 24.04 LTS 64bit", "ImageType": "PUBLIC_IMAGE", "Architecture": "x86_64", "ImageState": "NORMAL", "Platform": "Ubuntu", "ImageSize": 20}}}
 }
-func policyResponse(t Template) map[string]any {
-	ingress, egress := expectedPolicies(t)
+func policyResponse() map[string]any {
+	ingress, egress := expectedPolicies()
 	return map[string]any{"SecurityGroupPolicySet": map[string]any{"Ingress": ingress, "Egress": egress, "Version": "1"}}
 }
 func instanceResponse(i *instance) map[string]any {
@@ -91,13 +91,8 @@ func TestTemplateRejectsUnsafeAndInconsistentParameters(t *testing.T) {
 		"bandwidth-billing": func(t *Template) { t.RunInstances.InternetAccessible.InternetChargeType = "BANDWIDTH_PREPAID" },
 		"bandwidth-limit":   func(t *Template) { t.RunInstances.InternetAccessible.InternetMaxBandwidthOut = 101 },
 		"public-ip":         func(t *Template) { t.RunInstances.InternetAccessible.PublicIpAssigned = false },
-		"cidr-host-bits":    func(t *Template) { t.SSHCIDR = "192.0.2.1/24" },
-		"cidr-v6":           func(t *Template) { t.GRPCCIDR = "::/0" },
-		"cidr-zero-net":     func(t *Template) { t.GRPCCIDR = "0.0.0.0/8" },
-		"cidr-zero-host":    func(t *Template) { t.SSHCIDR = "0.0.0.0/32" },
 		"architecture":      func(t *Template) { t.Architecture = "i386" },
 		"os":                func(t *Template) { t.OS = "Ubuntu 22.04 LTS" },
-		"user":              func(t *Template) { t.SSHUsername = "root;reboot" },
 		"name-controls":     func(t *Template) { t.Name = "test\n" },
 	}
 	for name, change := range changes {
@@ -109,7 +104,7 @@ func TestTemplateRejectsUnsafeAndInconsistentParameters(t *testing.T) {
 			}
 		})
 	}
-	for _, field := range []string{"InstanceChargeType", "InstanceCount", "DataDisks", "UserData", "LoginSettings", "SecurityGroupIds", "ClientToken", "LaunchTemplate", "Endpoint"} {
+	for _, field := range []string{"InstanceChargeType", "InstanceCount", "DataDisks", "UserData", "LoginSettings", "SecurityGroupIds", "ClientToken", "LaunchTemplate", "Endpoint", "VirtualPrivateCloud"} {
 		t.Run(field, func(t *testing.T) {
 			raw, _ := json.Marshal(template)
 			var value map[string]any
@@ -147,6 +142,27 @@ func TestTemplatePreservesMixedCaseInstanceFamilies(t *testing.T) {
 				t.Fatalf("instance type changed: got %q, want %q", parsed.RunInstances.InstanceType, instanceType)
 			}
 		})
+	}
+}
+
+func TestTemplateRejectsRemovedLoginAndSourceFields(t *testing.T) {
+	for field, values := range map[string][]string{
+		"sshUsername": {"root", "ubuntu", "root;command"},
+		"sshCidr":     {"0.0.0.0/0", "192.0.2.0/24"},
+		"grpcCidr":    {"0.0.0.0/0", "198.51.100.0/24"},
+	} {
+		for _, value := range values {
+			t.Run(field+"="+value, func(t *testing.T) {
+				raw, _ := json.Marshal(fixtureTemplate())
+				var template map[string]any
+				json.Unmarshal(raw, &template)
+				template[field] = value
+				raw, _ = json.Marshal(template)
+				if _, err := parseTemplate(raw); err == nil {
+					t.Fatal("removed configurable access field accepted")
+				}
+			})
+		}
 	}
 }
 
@@ -270,13 +286,13 @@ func TestPrepareCreatesOnceAndRepairsOnlyMissingRules(t *testing.T) {
 			if !groupCreated {
 				return map[string]any{"TotalCount": 0, "SecurityGroupSet": []any{}}, nil
 			}
-			return map[string]any{"TotalCount": 1, "SecurityGroupSet": []any{map[string]any{"SecurityGroupId": "sg-fixture", "SecurityGroupName": groupName(template), "SecurityGroupDesc": groupDescription, "ProjectId": "0"}}}, nil
+			return map[string]any{"TotalCount": 1, "SecurityGroupSet": []any{map[string]any{"SecurityGroupId": "sg-fixture", "SecurityGroupName": groupName(), "SecurityGroupDesc": groupDescription, "ProjectId": "0"}}}, nil
 		case "CreateSecurityGroup":
 			if groupCreated {
 				t.Fatal("duplicate group create")
 			}
 			groupCreated = true
-			if c.body["GroupName"] != groupName(template) {
+			if c.body["GroupName"] != groupName() {
 				t.Fatal("unstable group name")
 			}
 			return map[string]any{"SecurityGroup": map[string]any{"SecurityGroupId": "sg-fixture"}}, nil
@@ -301,13 +317,21 @@ func TestPrepareCreatesOnceAndRepairsOnlyMissingRules(t *testing.T) {
 			return nil, nil
 		}
 	}
-	for range 2 {
-		result, err := prepare(context.Background(), api, template, string(ssh.MarshalAuthorizedKey(key)))
+	otherTemplate := template
+	otherTemplate.ID = "other-template"
+	otherTemplate.Name = "另一模板"
+	otherTemplate.RunInstances.Placement.Zone = "ap-guangzhou-6"
+	for _, current := range []Template{template, otherTemplate} {
+		result, err := prepare(context.Background(), api, current, string(ssh.MarshalAuthorizedKey(key)))
 		if err != nil || result.SecurityGroupID != "sg-fixture" || result.KeyID != "skey-fixture" {
 			t.Fatalf("prepare: %+v %v", result, err)
 		}
 	}
-	if len(ingress) != 2 || ingress[0].Port != "22" || ingress[1].Port != "20001" || len(egress) != 1 || egress[0].Port != "all" {
+	if len(ingress) != 2 || ingress[0].Port != "22" || ingress[1].Port != "20001" ||
+		ingress[0].Protocol != "TCP" || ingress[1].Protocol != "TCP" ||
+		ingress[0].CidrBlock != "0.0.0.0/0" || ingress[1].CidrBlock != "0.0.0.0/0" ||
+		ingress[0].Action != "ACCEPT" || ingress[1].Action != "ACCEPT" ||
+		len(egress) != 1 || egress[0].Port != "" {
 		t.Fatal("unexpected firewall rules")
 	}
 	// Reuse with an interrupted empty egress repairs exactly that direction.
@@ -327,14 +351,11 @@ func TestPrepareCreatesOnceAndRepairsOnlyMissingRules(t *testing.T) {
 	}
 }
 
-func TestSecurityRulesRejectDriftAndStableNameTracksCIDRs(t *testing.T) {
-	template := fixtureTemplate()
-	changed := template
-	changed.GRPCCIDR = "0.0.0.0/0"
-	if groupName(template) == groupName(changed) || groupName(template) != groupName(fixtureTemplate()) {
-		t.Fatal("security group name is not deterministic by policy")
+func TestSecurityRulesRejectDriftAndUseFixedSources(t *testing.T) {
+	if got, want := groupName(), "MisakaNetwork-Sisters-20001-"+sha([]byte("0.0.0.0/0\n0.0.0.0/0"))[:12]; got != want {
+		t.Fatalf("existing group with the same policy would not be reused: %s", got)
 	}
-	_, outbound := expectedPolicies(template)
+	_, outbound := expectedPolicies()
 	for _, port := range []string{"all", "ALL", ""} {
 		actual := []policy{{Protocol: "all", Port: port, CidrBlock: "0.0.0.0/0", Action: "ACCEPT"}}
 		missing, err := missingPolicies(actual, outbound)
@@ -342,8 +363,8 @@ func TestSecurityRulesRejectDriftAndStableNameTracksCIDRs(t *testing.T) {
 			t.Fatalf("equivalent ALL rule rejected: %v", err)
 		}
 	}
-	expected, _ := expectedPolicies(template)
-	for _, altered := range [][]policy{{{Protocol: "TCP", Port: "20001", CidrBlock: "0.0.0.0/0", Action: "ACCEPT"}}, append(append([]policy{}, expected...), policy{Protocol: "ALL", CidrBlock: "0.0.0.0/0", Action: "ACCEPT"}), {{Protocol: "TCP", Port: "22", CidrBlock: template.SSHCIDR, Action: "ACCEPT", AddressTemplate: map[string]any{"AddressId": "ipm-extra"}}}} {
+	expected, _ := expectedPolicies()
+	for _, altered := range [][]policy{{{Protocol: "TCP", Port: "20001", CidrBlock: "192.0.2.0/24", Action: "ACCEPT"}}, append(append([]policy{}, expected...), policy{Protocol: "ALL", CidrBlock: "0.0.0.0/0", Action: "ACCEPT"}), {{Protocol: "TCP", Port: "22", CidrBlock: "0.0.0.0/0", Action: "ACCEPT", AddressTemplate: map[string]any{"AddressId": "ipm-extra"}}}} {
 		if _, err := missingPolicies(altered, expected); err == nil {
 			t.Fatal("drift accepted")
 		}
@@ -383,7 +404,11 @@ func TestCreateConstrainsBillingCountOwnershipAndNeverRetriesMutation(t *testing
 		case "DescribeImages":
 			return imageResponse(), nil
 		case "DescribeSecurityGroupPolicies":
-			return policyResponse(fixtureTemplate()), nil
+			return policyResponse(), nil
+		case "DescribeVpcs":
+			return vpcResponse(ownedVpc()), nil
+		case "DescribeSubnets":
+			return subnetResponse(ownedSubnet(fixtureTemplate(), "subnet-fixture", "10.8.0.0/24")), nil
 		case "RunInstances":
 			if c.body["InstanceChargeType"] != "POSTPAID_BY_HOUR" || c.body["InstanceCount"] != float64(1) || c.body["ClientToken"] != fixtureToken {
 				t.Fatal("unsafe billing/count/token")
@@ -392,6 +417,15 @@ func TestCreateConstrainsBillingCountOwnershipAndNeverRetriesMutation(t *testing
 				if _, ok := c.body[key]; ok {
 					t.Fatal("forbidden creation field")
 				}
+			}
+			login := c.body["LoginSettings"].(map[string]any)
+			keys, ok := login["KeyIds"].([]any)
+			if len(login) != 1 || !ok || len(keys) != 1 || keys[0] != in.KeyID {
+				t.Fatal("creation must bind exactly the managed SSH key without password or login overrides")
+			}
+			network := c.body["VirtualPrivateCloud"].(map[string]any)
+			if network["VpcId"] != in.VpcID || network["SubnetId"] != in.SubnetID {
+				t.Fatal("purchase did not use the verified runtime network")
 			}
 			tags := c.body["TagSpecification"].([]any)[0].(map[string]any)["Tags"].([]any)
 			if len(tags) != 2 || tags[1].(map[string]any)["Value"] != fixtureToken {
@@ -522,7 +556,7 @@ func TestReleaseRejectsForeignBillingDisksAndEIPAndOnlySubmitsTermination(t *tes
 }
 
 func TestInvalidInputsNeverReachNetwork(t *testing.T) {
-	for _, action := range []string{"tencent_prepare", "tencent_create", "tencent_describe", "tencent_recover", "tencent_release"} {
+	for _, action := range []string{"tencent_prepare", "tencent_create", "tencent_describe", "tencent_recover", "tencent_release", "tencent_network_lookup", "tencent_network_create"} {
 		api := &fakeAPI{t: t, respond: func(callRecord) (any, error) { t.Fatal("invalid input reached network"); return nil, nil }}
 		if _, err := execute(context.Background(), api, action, Input{}); err == nil {
 			t.Fatal("empty input accepted")

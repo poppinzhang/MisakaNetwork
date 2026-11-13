@@ -9,6 +9,10 @@ void main() {
   test('deploy requests outlast the helper deploy budget', () {
     expect(helperTimeout({'action': 'deploy'}), const Duration(minutes: 30));
     expect(helperTimeout({'action': 'init_pki'}), const Duration(seconds: 300));
+    expect(
+      helperTimeout({'action': 'verify_cloud_credential'}),
+      const Duration(seconds: 35),
+    );
   });
   TestWidgetsFlutterBinding.ensureInitialized();
   const channel = MethodChannel('misaka/test-embedded');

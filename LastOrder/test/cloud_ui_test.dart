@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:last_order/src/app.dart';
 import 'package:last_order/src/cloud_controller.dart';
@@ -15,6 +18,8 @@ Future<AppController> openCloudApp(
   double textScale = 1,
   bool dark = false,
   List<CloudProvider> credentials = const [],
+  FakeHelper? helper,
+  MemoryStore? store,
 }) async {
   tester.view.physicalSize = Size(width, 1100);
   tester.view.devicePixelRatio = 1;
@@ -23,8 +28,8 @@ Future<AppController> openCloudApp(
   addTearDown(tester.view.resetDevicePixelRatio);
   addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
   final c = controller(
-    helper: FakeHelper()..cloudSshReady = true,
-    store: MemoryStore()
+    helper: helper ?? (FakeHelper()..cloudSshReady = true),
+    store: (store ?? MemoryStore())
       ..state = SavedState(
         themeMode: dark ? AppThemeMode.dark : AppThemeMode.light,
       ),
@@ -35,7 +40,6 @@ Future<AppController> openCloudApp(
   for (final provider in credentials) {
     await c.cloud.saveCredential(
       provider,
-      alias: '${provider.displayName}测试凭证',
       accessKeyId: 'synthetic-id-${provider.name}',
       accessKeySecret: 'synthetic-secret-${provider.name}',
     );
@@ -89,6 +93,31 @@ Future<void> advancePreview(WidgetTester tester) async {
   await tester.pump();
 }
 
+MemoryStore oldCredentialStore() =>
+    MemoryStore()
+      ..secrets[CloudController.workspaceKey] = jsonEncode({
+        'version': 1,
+        'credentials': [
+          {
+            'provider': 'tencent',
+            'alias': '旧备注不再展示',
+            'accessKeyId': 'synthetic-old-id',
+            'accessKeySecret': 'synthetic-old-secret',
+            'checkedAt': '2026-11-01T00:00:00Z',
+          },
+        ],
+        'jobs': [],
+      });
+
+class CredentialWriteStore extends MemoryStore {
+  Completer<void>? writeGate;
+  @override
+  Future<void> writeSecret(String key, String value) async {
+    if (key == CloudController.workspaceKey) await writeGate?.future;
+    await super.writeSecret(key, value);
+  }
+}
+
 void main() {
   testWidgets(
     'provider credentials use distinct official fields and an empty future-provider view',
@@ -101,6 +130,8 @@ void main() {
           find.byKey(ValueKey('cloud-provider-${provider.name}')),
         );
         expect(find.text('${provider.displayName}凭证'), findsOneWidget);
+        expect(find.text('账号备注'), findsNothing);
+        expect(find.byType(TextFormField), findsNWidgets(2));
         final id = tester.widget<TextField>(
           find.descendant(
             of: find.byKey(const ValueKey('cloud-key-id')),
@@ -115,7 +146,7 @@ void main() {
         );
         expect(id.decoration!.labelText, provider.credentialIdLabel);
         expect(secret.decoration!.labelText, provider.credentialSecretLabel);
-        expect(find.textContaining('本机检查格式'), findsOneWidget);
+        expect(find.textContaining('提交后联网验证，通过后才保存'), findsOneWidget);
       }
       await tapVisible(
         tester,
@@ -128,7 +159,7 @@ void main() {
   );
 
   testWidgets(
-    'credentials validate empty values, save securely, and clear editable secrets',
+    'credentials validate empty values and hide inputs after verified saving',
     (tester) async {
       final c = await openCloudApp(tester);
       await goToPage(tester, '公有云部署');
@@ -152,15 +183,15 @@ void main() {
         find.byKey(const ValueKey('cloud-save-credential')),
       );
       expect(c.cloud.credentialFor(CloudProvider.tencent), isNotNull);
-      expect(find.text('格式检查通过，已安全保存。云端身份与权限尚未验证。'), findsOneWidget);
+      expect(
+        c.cloud.credentialFor(CloudProvider.tencent)!.onlineVerified,
+        isTrue,
+      );
+      expect(find.text('联网验证通过，已安全保存。'), findsOneWidget);
+      expect(find.byKey(const ValueKey('cloud-save-credential')), findsNothing);
+      expect(find.byKey(const ValueKey('cloud-alias')), findsNothing);
       for (final key in ['cloud-key-id', 'cloud-key-secret']) {
-        expect(
-          tester
-              .widget<TextFormField>(find.byKey(ValueKey(key)))
-              .controller!
-              .text,
-          isEmpty,
-        );
+        expect(find.byKey(ValueKey(key)), findsNothing);
       }
       await tapVisible(tester, find.text('去创建云服务器'));
       expect(find.byType(CloudCreateDialog), findsOneWidget);
@@ -212,21 +243,13 @@ void main() {
   );
 
   testWidgets(
-    'failed credential save preserves the previous credential without echoing secrets',
+    'failed credential save leaves input available without echoing secrets',
     (tester) async {
-      final c = await openCloudApp(
-        tester,
-        credentials: [CloudProvider.tencent],
-      );
+      final c = await openCloudApp(tester);
       final store = c.store as MemoryStore;
       final original = store.secrets[CloudController.workspaceKey];
-      final previous = c.cloud.credentialFor(CloudProvider.tencent)!;
       store.failWrite.add(CloudController.workspaceKey);
       await goToPage(tester, '公有云部署');
-      await tester.enterText(
-        find.byKey(const ValueKey('cloud-alias')),
-        '替换失败的测试凭证',
-      );
       await tester.enterText(
         find.byKey(const ValueKey('cloud-key-id')),
         'synthetic-replacement-id',
@@ -242,11 +265,9 @@ void main() {
       );
 
       expect(find.textContaining('公有云信息无法保存'), findsOneWidget);
-      expect(find.text('格式检查通过，已安全保存。云端身份与权限尚未验证。'), findsNothing);
+      expect(find.text('联网验证通过，已安全保存。'), findsNothing);
       expect(store.secrets[CloudController.workspaceKey], original);
-      final retained = c.cloud.credentialFor(CloudProvider.tencent)!;
-      expect(retained.alias, previous.alias);
-      expect(retained.maskedId, previous.maskedId);
+      expect(c.cloud.credentialFor(CloudProvider.tencent), isNull);
       final secretField = tester.widget<TextField>(
         find.descendant(
           of: find.byKey(const ValueKey('cloud-key-secret')),
@@ -262,6 +283,280 @@ void main() {
         ),
         findsNothing,
       );
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'online verification disables repeated edits and hides inputs only after saving',
+    (tester) async {
+      final helper = FakeHelper()..cloudSshReady = true;
+      final c = await openCloudApp(tester, helper: helper);
+      final store = c.store as MemoryStore;
+      final original = store.secrets[CloudController.workspaceKey];
+      final verification = Completer<Map<String, dynamic>>();
+      helper.handler = (request, _) {
+        expect(request['action'], 'verify_cloud_credential');
+        expect((request['cloud_credential'] as Map)['provider'], 'tencent');
+        return verification.future;
+      };
+      final priorRequests = helper.requests.length;
+      await goToPage(tester, '公有云部署');
+      await tester.enterText(
+        find.byKey(const ValueKey('cloud-key-id')),
+        'synthetic-new-id',
+      );
+      await tester.enterText(
+        find.byKey(const ValueKey('cloud-key-secret')),
+        'synthetic-new-secret',
+      );
+      await tapVisible(
+        tester,
+        find.byKey(const ValueKey('cloud-save-credential')),
+      );
+      expect(find.text('正在验证并保存'), findsOneWidget);
+      expect(
+        tester
+            .widget<FilledButton>(
+              find.byKey(const ValueKey('cloud-save-credential')),
+            )
+            .onPressed,
+        isNull,
+      );
+      expect(
+        tester
+            .widget<TextFormField>(find.byKey(const ValueKey('cloud-key-id')))
+            .enabled,
+        isFalse,
+      );
+      expect(find.text('移除凭证'), findsNothing);
+      expect(find.text('去创建云服务器'), findsNothing);
+      expect(store.secrets[CloudController.workspaceKey], original);
+      expect(c.cloud.credentials, isEmpty);
+      expect(helper.requests, hasLength(priorRequests + 1));
+      verification.complete({'verified': true, 'provider': 'tencent'});
+      await tester.pumpAndSettle();
+      expect(find.text('联网验证通过，已安全保存。'), findsOneWidget);
+      expect(
+        c.cloud.credentialFor(CloudProvider.tencent)!.onlineVerified,
+        isTrue,
+      );
+      expect(find.byType(TextFormField), findsNothing);
+      expect(find.byKey(const ValueKey('cloud-save-credential')), findsNothing);
+      expect(c.cloud.credentials, hasLength(1));
+      expect(store.secrets[CloudController.workspaceKey], isNot(original));
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  for (final initiallySaved in [false, true]) {
+    testWidgets(
+      'failed online verification never saves a submitted credential (old unverified record: $initiallySaved)',
+      (tester) async {
+        final helper = FakeHelper()..cloudSshReady = true;
+        final c = await openCloudApp(
+          tester,
+          helper: helper,
+          store: initiallySaved ? oldCredentialStore() : null,
+        );
+        final store = c.store as MemoryStore;
+        final original = store.secrets[CloudController.workspaceKey];
+        helper.handler = (_, _) async =>
+            throw StateError('synthetic-secret-do-not-display');
+        await goToPage(tester, '公有云部署');
+        await tester.enterText(
+          find.byKey(const ValueKey('cloud-key-id')),
+          'synthetic-new-id',
+        );
+        await tester.enterText(
+          find.byKey(const ValueKey('cloud-key-secret')),
+          'synthetic-secret-do-not-display',
+        );
+        await tapVisible(
+          tester,
+          find.byKey(const ValueKey('cloud-save-credential')),
+        );
+        expect(find.textContaining('凭证联网验证未通过，未保存新凭证'), findsOneWidget);
+        expect(find.text('联网验证通过，已安全保存。'), findsNothing);
+        expect(store.secrets[CloudController.workspaceKey], original);
+        expect(c.cloud.credentials, hasLength(initiallySaved ? 1 : 0));
+        expect(
+          find.byWidgetPredicate(
+            (widget) =>
+                widget is Text &&
+                (widget.data?.contains('synthetic-secret-do-not-display') ??
+                    false),
+          ),
+          findsNothing,
+        );
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
+
+  for (final provider in CloudProvider.values) {
+    testWidgets(
+      '${provider.name} maintains one credential and permits confirmed removal',
+      (tester) async {
+        final c = await openCloudApp(tester, credentials: CloudProvider.values);
+        await goToPage(tester, '公有云部署');
+        await tapVisible(
+          tester,
+          find.byKey(ValueKey('cloud-provider-${provider.name}')),
+        );
+        expect(find.textContaining('如需更换凭证，请先移除当前凭证'), findsOneWidget);
+        expect(find.byType(TextFormField), findsNothing);
+        expect(
+          find.byKey(const ValueKey('cloud-save-credential')),
+          findsNothing,
+        );
+        expect(find.text('账号备注'), findsNothing);
+        expect(c.cloud.credentials, hasLength(3));
+        await tapVisible(tester, find.text('移除凭证'));
+        await tapVisible(tester, find.text('返回'));
+        expect(c.cloud.credentialFor(provider), isNotNull);
+        expect(find.byType(TextFormField), findsNothing);
+        await tapVisible(tester, find.text('移除凭证'));
+        await tapVisible(tester, find.text('移除'));
+        expect(c.cloud.credentialFor(provider), isNull);
+        expect(c.cloud.credentials, hasLength(2));
+        expect(find.text('已从本机移除凭证。'), findsOneWidget);
+        expect(find.text('移除凭证'), findsNothing);
+        expect(find.text('联网验证并保存'), findsOneWidget);
+        expect(find.byType(TextFormField), findsNWidgets(2));
+        for (final key in ['cloud-key-id', 'cloud-key-secret']) {
+          expect(
+            tester
+                .widget<TextFormField>(find.byKey(ValueKey(key)))
+                .controller!
+                .text,
+            isEmpty,
+          );
+        }
+        expect(find.text('账号备注'), findsNothing);
+        final remaining = jsonDecode(
+          (c.store as MemoryStore).secrets[CloudController.workspaceKey]!,
+        ) as Map;
+        expect(
+          (remaining['credentials'] as List).where(
+            (item) => item['provider'] == provider.name,
+          ),
+          isEmpty,
+        );
+        await tester.enterText(
+          find.byKey(const ValueKey('cloud-key-id')),
+          'synthetic-new-id',
+        );
+        await tester.enterText(
+          find.byKey(const ValueKey('cloud-key-secret')),
+          'synthetic-new-secret',
+        );
+        await tapVisible(
+          tester,
+          find.byKey(const ValueKey('cloud-save-credential')),
+        );
+        expect(c.cloud.credentials, hasLength(3));
+        expect(c.cloud.credentialFor(provider)!.onlineVerified, isTrue);
+        expect(find.byType(TextFormField), findsNothing);
+        expect(
+          find.byKey(const ValueKey('cloud-save-credential')),
+          findsNothing,
+        );
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
+
+  testWidgets('failed removal keeps verified credential and inputs hidden', (
+    tester,
+  ) async {
+    final c = await openCloudApp(tester, credentials: [CloudProvider.tencent]);
+    final store = c.store as MemoryStore;
+    final original = store.secrets[CloudController.workspaceKey];
+    store.failWrite.add(CloudController.workspaceKey);
+    await goToPage(tester, '公有云部署');
+    await tapVisible(tester, find.text('移除凭证'));
+    await tapVisible(tester, find.text('移除'));
+    expect(find.textContaining('公有云信息无法保存'), findsOneWidget);
+    expect(
+      c.cloud.credentialFor(CloudProvider.tencent)!.onlineVerified,
+      isTrue,
+    );
+    expect(store.secrets[CloudController.workspaceKey], original);
+    expect(find.byType(TextFormField), findsNothing);
+    expect(find.byKey(const ValueKey('cloud-save-credential')), findsNothing);
+    expect(find.text('移除凭证'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('pending removal shows inputs only after the deletion is saved', (
+    tester,
+  ) async {
+    final store = CredentialWriteStore();
+    final c = await openCloudApp(
+      tester,
+      store: store,
+      credentials: [CloudProvider.tencent],
+    );
+    final original = store.secrets[CloudController.workspaceKey];
+    final gate = Completer<void>();
+    store.writeGate = gate;
+    await goToPage(tester, '公有云部署');
+    await tapVisible(tester, find.text('移除凭证'));
+    await tapVisible(tester, find.text('移除'));
+    expect(find.text('正在移除凭证'), findsOneWidget);
+    expect(find.byType(TextFormField), findsNothing);
+    expect(find.byKey(const ValueKey('cloud-save-credential')), findsNothing);
+    expect(c.cloud.credentialFor(CloudProvider.tencent), isNotNull);
+    expect(store.secrets[CloudController.workspaceKey], original);
+    gate.complete();
+    await tester.pumpAndSettle();
+    expect(c.cloud.credentialFor(CloudProvider.tencent), isNull);
+    expect(find.byType(TextFormField), findsNWidgets(2));
+    expect(find.text('联网验证并保存'), findsOneWidget);
+    expect(find.text('账号备注'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+    'previous locally checked credentials require verification before new creation',
+    (tester) async {
+      final store = MemoryStore();
+      store.secrets[CloudController.workspaceKey] = jsonEncode({
+        'version': 1,
+        'credentials': [
+          {
+            'provider': 'tencent',
+            'alias': '之前保存的凭证',
+            'accessKeyId': 'synthetic-old-id',
+            'accessKeySecret': 'synthetic-old-secret',
+            'checkedAt': '2026-11-01T00:00:00Z',
+          },
+        ],
+        'jobs': [],
+      });
+      final c = await openCloudApp(tester, store: store);
+      expect(
+        c.cloud.credentialFor(CloudProvider.tencent)!.onlineVerified,
+        isFalse,
+      );
+      await goToPage(tester, '公有云部署');
+      expect(find.textContaining('待联网验证，请重新提交验证'), findsOneWidget);
+      expect(
+        tester
+            .widget<OutlinedButton>(
+              find.widgetWithText(OutlinedButton, '去创建云服务器'),
+            )
+            .onPressed,
+        isNull,
+      );
+      await openCloudCreation(tester);
+      expect(find.text('验证凭证'), findsOneWidget);
+      await tapVisible(tester, find.text('验证凭证'));
+      expect(find.text('腾讯云凭证'), findsOneWidget);
+      await tapVisible(tester, find.text('移除凭证'));
+      await tapVisible(tester, find.text('移除'));
+      expect(c.cloud.credentials, isEmpty);
       expect(tester.takeException(), isNull);
     },
   );
@@ -294,7 +589,12 @@ void main() {
       expect(c.cloud.jobs.map((job) => job.id).toSet(), hasLength(2));
       expect(find.byType(CloudMachineCard), findsNWidgets(2));
       expect((c.gateway as FakeGateway).statusRequests, isEmpty);
-      expect((c.helper as FakeHelper).requests, isEmpty);
+      expect(
+        (c.helper as FakeHelper).requests.where(
+          (request) => request['action'] != 'verify_cloud_credential',
+        ),
+        isEmpty,
+      );
       expect(tester.takeException(), isNull);
       await advancePreview(tester);
       await advancePreview(tester);

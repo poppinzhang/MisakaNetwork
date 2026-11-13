@@ -83,11 +83,13 @@ void main() {
     await capture('01-credentials-desktop');
     await c.cloud.saveCredential(
       CloudProvider.aliyun,
-      alias: '阿里云演示账号',
       accessKeyId: 'ExampleAccessId12345',
       accessKeySecret: 'ExampleSecret12345',
     );
     await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('cloud-key-id')), findsNothing);
+    expect(find.byKey(const ValueKey('cloud-save-credential')), findsNothing);
+    await capture('01b-credentials-verified-desktop');
     await tester.tap(find.text('去创建云服务器'));
     await tester.pumpAndSettle();
     await capture('02-providers-desktop');
@@ -134,5 +136,14 @@ void main() {
     tester.view.physicalSize = const Size(390, 1000);
     await tester.pumpAndSettle();
     await capture('06-credentials-mobile');
+    await c.cloud.saveCredential(
+      CloudProvider.volcengine,
+      accessKeyId: 'ExampleAccessId12345',
+      accessKeySecret: 'ExampleSecret12345',
+    );
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('cloud-key-id')), findsNothing);
+    expect(find.byKey(const ValueKey('cloud-save-credential')), findsNothing);
+    await capture('07-credentials-verified-mobile');
   }, skip: fontPath == null || output == null);
 }

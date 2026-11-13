@@ -447,7 +447,7 @@ func TestLingerIsVerifiedBeforeLinuxDeployment(t *testing.T) {
 			os.MkdirAll(shim, 0700)
 			os.WriteFile(filepath.Join(shim, "loginctl"), []byte("#!/bin/sh\nprintf '%s\\n' \"$*\" >> "+shellQuote(logPath)+"\ncase \"$1\" in\nshow-user) cat "+shellQuote(state)+" ;;\nenable-linger) "+enable+" ;;\n*) exit 1 ;;\nesac\n"), 0700)
 			t.Setenv("PATH", shim+":"+os.Getenv("PATH"))
-			err := ensureLinger(localSSH(t), "ticket")
+			err := ensureLinger(localSSH(t), "ticket", false)
 			if (err != nil) != tc.wantErr {
 				t.Fatalf("err = %v", err)
 			}

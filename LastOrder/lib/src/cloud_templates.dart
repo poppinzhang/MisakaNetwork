@@ -18,8 +18,8 @@ abstract final class TencentTemplateCatalog {
       'schemaVersion',
       'templates',
     });
-    if (catalog['schemaVersion'] is! int || catalog['schemaVersion'] != 1) {
-      throw const FormatException('腾讯云模板版本必须为 1。');
+    if (catalog['schemaVersion'] is! int || catalog['schemaVersion'] != 3) {
+      throw const FormatException('腾讯云模板版本必须为 3，请重新生成模板。');
     }
     final entries = catalog['templates'];
     if (entries is! List || entries.length > 100) {
@@ -53,9 +53,6 @@ abstract final class TencentTemplateCatalog {
       'os',
       'regionLabel',
       'region',
-      'sshUsername',
-      'sshCidr',
-      'grpcCidr',
       'runInstances',
     });
     _string(t, 'id', pattern: r'^[a-z][a-z0-9-]{0,63}$');
@@ -67,23 +64,16 @@ abstract final class TencentTemplateCatalog {
       'region',
       pattern: r'^[a-z]{2}-[a-z]+(?:-[a-z]+)*$',
     );
-    _string(t, 'sshUsername', pattern: r'^[a-z_][a-z0-9_-]{0,31}$');
     _integer(t, 'cpu', 1, 1024);
     _integer(t, 'memoryGb', 1, 1024);
     final diskSize = _integer(t, 'diskGb', 20, 4096);
     _choice(t, 'architecture', {'x64', 'arm64'});
     _choice(t, 'os', {'Ubuntu 24.04 LTS'});
-    for (final field in ['sshCidr', 'grpcCidr']) {
-      if (!_isCidr(_string(t, field))) {
-        throw FormatException('$field 必须是规范的 IPv4 CIDR，例如 203.0.113.8/32。');
-      }
-    }
     final run = _object(t['runInstances'], 'runInstances', {
       'Placement',
       'InstanceType',
       'ImageId',
       'SystemDisk',
-      'VirtualPrivateCloud',
       'InternetAccessible',
     });
     final placement = _object(run['Placement'], 'Placement', {'Zone'});
@@ -107,12 +97,6 @@ abstract final class TencentTemplateCatalog {
     if (_integer(disk, 'DiskSize', 20, 4096) != diskSize) {
       throw const FormatException('diskGb 必须与 SystemDisk.DiskSize 相同。');
     }
-    final vpc = _object(run['VirtualPrivateCloud'], 'VirtualPrivateCloud', {
-      'VpcId',
-      'SubnetId',
-    });
-    _string(vpc, 'VpcId', pattern: r'^vpc-[a-z0-9]+$');
-    _string(vpc, 'SubnetId', pattern: r'^subnet-[a-z0-9]+$');
     final internet = _object(run['InternetAccessible'], 'InternetAccessible', {
       'InternetChargeType',
       'InternetMaxBandwidthOut',
@@ -176,29 +160,5 @@ abstract final class TencentTemplateCatalog {
     Set<String> choices,
   ) {
     if (!choices.contains(value[key])) throw FormatException('$key 不在支持范围内。');
-  }
-
-  static bool _isCidr(String value) {
-    final parts = value.split('/');
-    if (parts.length != 2) return false;
-    final octets = parts[0].split('.');
-    final prefix = int.tryParse(parts[1]);
-    if (octets.length != 4 ||
-        prefix == null ||
-        prefix < 0 ||
-        prefix > 32 ||
-        '$prefix' != parts[1]) {
-      return false;
-    }
-    var ip = 0;
-    for (final octet in octets) {
-      final n = int.tryParse(octet);
-      if (n == null || n < 0 || n > 255 || '$n' != octet) return false;
-      ip = (ip << 8) | n;
-    }
-    final hostMask = (1 << (32 - prefix)) - 1;
-    // Tencent VPC normalizes 0.0.0.0/n to 0.0.0.0/0. Accept only the
-    // administrator's explicit /0 choice, never silently broaden access.
-    return !(ip == 0 && prefix != 0) && ip & hostMask == 0;
   }
 }

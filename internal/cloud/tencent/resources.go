@@ -7,9 +7,9 @@ import (
 	"encoding/json"
 	"errors"
 	"net/netip"
-	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"golang.org/x/crypto/ssh"
 )
@@ -18,6 +18,7 @@ const managedTag = "misaka-managed"
 const managedValue = "lastorder-v1"
 const operationTag = "misaka-operation"
 const groupDescription = "MisakaNetwork managed SSH and Sisters TLS rules v1"
+const groupSourceCIDR = "0.0.0.0/0"
 
 // Serializes preparation inside the Android helper. Desktop operation
 // serialization is provided by CloudController; names are not a cloud lock.
@@ -28,6 +29,7 @@ type Prepared struct {
 	KeyID           string `json:"key_id"`
 }
 type Created struct {
+	State      string `json:"state,omitempty"`
 	InstanceID string `json:"instance_id"`
 	RequestID  string `json:"request_id"`
 }
@@ -121,9 +123,68 @@ func prepare(ctx context.Context, api caller, t Template, rawKey string) (Prepar
 	return Prepared{SecurityGroupID: groupID, KeyID: keyID}, nil
 }
 
+var errPreparationPending = errors.New("云资源仍在准备中，尚未提交服务器购买；请稍后重试查询确认")
+
+// The APIs return resource IDs, not a common asynchronous task identifier.
+// Wait for Describe to observe the exact resource/configuration before use.
+// The callback may only query: this loop must never replay a mutation.
+func waitPreparation(ctx context.Context, check func(context.Context) (bool, error)) error {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	for {
+		if ctx.Err() != nil {
+			return errPreparationPending
+		}
+		ready, err := check(ctx)
+		if ctx.Err() != nil {
+			return errPreparationPending
+		}
+		if err != nil || ready {
+			return err
+		}
+		timer := time.NewTimer(time.Second)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return errPreparationPending
+		case <-timer.C:
+		}
+	}
+}
+
+func resourceNotVisible(err error) bool {
+	var cloud *apiError
+	return errors.As(err, &cloud) && cloud.code == "ResourceNotFound"
+}
+
+func awaitPreparedID(ctx context.Context, lookup func(context.Context) (string, error), expectedID string, mutationErr error) (string, error) {
+	var id string
+	err := waitPreparation(ctx, func(ctx context.Context) (bool, error) {
+		found, err := lookup(ctx)
+		if resourceNotVisible(err) {
+			found, err = "", nil
+		}
+		if err != nil {
+			return false, err
+		}
+		if found == "" {
+			if definiteNetworkRejection(mutationErr) {
+				return false, mutationErr
+			}
+			return false, nil
+		}
+		if expectedID != "" && found != expectedID {
+			return false, errors.New("云资源与创建响应标识不匹配，请在控制台核对")
+		}
+		id = found
+		return true, nil
+	})
+	return id, err
+}
+
 func ensureKey(ctx context.Context, api caller, region string, key ssh.PublicKey) (string, error) {
 	name := "misaka_" + sha(key.Marshal())[:18] // CVM limit: 25 chars.
-	lookup := func() (string, error) {
+	lookup := func(ctx context.Context) (string, error) {
 		var out struct {
 			TotalCount *int
 			KeyPairSet []struct {
@@ -145,30 +206,28 @@ func ensureKey(ctx context.Context, api caller, region string, key ssh.PublicKey
 			}
 			ids = append(ids, existing.KeyId)
 		}
-		sort.Strings(ids)
+		if len(ids) > 1 {
+			return "", errors.New("同名云资源不唯一，请在控制台核对")
+		}
 		if len(ids) > 0 {
 			return ids[0], nil
 		}
 		return "", nil
 	}
-	id, err := lookup()
+	id, err := lookup(ctx)
 	if err != nil || id != "" {
 		return id, err
 	}
 	var imported struct{ KeyId string }
 	err = api.call(ctx, "cvm", "ImportKeyPair", region, map[string]any{"KeyName": name, "ProjectId": 0, "PublicKey": strings.TrimSpace(string(ssh.MarshalAuthorizedKey(key)))}, &imported)
-	if err != nil {
-		// Creation may have succeeded despite a lost response, or another
-		// controller may have imported the identical key concurrently.
-		if id, lookupErr := lookup(); lookupErr == nil && id != "" {
-			return id, nil
-		}
-		return "", err
-	}
-	if !matches(`^skey-[a-z0-9]+$`, imported.KeyId) {
+	if err == nil && !matches(`^skey-[a-z0-9]+$`, imported.KeyId) {
 		return "", errors.New("云 SSH 密钥导入结果异常，请在控制台核对")
 	}
-	return imported.KeyId, nil
+	expectedID := ""
+	if matches(`^skey-[a-z0-9]+$`, imported.KeyId) {
+		expectedID = imported.KeyId
+	}
+	return awaitPreparedID(ctx, lookup, expectedID, err)
 }
 
 type policy struct {
@@ -182,11 +241,12 @@ type policy struct {
 	ServiceTemplate map[string]any `json:",omitempty"`
 }
 
-func groupName(t Template) string {
-	return "MisakaNetwork-Sisters-20001-" + sha([]byte(t.SSHCIDR + "\n" + t.GRPCCIDR))[:12]
+func groupName() string {
+	// Keep the stable name used by the same fixed policy in earlier builds.
+	return "MisakaNetwork-Sisters-20001-" + sha([]byte(groupSourceCIDR + "\n" + groupSourceCIDR))[:12]
 }
-func expectedPolicies(t Template) ([]policy, []policy) {
-	return []policy{{Protocol: "TCP", Port: "22", CidrBlock: t.SSHCIDR, Action: "ACCEPT"}, {Protocol: "TCP", Port: "20001", CidrBlock: t.GRPCCIDR, Action: "ACCEPT"}}, []policy{{Protocol: "ALL", Port: "all", CidrBlock: "0.0.0.0/0", Action: "ACCEPT"}}
+func expectedPolicies() ([]policy, []policy) {
+	return []policy{{Protocol: "TCP", Port: "22", CidrBlock: groupSourceCIDR, Action: "ACCEPT"}, {Protocol: "TCP", Port: "20001", CidrBlock: groupSourceCIDR, Action: "ACCEPT"}}, []policy{{Protocol: "ALL", CidrBlock: "0.0.0.0/0", Action: "ACCEPT"}}
 }
 
 func emptyTemplate(m map[string]any) bool {
@@ -233,8 +293,8 @@ func missingPolicies(actual, expected []policy) ([]policy, error) {
 }
 
 func ensureGroup(ctx context.Context, api caller, t Template) (string, error) {
-	name := groupName(t)
-	lookup := func() (string, error) {
+	name := groupName()
+	lookup := func(ctx context.Context) (string, error) {
 		var out struct {
 			TotalCount       *int
 			SecurityGroupSet []struct {
@@ -255,13 +315,15 @@ func ensureGroup(ctx context.Context, api caller, t Template) (string, error) {
 			}
 			ids = append(ids, group.SecurityGroupId)
 		}
-		sort.Strings(ids)
+		if len(ids) > 1 {
+			return "", errors.New("同名云资源不唯一，请在控制台核对")
+		}
 		if len(ids) > 0 {
 			return ids[0], nil
 		}
 		return "", nil
 	}
-	id, err := lookup()
+	id, err := lookup(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -269,18 +331,17 @@ func ensureGroup(ctx context.Context, api caller, t Template) (string, error) {
 		var out struct {
 			SecurityGroup struct{ SecurityGroupId string }
 		}
-		err := api.call(ctx, "vpc", "CreateSecurityGroup", t.Region, map[string]any{"GroupName": name, "GroupDescription": groupDescription, "ProjectId": "0"}, &out)
-		if err != nil {
-			var lookupErr error
-			id, lookupErr = lookup()
-			if lookupErr != nil || id == "" {
-				return "", err
-			}
-		} else {
-			id = out.SecurityGroup.SecurityGroupId
-		}
-		if !matches(`^sg-[a-z0-9]+$`, id) {
+		mutationErr := api.call(ctx, "vpc", "CreateSecurityGroup", t.Region, map[string]any{"GroupName": name, "GroupDescription": groupDescription, "ProjectId": "0"}, &out)
+		if mutationErr == nil && !matches(`^sg-[a-z0-9]+$`, out.SecurityGroup.SecurityGroupId) {
 			return "", errors.New("安全组创建结果异常，请在控制台核对")
+		}
+		expectedID := ""
+		if matches(`^sg-[a-z0-9]+$`, out.SecurityGroup.SecurityGroupId) {
+			expectedID = out.SecurityGroup.SecurityGroupId
+		}
+		id, err = awaitPreparedID(ctx, lookup, expectedID, mutationErr)
+		if err != nil {
+			return "", err
 		}
 	}
 	if err := reconcilePolicies(ctx, api, t, id, true); err != nil {
@@ -289,26 +350,52 @@ func ensureGroup(ctx context.Context, api caller, t Template) (string, error) {
 	return id, nil
 }
 
-func reconcilePolicies(ctx context.Context, api caller, t Template, id string, allowAdd bool) error {
-	var out struct {
-		SecurityGroupPolicySet *struct {
-			Ingress []policy
-			Egress  []policy
-			Version string
-		}
-	}
+type groupPolicies struct {
+	Ingress []policy
+	Egress  []policy
+	Version string
+}
+
+func readPolicies(ctx context.Context, api caller, t Template, id string) (*groupPolicies, error) {
+	var out struct{ SecurityGroupPolicySet *groupPolicies }
 	if err := api.call(ctx, "vpc", "DescribeSecurityGroupPolicies", t.Region, map[string]any{"SecurityGroupId": id}, &out); err != nil {
-		return err
+		return nil, err
 	}
 	if out.SecurityGroupPolicySet == nil || !matches(`^[0-9]{1,20}$`, out.SecurityGroupPolicySet.Version) {
-		return errors.New("安全组规则响应不完整，已停止操作")
+		return nil, errors.New("安全组规则响应不完整，已停止操作")
 	}
-	ingress, egress := expectedPolicies(t)
+	ingress, egress := expectedPolicies()
+	if _, err := missingPolicies(out.SecurityGroupPolicySet.Ingress, ingress); err != nil {
+		return nil, err
+	}
+	if _, err := missingPolicies(out.SecurityGroupPolicySet.Egress, egress); err != nil {
+		return nil, err
+	}
+	return out.SecurityGroupPolicySet, nil
+}
+
+func reconcilePolicies(ctx context.Context, api caller, t Template, id string, allowAdd bool) error {
+	var current *groupPolicies
+	if err := waitPreparation(ctx, func(ctx context.Context) (bool, error) {
+		var err error
+		current, err = readPolicies(ctx, api, t, id)
+		if allowAdd && resourceNotVisible(err) {
+			return false, nil
+		}
+		return err == nil, err
+	}); err != nil {
+		return err
+	}
+	ingress, egress := expectedPolicies()
 	for _, direction := range []struct {
-		name             string
-		actual, expected []policy
-	}{{"Ingress", out.SecurityGroupPolicySet.Ingress, ingress}, {"Egress", out.SecurityGroupPolicySet.Egress, egress}} {
-		missing, err := missingPolicies(direction.actual, direction.expected)
+		name     string
+		expected []policy
+	}{{"Ingress", ingress}, {"Egress", egress}} {
+		actual := current.Ingress
+		if direction.name == "Egress" {
+			actual = current.Egress
+		}
+		missing, err := missingPolicies(actual, direction.expected)
 		if err != nil {
 			return err
 		}
@@ -318,9 +405,35 @@ func reconcilePolicies(ctx context.Context, api caller, t Template, id string, a
 		if !allowAdd {
 			return errors.New("安全组规则未完成，请重试准备操作")
 		}
-		// VPC accepts only one direction per CreateSecurityGroupPolicies call.
+		// Submit a direction once, then only query until its rules are visible.
+		// A lost response is never grounds to repeat a policy insertion.
 		var response struct{ RequestId string }
-		if err := api.call(ctx, "vpc", "CreateSecurityGroupPolicies", t.Region, map[string]any{"SecurityGroupId": id, "SecurityGroupPolicySet": map[string]any{direction.name: missing}}, &response); err != nil {
+		mutationErr := api.call(ctx, "vpc", "CreateSecurityGroupPolicies", t.Region, map[string]any{"SecurityGroupId": id, "SecurityGroupPolicySet": map[string]any{direction.name: missing}}, &response)
+		if err := waitPreparation(ctx, func(ctx context.Context) (bool, error) {
+			var err error
+			current, err = readPolicies(ctx, api, t, id)
+			if resourceNotVisible(err) {
+				if definiteNetworkRejection(mutationErr) {
+					return false, mutationErr
+				}
+				return false, nil
+			}
+			if err != nil {
+				return false, err
+			}
+			actual := current.Ingress
+			if direction.name == "Egress" {
+				actual = current.Egress
+			}
+			remaining, err := missingPolicies(actual, direction.expected)
+			if err != nil || len(remaining) == 0 {
+				return err == nil, err
+			}
+			if definiteNetworkRejection(mutationErr) {
+				return false, mutationErr
+			}
+			return false, nil
+		}); err != nil {
 			return err
 		}
 	}
@@ -331,13 +444,16 @@ func reconcilePolicies(ctx context.Context, api caller, t Template, id string, a
 }
 
 func create(ctx context.Context, api caller, t Template, in Input) (Created, error) {
-	if !tokenPattern.MatchString(in.ClientToken) || !matches(`^sg-[a-z0-9]+$`, in.SecurityGroupID) || !matches(`^skey-[a-z0-9]+$`, in.KeyID) || !textOK(in.InstanceName, 60) {
+	if !tokenPattern.MatchString(in.ClientToken) || !matches(`^sg-[a-z0-9]+$`, in.SecurityGroupID) || !matches(`^skey-[a-z0-9]+$`, in.KeyID) || !textOK(in.InstanceName, 60) || !matches(`^vpc-[a-z0-9]+$`, in.VpcID) || !matches(`^subnet-[a-z0-9]+$`, in.SubnetID) {
 		return Created{}, errors.New("腾讯云创建操作记录不完整")
 	}
 	if err := preflightImage(ctx, api, t); err != nil {
 		return Created{}, err
 	}
 	if err := reconcilePolicies(ctx, api, t, in.SecurityGroupID, false); err != nil {
+		return Created{}, err
+	}
+	if err := verifyNetworkForPurchase(ctx, api, t, in); err != nil {
 		return Created{}, err
 	}
 	encoded, _ := json.Marshal(t.RunInstances)
@@ -349,12 +465,16 @@ func create(ctx context.Context, api caller, t Template, in Input) (Created, err
 	payload["InstanceName"] = in.InstanceName
 	payload["SecurityGroupIds"] = []string{in.SecurityGroupID}
 	payload["LoginSettings"] = map[string]any{"KeyIds": []string{in.KeyID}}
+	payload["VirtualPrivateCloud"] = map[string]string{"VpcId": in.VpcID, "SubnetId": in.SubnetID}
 	payload["TagSpecification"] = []any{map[string]any{"ResourceType": "instance", "Tags": []tag{{Key: managedTag, Value: managedValue}, {Key: operationTag, Value: in.ClientToken}}}}
 	var out struct {
 		InstanceIdSet []string
 		RequestId     string
 	}
 	if err := api.call(ctx, "cvm", "RunInstances", t.Region, payload, &out); err != nil {
+		if zoneUnavailable(err) {
+			return Created{State: "unavailable"}, nil
+		}
 		return Created{}, err
 	}
 	if len(out.InstanceIdSet) != 1 || !instancePattern.MatchString(out.InstanceIdSet[0]) {

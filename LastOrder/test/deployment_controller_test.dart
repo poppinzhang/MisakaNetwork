@@ -9,6 +9,8 @@ import 'package:last_order/src/services.dart';
 
 import 'fakes.dart';
 
+const hostFingerprint = 'SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
+
 const credentials = <String, dynamic>{
   'ca_cert': 'ca',
   'client_cert': 'cert',
@@ -179,38 +181,110 @@ void main() {
   );
 
   test(
-    'fingerprint waits for explicit confirmation then persists the pin',
+    'first host identity saves before automatic deployment continues',
     () async {
+      final saveGate = Completer<void>();
+      final store = MemoryStore();
       final helper = FakeHelper()
         ..handler = (request, _) async {
           if (request['action'] != 'deploy') return {};
-          return request['host_key_fingerprint'] == ''
-              ? {'needs_confirmation': true, 'fingerprint': 'SHA256:test-pin'}
-              : credentials;
+          if (request['host_key_fingerprint'] == '') {
+            return {'needs_confirmation': true, 'fingerprint': hostFingerprint};
+          }
+          expectSync(store.state.machines.single.fingerprint, hostFingerprint);
+          return credentials;
         };
-      final store = MemoryStore();
       final c = controller(store: store, helper: helper);
       addTearDown(c.dispose);
       await c.initialize(poll: false);
+      store.beforeSave = (state) async {
+        if (state.machines.single.fingerprint.isNotEmpty) await saveGate.future;
+      };
       await start(c);
       final id = c.state.machines.single.id;
-      await settleUntil(() => c.deployments[id]?.awaitingConfirmation ?? false);
+      await settleUntil(() => c.deployments[id]?.stage == '保存服务器身份');
       expect(c.deploying, 1);
       expect(store.state.machines.single.fingerprint, isEmpty);
       expect(
         helper.requests.where((r) => r['action'] == 'deploy'),
         hasLength(1),
       );
-      await c.confirmDeployment(id);
+      saveGate.complete();
       await settleUntil(() => c.deploying == 0);
-      expect(store.state.machines.single.fingerprint, 'SHA256:test-pin');
+      expect(store.state.machines.single.fingerprint, hostFingerprint);
       expect(store.state.machines.single.canConnect, isTrue);
-      expect(helper.requests.last['host_key_fingerprint'], 'SHA256:test-pin');
+      expect(helper.requests.last['host_key_fingerprint'], hostFingerprint);
+      expect(
+        helper.requests.where((r) => r['action'] == 'deploy'),
+        hasLength(2),
+      );
+
+      await start(c, existing: c.state.machines.single);
+      await settleUntil(() => c.deploying == 0);
+      expect(helper.requests.last['host_key_fingerprint'], hostFingerprint);
+      expect(
+        helper.requests.where((r) => r['action'] == 'deploy'),
+        hasLength(3),
+      );
+    },
+  );
+
+  for (final badFingerprint in [
+    null,
+    '',
+    'SHA256:test-pin',
+    'SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAB',
+  ]) {
+    test(
+      'invalid initial host identity $badFingerprint stops deployment',
+      () async {
+        final helper = FakeHelper()
+          ..handler = (request, _) async => request['action'] == 'deploy'
+              ? {'needs_confirmation': true, 'fingerprint': badFingerprint}
+              : {};
+        final c = controller(helper: helper);
+        addTearDown(c.dispose);
+        await c.initialize(poll: false);
+        await start(c);
+        await settleUntil(() => c.deploying == 0);
+        expect(c.state.machines.single.canConnect, isFalse);
+        expect(c.state.machines.single.fingerprint, isEmpty);
+        expect(c.state.machines.single.deploymentError, contains('无法验证服务器身份'));
+        expect(
+          helper.requests.where((r) => r['action'] == 'deploy'),
+          hasLength(1),
+        );
+      },
+    );
+  }
+
+  test(
+    'failed pin save prevents authentication and subsequent deployment',
+    () async {
+      final store = MemoryStore();
+      final helper = FakeHelper()
+        ..handler = (request, _) async {
+          if (request['action'] != 'deploy') return {};
+          store.failSave = true;
+          return {'needs_confirmation': true, 'fingerprint': hostFingerprint};
+        };
+      final c = controller(store: store, helper: helper);
+      addTearDown(c.dispose);
+      await c.initialize(poll: false);
+      await start(c);
+      await settleUntil(() => c.deploying == 0);
+      expect(c.state.machines.single.canConnect, isFalse);
+      expect(store.state.machines.single.fingerprint, isEmpty);
+      expect(c.state.machines.single.deploymentError, contains('服务器身份未能保存'));
+      expect(
+        helper.requests.where((r) => r['action'] == 'deploy'),
+        hasLength(1),
+      );
     },
   );
 
   test(
-    'rejecting a fingerprint keeps a failed card and deletes owned key copies',
+    'changed pinned host is never adopted and owned key copies are removed',
     () async {
       final directory = await Directory.systemTemp.createTemp(
         'deployment-test-',
@@ -219,26 +293,64 @@ void main() {
       final key = await File('${directory.path}/key').writeAsString('fake-key');
       final helper = FakeHelper()
         ..handler = (request, _) async => request['action'] == 'deploy'
-            ? {'needs_confirmation': true, 'fingerprint': 'SHA256:test-pin'}
+            ? {
+                'needs_confirmation': true,
+                'fingerprint': request['host_key_fingerprint'] == ''
+                    ? hostFingerprint
+                    : 'SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAE',
+              }
             : {};
       final c = controller(helper: helper);
       addTearDown(c.dispose);
       await c.initialize(poll: false);
       await start(c, importedFiles: [key.path]);
       final id = c.state.machines.single.id;
-      await settleUntil(() => c.deployments[id]?.awaitingConfirmation ?? false);
-      expect(await key.exists(), isTrue);
-      await c.rejectDeployment(id);
+      await settleUntil(() => c.deploying == 0);
       expect(c.deployments[id]?.phase, DeploymentPhase.failed);
-      expect(c.state.machines.single.deploymentError, contains('部署已取消'));
+      expect(c.state.machines.single.deploymentError, contains('与已保存记录不一致'));
       expect(c.state.machines.single.canConnect, isFalse);
+      expect(c.state.machines.single.fingerprint, hostFingerprint);
       expect(await key.exists(), isFalse);
-      expect(c.deploying, 0);
+      expect(
+        helper.requests.where((r) => r['action'] == 'deploy'),
+        hasLength(2),
+      );
+
+      await start(c, existing: c.state.machines.single);
+      await settleUntil(() => c.deploying == 0);
+      expect(
+        helper.requests.where((r) => r['action'] == 'deploy'),
+        hasLength(3),
+      );
+      expect(helper.requests.last['host_key_fingerprint'], hostFingerprint);
+      expect(c.state.machines.single.fingerprint, hostFingerprint);
+      expect(c.state.machines.single.canConnect, isFalse);
+    },
+  );
+
+  test(
+    'app closing during identity save cannot start the authenticated call',
+    () async {
+      final saveGate = Completer<void>();
+      final store = MemoryStore();
+      final helper = FakeHelper()
+        ..handler = (request, _) async => request['action'] == 'deploy'
+            ? {'needs_confirmation': true, 'fingerprint': hostFingerprint}
+            : {};
+      final c = controller(store: store, helper: helper);
+      await c.initialize(poll: false);
+      store.beforeSave = (state) async {
+        if (state.machines.single.fingerprint.isNotEmpty) await saveGate.future;
+      };
+      await start(c);
+      await settleUntil(() => c.deployments.values.single.stage == '保存服务器身份');
+      c.dispose();
+      saveGate.complete();
+      await settleUntil(() => c.deploying == 0);
       expect(
         helper.requests.where((r) => r['action'] == 'deploy'),
         hasLength(1),
       );
-      await expectLater(start(c, name: '另一台'), throwsA(isA<UserError>()));
     },
   );
 

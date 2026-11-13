@@ -147,40 +147,26 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('fingerprint stays on the card until explicitly approved', (
+  testWidgets('first host identity is remembered without an approval step', (
     tester,
   ) async {
+    const fingerprint = 'SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
     final deployments = _Deployments();
     final c = await _openMachines(tester, deployments);
-    await _submitMachine(tester, name: '待确认节点', host: '192.0.2.10');
+    await _submitMachine(tester, name: '自动部署节点', host: '192.0.2.10');
     deployments.calls.single.result.complete({
       'needs_confirmation': true,
-      'fingerprint': 'SHA256:synthetic-host-fingerprint',
+      'fingerprint': fingerprint,
     });
     await tester.pumpAndSettle();
 
     expect(find.text('确认 SSH 主机指纹'), findsNothing);
-    expect(find.text('核对 SSH 指纹'), findsOneWidget);
-    expect(deployments.calls, hasLength(1));
-    await tester.tap(find.text('核对 SSH 指纹'));
-    await tester.pumpAndSettle();
-    expect(find.text('确认 SSH 主机指纹'), findsOneWidget);
-    expect(find.text('SHA256:synthetic-host-fingerprint'), findsOneWidget);
-    await tester.tap(find.text('取消'));
-    await tester.pumpAndSettle();
-    expect(deployments.calls, hasLength(1));
-    expect(find.text('核对 SSH 指纹'), findsOneWidget);
-
-    await tester.tap(find.text('核对 SSH 指纹'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('指纹一致，部署'));
-    await tester.pumpAndSettle();
+    expect(find.text('核对 SSH 指纹'), findsNothing);
+    expect(find.text('取消部署'), findsNothing);
+    expect(find.text(fingerprint), findsNothing);
     expect(deployments.calls, hasLength(2));
-    expect(
-      deployments.calls.last.request['host_key_fingerprint'],
-      'SHA256:synthetic-host-fingerprint',
-    );
-    expect(find.text('确认 SSH 主机指纹'), findsNothing);
+    expect(deployments.calls.last.request['host_key_fingerprint'], fingerprint);
+    expect(c.state.machines.single.fingerprint, fingerprint);
     deployments.calls.last.result.complete(_Deployments.credentials);
     await tester.pumpAndSettle();
     expect(c.state.machines.single.canConnect, isTrue);
@@ -188,29 +174,35 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('cancelling fingerprint approval keeps a retryable machine', (
-    tester,
-  ) async {
-    final deployments = _Deployments();
-    final c = await _openMachines(tester, deployments);
-    await _submitMachine(tester, name: '待取消节点', host: '192.0.2.10');
-    final id = c.state.machines.single.id;
-    deployments.calls.single.result.complete({
-      'needs_confirmation': true,
-      'fingerprint': 'SHA256:synthetic-host-fingerprint',
-    });
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('取消部署'));
-    await tester.pumpAndSettle();
+  testWidgets(
+    'a changed host identity fails visibly without replacing its pin',
+    (tester) async {
+      const fingerprint = 'SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
+      final deployments = _Deployments();
+      final c = await _openMachines(tester, deployments);
+      await _submitMachine(tester, name: '身份变化节点', host: '192.0.2.10');
+      final id = c.state.machines.single.id;
+      deployments.calls.single.result.complete({
+        'needs_confirmation': true,
+        'fingerprint': fingerprint,
+      });
+      await tester.pumpAndSettle();
+      deployments.calls.last.result.completeError(
+        const UserError('SSH 主机指纹不匹配，连接已停止。'),
+      );
+      await tester.pumpAndSettle();
 
-    expect(deployments.calls, hasLength(1));
-    expect(c.state.machines.single.id, id);
-    expect(c.state.machines.single.canConnect, isFalse);
-    expect(find.text('部署失败'), findsOneWidget);
-    expect(find.text('重试部署'), findsOneWidget);
-    expect(find.text('移除连接'), findsOneWidget);
-    expect(tester.takeException(), isNull);
-  });
+      expect(deployments.calls, hasLength(2));
+      expect(c.state.machines.single.id, id);
+      expect(c.state.machines.single.fingerprint, fingerprint);
+      expect(c.state.machines.single.canConnect, isFalse);
+      expect(find.text('部署失败'), findsOneWidget);
+      expect(find.text('SSH 主机指纹不匹配，连接已停止。'), findsOneWidget);
+      expect(find.text('重试部署'), findsOneWidget);
+      expect(find.text('移除连接'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   testWidgets('a failed deployment retries the same machine from its card', (
     tester,

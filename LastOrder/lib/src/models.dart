@@ -15,6 +15,7 @@ class Machine {
     this.fingerprint = '',
     this.deploymentPending = false,
     this.deploymentError = '',
+    this.deploymentUsername = '',
   });
   final String id,
       name,
@@ -24,7 +25,8 @@ class Machine {
       clientKey,
       serverName,
       fingerprint,
-      deploymentError;
+      deploymentError,
+      deploymentUsername;
   final int port;
   final bool deploymentPending;
 
@@ -51,6 +53,7 @@ class Machine {
     fingerprint: fingerprint ?? this.fingerprint,
     deploymentPending: deploymentPending ?? this.deploymentPending,
     deploymentError: deploymentError ?? this.deploymentError,
+    deploymentUsername: deploymentUsername,
   );
   Map<String, dynamic> toJson() => {
     'id': id,
@@ -64,6 +67,7 @@ class Machine {
     'fingerprint': fingerprint,
     'deploymentPending': deploymentPending,
     'deploymentError': deploymentError,
+    'deploymentUsername': deploymentUsername,
   };
   factory Machine.fromJson(Map<String, dynamic> j) => Machine(
     id: j['id'] as String,
@@ -77,6 +81,7 @@ class Machine {
     fingerprint: j['fingerprint'] as String? ?? '',
     deploymentPending: j['deploymentPending'] as bool? ?? false,
     deploymentError: j['deploymentError'] as String? ?? '',
+    deploymentUsername: j['deploymentUsername'] as String? ?? '',
   );
 }
 

@@ -1,3 +1,6 @@
+import 'dart:math' as math;
+
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
@@ -162,7 +165,7 @@ class _CloudCredentialsPageState extends State<CloudCredentialsPage> {
           ),
           const SizedBox(height: 24),
           const CloudNotice(
-            '凭证仅在本机检查格式。腾讯云支持创建和释放按量计费服务器，会产生云费用；阿里云和火山引擎仍为交互预览。',
+            '凭证提交后联网验证，通过后才保存。每家云厂商仅保留一份凭证。腾讯云支持创建和释放按量计费服务器，会产生云费用；阿里云和火山引擎的资源操作仍为交互预览。',
             icon: LucideIcons.info,
           ),
           const SizedBox(height: 24),
@@ -381,7 +384,11 @@ class _CloudCredentialsPageState extends State<CloudCredentialsPage> {
                     ),
                     const SizedBox(height: 5),
                     Text(
-                      credential == null ? '尚未录入凭证' : '格式已检查 · 未联网',
+                      credential == null
+                          ? '尚未录入凭证'
+                          : credential.onlineVerified
+                          ? '联网验证通过'
+                          : '待联网验证',
                       style: TextStyle(
                         color: credential == null
                             ? colors.onSurfaceVariant
@@ -418,40 +425,34 @@ class CloudCredentialForm extends StatefulWidget {
 
 class _CloudCredentialFormState extends State<CloudCredentialForm> {
   final form = GlobalKey<FormState>();
-  late final alias = TextEditingController(
-    text:
-        widget.controller.credentialFor(widget.provider)?.alias ??
-        '${widget.provider.displayName}账号',
-  );
   final keyId = TextEditingController(), secret = TextEditingController();
-  bool busy = false, reveal = false;
+  bool busy = false, removing = false, reveal = false;
   String? error, saved;
   @override
   void dispose() {
-    alias.dispose();
     keyId.dispose();
     secret.dispose();
     super.dispose();
   }
 
   Future<void> save() async {
-    if (!form.currentState!.validate()) return;
+    if (busy || !form.currentState!.validate()) return;
     setState(() {
       busy = true;
+      removing = false;
       error = null;
       saved = null;
     });
     try {
       await widget.controller.saveCredential(
         widget.provider,
-        alias: alias.text.trim(),
         accessKeyId: keyId.text,
         accessKeySecret: secret.text,
       );
       if (!mounted) return;
       keyId.clear();
       secret.clear();
-      setState(() => saved = '格式检查通过，已安全保存。云端身份与权限尚未验证。');
+      setState(() => saved = '联网验证通过，已安全保存。');
     } catch (e) {
       if (mounted) setState(() => error = readableError(e));
     } finally {
@@ -460,6 +461,7 @@ class _CloudCredentialFormState extends State<CloudCredentialForm> {
   }
 
   Future<void> remove() async {
+    if (busy) return;
     final approved = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -482,11 +484,20 @@ class _CloudCredentialFormState extends State<CloudCredentialForm> {
     if (approved != true || !mounted) return;
     setState(() {
       busy = true;
+      removing = true;
       error = null;
+      saved = null;
     });
     try {
       await widget.controller.removeCredential(widget.provider);
-      if (mounted) setState(() => saved = null);
+      if (mounted) {
+        keyId.clear();
+        secret.clear();
+        setState(() {
+          reveal = false;
+          saved = '已从本机移除凭证。';
+        });
+      }
     } catch (e) {
       if (mounted) setState(() => error = readableError(e));
     } finally {
@@ -511,6 +522,7 @@ class _CloudCredentialFormState extends State<CloudCredentialForm> {
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
     final credential = widget.controller.credentialFor(widget.provider);
+    final canEnterCredential = credential?.onlineVerified != true;
     return Container(
       padding: EdgeInsets.all(MediaQuery.sizeOf(context).width < 600 ? 20 : 28),
       decoration: BoxDecoration(
@@ -559,84 +571,88 @@ class _CloudCredentialFormState extends State<CloudCredentialForm> {
             const SizedBox(height: 20),
             if (credential != null) ...[
               CloudNotice(
-                '已保存 ${credential.alias} · ${credential.maskedId}\n格式已检查，未联网验证。${widget.provider == CloudProvider.tencent ? '存在未释放资源时只可更新同一 SecretId 的密钥。' : '填写新密钥可替换现有凭证。'}',
-                icon: LucideIcons.shieldCheck,
+                '已保存${widget.provider.displayName}凭证 · ${credential.maskedId}\n${credential.onlineVerified ? '联网验证通过。' : '待联网验证，请重新提交验证。'}${widget.provider == CloudProvider.tencent ? '仍有未释放或待核实的云资源时，不能移除凭证。' : ''}',
+                icon: credential.onlineVerified
+                    ? LucideIcons.shieldCheck
+                    : LucideIcons.info,
               ),
               const SizedBox(height: 20),
             ],
-            TextFormField(
-              key: const ValueKey('cloud-alias'),
-              controller: alias,
-              enabled: !busy,
-              maxLength: 40,
-              decoration: const InputDecoration(
-                labelText: '账号备注',
-                hintText: '方便识别这份凭证',
-                counterText: '',
-              ),
-              validator: (v) =>
-                  v == null || v.trim().isEmpty ? '请填写账号备注' : null,
-            ),
-            const SizedBox(height: 16),
-            TextFormField(
-              key: const ValueKey('cloud-key-id'),
-              controller: keyId,
-              enabled: !busy,
-              autocorrect: false,
-              enableSuggestions: false,
-              decoration: InputDecoration(
-                labelText: widget.provider.credentialIdLabel,
-              ),
-              validator: (v) => CloudController.validateCredentialValue(
-                v ?? '',
-                widget.provider.credentialIdLabel,
-              ),
-            ),
-            const SizedBox(height: 16),
-            TextFormField(
-              key: const ValueKey('cloud-key-secret'),
-              controller: secret,
-              enabled: !busy,
-              obscureText: !reveal,
-              autocorrect: false,
-              enableSuggestions: false,
-              decoration: InputDecoration(
-                labelText: widget.provider.credentialSecretLabel,
-                suffixIcon: IconButton(
-                  tooltip: reveal ? '隐藏密钥' : '显示密钥',
-                  onPressed: () => setState(() => reveal = !reveal),
-                  icon: Icon(
-                    reveal ? LucideIcons.eyeOff : LucideIcons.eye,
-                    size: 18,
-                  ),
-                ),
-              ),
-              validator: (v) => CloudController.validateCredentialValue(
-                v ?? '',
-                widget.provider.credentialSecretLabel,
-              ),
-            ),
-            const SizedBox(height: 12),
             Text(
-              switch (widget.provider) {
-                CloudProvider.tencent => '使用 CAM 子用户的 API 密钥，无需填写 AppID。',
-                CloudProvider.aliyun => '使用 RAM 用户的访问密钥，无需填写网页登录密码。',
-                CloudProvider.volcengine => '使用 IAM 用户的访问密钥；不是火山方舟的模型 API Key。',
-              },
+              credential == null
+                  ? '每家云厂商只能保存一份凭证。'
+                  : credential.onlineVerified
+                  ? '如需更换凭证，请先移除当前凭证。'
+                  : '重新提交并通过联网验证后即可使用；验证失败时保留原记录。',
               style: TextStyle(
                 color: colors.onSurfaceVariant,
                 fontSize: 12,
                 height: 1.6,
               ),
             ),
-            Align(
-              alignment: Alignment.centerLeft,
-              child: TextButton.icon(
-                onPressed: help,
-                icon: const Icon(LucideIcons.externalLink, size: 14),
-                label: const Text('查看官方凭证说明'),
+            if (canEnterCredential) ...[
+              const SizedBox(height: 16),
+              TextFormField(
+                key: const ValueKey('cloud-key-id'),
+                controller: keyId,
+                enabled: !busy,
+                autocorrect: false,
+                enableSuggestions: false,
+                decoration: InputDecoration(
+                  labelText: widget.provider.credentialIdLabel,
+                ),
+                validator: (v) => CloudController.validateCredentialValue(
+                  v ?? '',
+                  widget.provider.credentialIdLabel,
+                ),
               ),
-            ),
+              const SizedBox(height: 16),
+              TextFormField(
+                key: const ValueKey('cloud-key-secret'),
+                controller: secret,
+                enabled: !busy,
+                obscureText: !reveal,
+                autocorrect: false,
+                enableSuggestions: false,
+                decoration: InputDecoration(
+                  labelText: widget.provider.credentialSecretLabel,
+                  suffixIcon: IconButton(
+                    tooltip: reveal ? '隐藏密钥' : '显示密钥',
+                    onPressed: () => setState(() => reveal = !reveal),
+                    icon: Icon(
+                      reveal ? LucideIcons.eyeOff : LucideIcons.eye,
+                      size: 18,
+                    ),
+                  ),
+                ),
+                validator: (v) => CloudController.validateCredentialValue(
+                  v ?? '',
+                  widget.provider.credentialSecretLabel,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                switch (widget.provider) {
+                  CloudProvider.tencent => '使用 CAM 子用户的 API 密钥，无需填写 AppID。',
+                  CloudProvider.aliyun => '使用 RAM 用户的访问密钥，无需填写网页登录密码。',
+                  CloudProvider.volcengine =>
+                    '使用 IAM 用户的访问密钥；不是火山方舟的模型 API Key。',
+                },
+                style: TextStyle(
+                  color: colors.onSurfaceVariant,
+                  fontSize: 12,
+                  height: 1.6,
+                ),
+              ),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  onPressed: help,
+                  icon: const Icon(LucideIcons.externalLink, size: 14),
+                  label: const Text('查看官方凭证说明'),
+                ),
+              ),
+            ],
             if (error != null)
               Padding(
                 padding: const EdgeInsets.only(bottom: 16),
@@ -653,27 +669,30 @@ class _CloudCredentialFormState extends State<CloudCredentialForm> {
               runSpacing: 10,
               crossAxisAlignment: WrapCrossAlignment.center,
               children: [
-                FilledButton.icon(
-                  key: const ValueKey('cloud-save-credential'),
-                  onPressed: busy || !widget.controller.initialized
-                      ? null
-                      : save,
-                  icon: Icon(
-                    busy ? LucideIcons.loaderCircle : LucideIcons.shieldCheck,
-                    size: 17,
+                if (canEnterCredential)
+                  FilledButton.icon(
+                    key: const ValueKey('cloud-save-credential'),
+                    onPressed: busy || !widget.controller.initialized
+                        ? null
+                        : save,
+                    icon: Icon(
+                      busy ? LucideIcons.loaderCircle : LucideIcons.shieldCheck,
+                      size: 17,
+                    ),
+                    label: Text(busy && !removing ? '正在验证并保存' : '联网验证并保存'),
                   ),
-                  label: Text(busy ? '正在安全保存' : '检查并保存凭证'),
-                ),
                 if (credential != null)
                   OutlinedButton.icon(
-                    onPressed: widget.onCreate,
+                    onPressed: busy || !credential.onlineVerified
+                        ? null
+                        : widget.onCreate,
                     icon: const Icon(LucideIcons.plus, size: 16),
                     label: const Text('去创建云服务器'),
                   ),
                 if (credential != null)
                   TextButton(
                     onPressed: busy ? null : remove,
-                    child: const Text('移除凭证'),
+                    child: Text(busy && removing ? '正在移除凭证' : '移除凭证'),
                   ),
               ],
             ),
@@ -1041,7 +1060,7 @@ class _CloudCreateDialogState extends State<CloudCreateDialog> {
                             const SizedBox(height: 16),
                             Text(
                               provider == CloudProvider.tencent
-                                  ? '模板由管理员维护并随应用打包。库存、权限与实际价格以腾讯云为准。'
+                                  ? '模板由管理员维护并随应用打包。LastOrder 会自动创建并复用 VPC 和子网；释放服务器时保留共享网络。库存、权限与实际价格以腾讯云为准。'
                                   : '模板参数为界面示例，地域、机型、网络与费用将在后续确定。',
                               style: TextStyle(
                                 fontSize: 12,
@@ -1063,7 +1082,7 @@ class _CloudCreateDialogState extends State<CloudCreateDialog> {
                                   child: Text(
                                     widget.controller.sshReady
                                         ? provider == CloudProvider.tencent
-                                              ? '导入并复用本机 SSH 公钥 · RSA 2048\n创建后保留实例信息。Sisters 需另行部署，首次 SSH 连接仍需核对服务器主机指纹。'
+                                              ? '导入并复用本机 SSH 公钥 · RSA 2048\n创建后保留服务器记录。Sisters 需另行部署，连接身份由应用自动记录并校验。'
                                               : '自动使用本机 SSH 公钥 · RSA 2048\n创建后演示 Sisters 部署。'
                                         : '本机 SSH 登录密钥尚未就绪，请先前往公有云凭证页面完成准备。',
                                     style: TextStyle(
@@ -1163,7 +1182,7 @@ class _CloudCreateDialogState extends State<CloudCreateDialog> {
                     )
                   else
                     Text(
-                      '已有凭证仅通过本地格式检查，云端身份与权限尚未验证。',
+                      '请先联网验证并保存凭证，再选择云服务器配置。验证通过不代表所有资源操作均已授权。',
                       style: TextStyle(
                         fontSize: 11,
                         color: colors.onSurfaceVariant,
@@ -1185,12 +1204,15 @@ class _CloudCreateDialogState extends State<CloudCreateDialog> {
     final internet = parameters['InternetAccessible'] as Map;
     return CloudNotice(
       '本次创建：1 台 · 按量计费（按小时后付费）\n'
-      '${value['region']} / ${placement['Zone']} · ${parameters['InstanceType']}\n'
+      '地域：${value['region']} · 机型：${parameters['InstanceType']}\n'
+      '建议可用区：${placement['Zone']}\n'
+      '建议可用区售罄时，将依次尝试同地域其他可用区，保持相同机型、镜像、系统盘和带宽。创建结果不确定时暂停尝试并查询核实。\n'
       '镜像 ${parameters['ImageId']} · ${template.diskGb} GB 系统盘\n'
       '公网按流量计费 · 出网带宽上限 ${internet['InternetMaxBandwidthOut']} Mbps\n'
-      'SSH 22：${value['sshCidr']}\n'
-      'Sisters 20001：${value['grpcCidr']}\n'
-      '创建会产生云费用；尚未接入自动部署和费用查询。',
+      'SSH 登录：${TencentAccessPolicy.sshUsername}（密钥）\n'
+      'SSH TCP ${TencentAccessPolicy.sshPort} 来源：${TencentAccessPolicy.ingressCidr}\n'
+      'Sisters TCP ${TencentAccessPolicy.sistersPort} 来源：${TencentAccessPolicy.ingressCidr}\n'
+      '创建会产生云费用。创建完成后，点击「部署 Sisters」即可部署；暂不提供费用查询。',
     );
   }
 
@@ -1206,10 +1228,10 @@ class _CloudCreateDialogState extends State<CloudCreateDialog> {
       ),
       child: LayoutBuilder(
         builder: (context, constraints) {
-          final button = credential == null
+          final button = credential?.onlineVerified != true
               ? OutlinedButton(
                   onPressed: () => Navigator.pop(context, item),
-                  child: const Text('录入凭证'),
+                  child: Text(credential == null ? '录入凭证' : '验证凭证'),
                 )
               : FilledButton.tonal(
                   key: ValueKey('cloud-select-provider-${item.name}'),
@@ -1237,8 +1259,10 @@ class _CloudCreateDialogState extends State<CloudCreateDialog> {
                     const SizedBox(height: 5),
                     Text(
                       credential == null
-                          ? '添加凭证后即可选择配置'
-                          : '${credential.alias} · ${item == CloudProvider.tencent ? '按量付费' : '交互预览'}',
+                          ? '验证并保存凭证后即可选择配置'
+                          : !credential.onlineVerified
+                          ? '待联网验证'
+                          : '已验证 · ${item == CloudProvider.tencent ? '按量付费' : '交互预览'}',
                       style: TextStyle(
                         fontSize: 12,
                         color: colors.onSurfaceVariant,
@@ -1364,9 +1388,18 @@ class CloudMachineCard extends StatefulWidget {
     super.key,
     required this.machine,
     required this.controller,
+    this.onDeploy,
+    this.sistersLinked = false,
+    this.sistersReady = false,
+    this.sistersProgress,
+    this.sistersDetails,
+    this.onRemoveConnection,
   });
   final CloudMachine machine;
   final CloudController controller;
+  final Future<void> Function()? onDeploy, onRemoveConnection;
+  final bool sistersLinked, sistersReady;
+  final Widget? sistersProgress, sistersDetails;
   @override
   State<CloudMachineCard> createState() => _CloudMachineCardState();
 }
@@ -1396,7 +1429,7 @@ class _CloudMachineCardState extends State<CloudMachineCard> {
         content: Text(
           widget.machine.isReal
               ? '确认释放「${widget.machine.name}」？\n'
-                    '地域：${widget.machine.region}\n实例：${widget.machine.instanceId}\n\n'
+                    '公网地址：${widget.machine.publicIp.isEmpty ? '等待云端返回' : widget.machine.publicIp}\n\n'
                     '释放将结束此实例上的所有任务并删除系统盘数据，无法恢复。共享安全组、SSH 公钥、VPC 和子网会保留。\n\n'
                     '提交后还需查询云端确认；确认按钮不代表费用已停止。额外绑定的磁盘、弹性公网 IP 等资源需在腾讯云控制台另行核对。'
               : '确认演示释放「${widget.machine.name}」？\n\n当前仅演示此流程，不操作云端资源。',
@@ -1483,7 +1516,15 @@ class _CloudMachineCardState extends State<CloudMachineCard> {
               spacing: 8,
               runSpacing: 8,
               children: [
-                CloudPill(m.statusLabel, color: color),
+                CloudPill(
+                  m.phase == CloudMachinePhase.created && widget.sistersReady
+                      ? '已创建 · Sisters 已部署'
+                      : m.phase == CloudMachinePhase.created &&
+                            widget.sistersLinked
+                      ? '云服务器已创建'
+                      : m.statusLabel,
+                  color: color,
+                ),
                 CloudPill(
                   m.isReal ? '按量计费' : '交互预览',
                   color: colors.onSurfaceVariant,
@@ -1495,15 +1536,9 @@ class _CloudMachineCardState extends State<CloudMachineCard> {
               '${m.template.cpu} 核 / ${m.template.memoryGb} GB 内存 / ${m.template.diskGb} GB 系统盘',
               style: TextStyle(fontSize: 13, color: colors.onSurface),
             ),
-            const SizedBox(height: 6),
-            Text(
-              m.template.regionLabel,
-              style: TextStyle(fontSize: 12, color: colors.onSurfaceVariant),
-            ),
             if (m.isReal) ...[
               const SizedBox(height: 12),
               SelectableText(
-                '地域：${m.region}\n实例：${m.instanceId.isEmpty ? '尚未取得实例 ID' : m.instanceId}\n'
                 '公网地址：${m.publicIp.isEmpty ? '等待云端返回' : m.publicIp}',
                 style: TextStyle(
                   fontSize: 12,
@@ -1526,7 +1561,7 @@ class _CloudMachineCardState extends State<CloudMachineCard> {
                 m.isReal
                     ? m.phase == CloudMachinePhase.releasing
                           ? '正在请求释放并核对云端结果。关闭应用不会取消云端操作。'
-                          : '正在创建云服务器，请等待云端返回。关闭应用不会停止计费。'
+                          : '正在准备共享网络、安全组与登录公钥，并创建云服务器。关闭应用不会取消云端操作。'
                     : m.phase == CloudMachinePhase.releasing
                     ? '正在演示释放，请稍候。'
                     : '流程独立进行，你可以继续添加其他机器。',
@@ -1539,7 +1574,13 @@ class _CloudMachineCardState extends State<CloudMachineCard> {
                 m.isReal
                     ? released
                           ? '云端已确认实例释放。请在腾讯云控制台核对账单及额外关联资源。'
-                          : '云服务器已创建，可能持续产生费用。Sisters 尚未部署，此记录不能分发任务。'
+                          : widget.sistersReady
+                          ? 'Sisters 已部署，可在此查看连接状态并分发任务。云服务器仍按量计费。'
+                          : widget.sistersLinked
+                          ? 'Sisters 部署与连接状态见下方。云服务器仍按量计费。'
+                          : m.phase != CloudMachinePhase.created
+                          ? '请先查询云端状态，确认服务器已运行后再部署 Sisters。云资源可能继续计费。'
+                          : '云服务器已创建，可能持续产生费用。点击「部署 Sisters」即可使用已保存的 SSH 密钥部署。'
                     : released
                     ? '释放流程已演示完成，没有操作真实云资源。'
                     : '创建与部署流程已演示完成。此预览节点不能执行抢票任务。',
@@ -1549,6 +1590,14 @@ class _CloudMachineCardState extends State<CloudMachineCard> {
                   color: colors.onSurfaceVariant,
                 ),
               ),
+            if (widget.sistersDetails != null) ...[
+              const SizedBox(height: 18),
+              widget.sistersDetails!,
+            ],
+            if (widget.sistersProgress != null) ...[
+              const SizedBox(height: 12),
+              widget.sistersProgress!,
+            ],
             if (error != null)
               Padding(
                 padding: const EdgeInsets.only(top: 12),
@@ -1558,15 +1607,39 @@ class _CloudMachineCardState extends State<CloudMachineCard> {
               const SizedBox(height: 18),
               const Divider(height: 1),
               const SizedBox(height: 12),
-              Wrap(
-                spacing: 10,
-                runSpacing: 8,
+              _CloudMachineActions(
+                minimumColumnWidth:
+                    180 *
+                    math.max(
+                      1,
+                      MediaQuery.textScalerOf(context).scale(14) / 14,
+                    ),
                 children: [
+                  if (m.isReal &&
+                      m.phase == CloudMachinePhase.created &&
+                      widget.onDeploy != null)
+                    FilledButton.icon(
+                      key: ValueKey('cloud-deploy-${m.id}'),
+                      style: _actionStyle(),
+                      onPressed:
+                          busy || widget.controller.isDeployingTencent(m.id)
+                          ? null
+                          : () => act(widget.onDeploy!),
+                      icon: const Icon(LucideIcons.upload, size: 16),
+                      label: Text(
+                        widget.sistersReady
+                            ? '重新部署 Sisters'
+                            : widget.sistersLinked
+                            ? '重试部署 Sisters'
+                            : '部署 Sisters',
+                      ),
+                    ),
                   if (m.isReal &&
                       !released &&
                       (m.instanceId.isNotEmpty || m.createSubmitted))
                     OutlinedButton.icon(
                       key: ValueKey('cloud-refresh-${m.id}'),
+                      style: _actionStyle(),
                       onPressed: busy
                           ? null
                           : () => act(
@@ -1576,17 +1649,40 @@ class _CloudMachineCardState extends State<CloudMachineCard> {
                       icon: const Icon(LucideIcons.refreshCw, size: 16),
                       label: const Text('查询云端状态'),
                     ),
+                  if (m.isReal &&
+                      m.phase == CloudMachinePhase.createFailed &&
+                      !m.createSubmitted &&
+                      m.instanceId.isEmpty)
+                    OutlinedButton.icon(
+                      key: ValueKey('cloud-retry-prepare-${m.id}'),
+                      style: _actionStyle(),
+                      onPressed: busy
+                          ? null
+                          : () => act(
+                              () => widget.controller.retryTencentPreparation(
+                                m.id,
+                              ),
+                            ),
+                      icon: const Icon(LucideIcons.refreshCw, size: 16),
+                      label: const Text('重试准备并创建'),
+                    ),
                   if (!released &&
                       (m.isReal
                           ? m.instanceId.isNotEmpty && !m.active
                           : m.phase != CloudMachinePhase.createFailed))
                     OutlinedButton.icon(
-                      onPressed: busy ? null : release,
+                      key: ValueKey('cloud-release-${m.id}'),
+                      style: _actionStyle(foreground: colors.error),
+                      onPressed:
+                          busy || widget.controller.isDeployingTencent(m.id)
+                          ? null
+                          : release,
                       icon: const Icon(LucideIcons.power, size: 16),
                       label: const Text('释放云服务器'),
                     ),
                   if (m.canRemove)
-                    TextButton.icon(
+                    OutlinedButton.icon(
+                      style: _actionStyle(foreground: colors.onSurfaceVariant),
                       onPressed: busy
                           ? null
                           : () => act(
@@ -1603,6 +1699,17 @@ class _CloudMachineCardState extends State<CloudMachineCard> {
                             : '删除预览记录',
                       ),
                     ),
+                  if (widget.onRemoveConnection != null)
+                    OutlinedButton.icon(
+                      key: ValueKey('cloud-remove-connection-${m.id}'),
+                      style: _actionStyle(foreground: colors.onSurfaceVariant),
+                      onPressed:
+                          busy || widget.controller.isDeployingTencent(m.id)
+                          ? null
+                          : () => act(widget.onRemoveConnection!),
+                      icon: const Icon(LucideIcons.unlink, size: 15),
+                      label: const Text('移除 Sisters 连接'),
+                    ),
                 ],
               ),
             ],
@@ -1611,4 +1718,140 @@ class _CloudMachineCardState extends State<CloudMachineCard> {
       ),
     );
   }
+
+  ButtonStyle _actionStyle({Color? foreground}) => OutlinedButton.styleFrom(
+    foregroundColor: foreground,
+    minimumSize: const Size(0, 48),
+    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+    visualDensity: VisualDensity.standard,
+    textStyle: Theme.of(context).textTheme.labelLarge
+        ?.copyWith(fontSize: 13, fontWeight: FontWeight.w600),
+  );
+}
+
+// The surrounding card rows use IntrinsicHeight. A render layout keeps the
+// actions responsive to each card's width while also supporting that pass.
+class _CloudMachineActions extends MultiChildRenderObjectWidget {
+  const _CloudMachineActions({
+    required this.minimumColumnWidth,
+    required super.children,
+  });
+
+  final double minimumColumnWidth;
+
+  @override
+  RenderObject createRenderObject(BuildContext context) =>
+      _RenderCloudMachineActions(minimumColumnWidth);
+
+  @override
+  void updateRenderObject(
+    BuildContext context,
+    _RenderCloudMachineActions renderObject,
+  ) {
+    renderObject.minimumColumnWidth = minimumColumnWidth;
+  }
+}
+
+class _CloudMachineActionParentData extends ContainerBoxParentData<RenderBox> {}
+
+class _RenderCloudMachineActions extends RenderBox
+    with
+        ContainerRenderObjectMixin<RenderBox, _CloudMachineActionParentData>,
+        RenderBoxContainerDefaultsMixin<
+          RenderBox,
+          _CloudMachineActionParentData
+        > {
+  _RenderCloudMachineActions(this._minimumColumnWidth);
+
+  static const gap = 10.0;
+  double _minimumColumnWidth;
+
+  set minimumColumnWidth(double value) {
+    if (value == _minimumColumnWidth) return;
+    _minimumColumnWidth = value;
+    markNeedsLayout();
+  }
+
+  @override
+  void setupParentData(RenderBox child) {
+    if (child.parentData is! _CloudMachineActionParentData) {
+      child.parentData = _CloudMachineActionParentData();
+    }
+  }
+
+  int columns(double width) =>
+      childCount > 1 && width >= 2 * _minimumColumnWidth + gap ? 2 : 1;
+
+  double layoutWidth(BoxConstraints constraints) => constraints.hasBoundedWidth
+      ? constraints.maxWidth
+      : computeMaxIntrinsicWidth(double.infinity);
+
+  @override
+  Size computeDryLayout(BoxConstraints constraints) {
+    if (childCount == 0) return constraints.constrain(Size.zero);
+    final width = layoutWidth(constraints);
+    final count = columns(width);
+    final cellWidth = (width - gap * (count - 1)) / count;
+    var cellHeight = 0.0;
+    visitChildren((child) {
+      cellHeight = math.max(
+        cellHeight,
+        (child as RenderBox)
+            .getDryLayout(BoxConstraints.tightFor(width: cellWidth))
+            .height,
+      );
+    });
+    final rows = (childCount / count).ceil();
+    return constraints.constrain(
+      Size(width, rows * cellHeight + gap * (rows - 1)),
+    );
+  }
+
+  @override
+  double computeMinIntrinsicWidth(double height) => _minimumColumnWidth;
+
+  @override
+  double computeMaxIntrinsicWidth(double height) =>
+      childCount > 1 ? 2 * _minimumColumnWidth + gap : _minimumColumnWidth;
+
+  @override
+  double computeMinIntrinsicHeight(double width) =>
+      computeMaxIntrinsicHeight(width);
+
+  @override
+  double computeMaxIntrinsicHeight(double width) =>
+      computeDryLayout(BoxConstraints.tightFor(width: width)).height;
+
+  @override
+  void performLayout() {
+    size = computeDryLayout(constraints);
+    if (childCount == 0) return;
+    final count = columns(size.width);
+    final rows = (childCount / count).ceil();
+    final cellSize = Size(
+      (size.width - gap * (count - 1)) / count,
+      (size.height - gap * (rows - 1)) / rows,
+    );
+    var index = 0;
+    visitChildren((child) {
+      final box = child as RenderBox;
+      box.layout(BoxConstraints.tight(cellSize));
+      final data = box.parentData! as _CloudMachineActionParentData;
+      data.offset = Offset(
+        (index % count) * (cellSize.width + gap),
+        (index ~/ count) * (cellSize.height + gap),
+      );
+      index++;
+    });
+  }
+
+  @override
+  void paint(PaintingContext context, Offset offset) =>
+      defaultPaint(context, offset);
+
+  @override
+  bool hitTestChildren(BoxHitTestResult result, {required Offset position}) =>
+      defaultHitTestChildren(result, position: position);
 }

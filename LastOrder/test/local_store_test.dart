@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:last_order/src/models.dart';
@@ -16,10 +17,52 @@ Future<void> protectTestPath(String path, String mode) async {
 }
 
 class TestLocalStore extends LocalStore {
-  TestLocalStore(this.path, {super.protect = protectTestPath});
+  TestLocalStore(this.path, {super.protect = protectTestPath})
+    : super(useEncryptedVault: false);
   final String path;
   @override
   Future<String> directory() async => path;
+}
+
+class CountingSecureStorage extends FlutterSecureStorage {
+  final values = <String, String>{};
+  final reads = <String>[];
+  final writes = <String>[];
+  bool denyRead = false;
+
+  @override
+  Future<String?> read({
+    required String key,
+    AppleOptions? iOptions,
+    AndroidOptions? aOptions,
+    LinuxOptions? lOptions,
+    WebOptions? webOptions,
+    AppleOptions? mOptions,
+    WindowsOptions? wOptions,
+  }) async {
+    reads.add(key);
+    if (denyRead) throw PlatformException(code: 'synthetic-denial');
+    return values[key];
+  }
+
+  @override
+  Future<void> write({
+    required String key,
+    required String? value,
+    AppleOptions? iOptions,
+    AndroidOptions? aOptions,
+    LinuxOptions? lOptions,
+    WebOptions? webOptions,
+    AppleOptions? mOptions,
+    WindowsOptions? wOptions,
+  }) async {
+    writes.add(key);
+    if (value == null) {
+      values.remove(key);
+    } else {
+      values[key] = value;
+    }
+  }
 }
 
 void main() {
@@ -209,4 +252,129 @@ void main() {
       }
     },
   );
+
+  group('macOS vault routing', () {
+    late CountingSecureStorage keychain;
+    late LocalStore mac;
+
+    LocalStore newStore() => LocalStore(
+      protect: protectTestPath,
+      supportDirectory: () async => temporary,
+      useEncryptedVault: true,
+      secure: keychain,
+    );
+
+    setUp(() {
+      keychain = CountingSecureStorage();
+      mac = newStore();
+    });
+
+    test('accounts, tasks and cloud records share one session key', () async {
+      await mac.load();
+      final entries = {
+        'account.a': 'synthetic-cookie-secret',
+        'task.a': 'synthetic-buyer-secret',
+        'cloud.preview.v1': 'synthetic-cloud-secret',
+        'cloud.ssh-identity.v1': 'synthetic-ssh-secret',
+      };
+      await Future.wait([
+        for (final entry in entries.entries)
+          mac.writeSecret(entry.key, entry.value),
+      ]);
+      final another = newStore();
+      await another.load();
+      for (final entry in entries.entries) {
+        expect(await another.readSecret(entry.key), entry.value);
+      }
+      await another.deleteSecret('account.a');
+      await another.deleteSecret('account.a');
+      expect(await mac.readSecret('account.a'), isNull);
+      expect(await mac.readSecret('task.a'), entries['task.a']);
+      expect(keychain.reads, [LocalStore.masterKeyName]);
+      expect(keychain.writes, [LocalStore.masterKeyName]);
+      expect(keychain.values.keys, [LocalStore.masterKeyName]);
+      await for (final file in temporary.list(recursive: true)) {
+        if (file is! File) continue;
+        final bytes = await file.readAsString();
+        for (final value in entries.values) {
+          expect(bytes, isNot(contains(value)));
+        }
+        expect(
+          bytes,
+          isNot(contains(keychain.values[LocalStore.masterKeyName]!)),
+        );
+      }
+    });
+
+    test(
+      'old state, secrets and imported credentials are left untouched',
+      () async {
+        final oldDirectory = Directory(p.join(temporary.path, 'MisakaNetwork'));
+        final credentials = Directory(p.join(oldDirectory.path, 'credentials'));
+        await credentials.create(recursive: true);
+        final oldKey = File(p.join(credentials.path, 'old-key'));
+        await oldKey.writeAsString('synthetic-old-private-key');
+        final oldState = File(
+          p.join(oldDirectory.path, LocalStore.stateFilename),
+        );
+        final original = SavedState(
+          accounts: [Account(id: 'old', name: 'old', uid: '123')],
+        ).encode();
+        await oldState.writeAsString(original);
+        keychain.values['v2.account.old'] = 'synthetic-old-cookie';
+        final state = await mac.load();
+        expect(state.accounts, isEmpty);
+        expect(await mac.readSecret('account.old'), isNull);
+        await mac.pruneCredentials({});
+        await mac.save(SavedState(themeMode: AppThemeMode.dark));
+        expect((await newStore().load()).themeMode, AppThemeMode.dark);
+        expect(await oldState.readAsString(), original);
+        expect(await oldKey.readAsString(), 'synthetic-old-private-key');
+        expect(keychain.values['v2.account.old'], 'synthetic-old-cookie');
+        expect(keychain.reads, [LocalStore.masterKeyName]);
+        expect(
+          await mac.directory(),
+          p.join(oldDirectory.path, LocalStore.macosStorageDirectory),
+        );
+      },
+    );
+
+    test(
+      'denied unlock fails startup without repeated background prompts',
+      () async {
+        keychain.denyRead = true;
+        await expectLater(mac.load(), throwsA(isA<UserError>()));
+        await expectLater(newStore().load(), throwsA(isA<UserError>()));
+        await expectLater(
+          mac.readSecret('account.a'),
+          throwsA(isA<UserError>()),
+        );
+        await expectLater(
+          mac.writeSecret('task.a', 'secret'),
+          throwsA(isA<UserError>()),
+        );
+        expect(keychain.reads, [LocalStore.masterKeyName]);
+        expect(keychain.writes, isEmpty);
+      },
+    );
+
+    test(
+      'a linked storage root is rejected before accessing the keychain',
+      () async {
+        if (!Platform.isMacOS && !Platform.isLinux) return;
+        final other = await Directory.systemTemp.createTemp(
+          'lastorder-unrelated-',
+        );
+        try {
+          await Link(p.join(temporary.path, 'MisakaNetwork'))
+              .create(other.path);
+          await expectLater(mac.load(), throwsA(isA<UserError>()));
+          expect(keychain.reads, isEmpty);
+          expect(await other.list().toList(), isEmpty);
+        } finally {
+          await other.delete(recursive: true);
+        }
+      },
+    );
+  });
 }

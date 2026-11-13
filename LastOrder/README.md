@@ -4,7 +4,11 @@ MisakaNetwork 的 Flutter 管理台，源码版本 **0.2.3+9**。目标平台为
 
 提供 Sisters 部署、账号登录、任务创建、分发与监控。基础功能见 [实现文档](../docs/LastOrder/0.1.0实现.md)，账号状态见 [Cookie 生命周期](../docs/LastOrder/Cookie生命周期.md)，新增平台见 [Windows 与 Android](../docs/LastOrder/Windows与Android.md)。
 
-三端使用相同 schema 2 账号和任务模型。macOS 登录钥匙串、Windows 加密存储与 Android Keystore 支持的安全存储负责保护凭据。0.1.0 数据不迁移；新平台安装需要重新登录和配置机器。Android 的 Python 客户端与 Go 部署 helper 以内嵌库运行，任务仍由远程 Sisters 执行。
+三端使用相同 schema 2 账号和任务模型。已交付 0.2.3 通过 macOS 登录钥匙串、Windows 加密存储与 Android Keystore 支持的安全存储保护凭据；未发布的 macOS 源码改为单一钥匙串主密钥和本地加密文件，其他平台不变。macOS 新资料目录不读取、迁移或删除旧数据，切换前先处理远端任务和云资源，之后重新添加/部署机器、登录账号和创建任务；详见 [macOS 加密存储](../docs/LastOrder/macOS加密存储.md)。0.1.0 数据不迁移；新平台安装需要重新登录和配置机器。Android 的 Python 客户端与 Go 部署 helper 以内嵌库运行，任务仍由远程 Sisters 执行。
+
+源码未发布的腾讯云 Ubuntu 实例使用镜像默认 `ubuntu` 账号与应用内置 SSH 密钥部署。云资源和关联 Sisters 的部署进度、错误、连接状态与操作集中在原云服务器卡片，底层机器及任务关联继续保留；细节见[腾讯云接入](../docs/LastOrder/腾讯云接入.md)。
+
+源码未发布的「公有云部署」凭证提交会调用三家官方只读身份接口，验证通过后才安全保存；每厂商仅保留一份，不再填写账号备注。保存成功后隐藏输入框与提交按钮，只有成功移除当前凭证后才显示空白表单，不能直接覆盖已验证凭证；失败保留原来的未验证记录。旧的仅格式检查记录需重新提交验证；仍有未释放或结果待核实的腾讯云资源时继续保护管理凭证。验证不代表已具备所有资源操作权限或购买条件，详见[公有云接入方案](../docs/LastOrder/公有云接入方案.md#01-凭证入口与联网验证)。
 
 ```sh
 flutter pub get --enforce-lockfile

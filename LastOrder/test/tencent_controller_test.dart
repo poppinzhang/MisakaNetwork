@@ -19,18 +19,11 @@ Map<String, dynamic> templateData() => {
   'os': 'Ubuntu 24.04 LTS',
   'regionLabel': '广州',
   'region': 'ap-guangzhou',
-  'sshUsername': 'ubuntu',
-  'sshCidr': '192.0.2.0/24',
-  'grpcCidr': '192.0.2.0/24',
   'runInstances': {
     'Placement': {'Zone': 'ap-guangzhou-6'},
     'InstanceType': 'S5.MEDIUM4',
     'ImageId': 'img-test1234',
     'SystemDisk': {'DiskType': 'CLOUD_SSD', 'DiskSize': 50},
-    'VirtualPrivateCloud': {
-      'VpcId': 'vpc-test1234',
-      'SubnetId': 'subnet-test1234',
-    },
     'InternetAccessible': {
       'InternetChargeType': 'TRAFFIC_POSTPAID_BY_HOUR',
       'InternetMaxBandwidthOut': 5,
@@ -59,11 +52,23 @@ class Harness {
         throw const UserError('secret-sensitive-upstream');
       }
       switch (action) {
+        case 'verify_cloud_credential':
+          return {
+            'verified': true,
+            'provider': (request['cloud_credential'] as Map)['provider'],
+          };
         case 'generate_cloud_ssh_key':
           return {
             'private_key': '-----BEGIN RSA PRIVATE KEY-----TEST',
             'public_key': 'ssh-rsa TEST',
             'fingerprint': 'SHA256:TEST',
+          };
+        case 'tencent_network_lookup':
+          return {
+            'found': true,
+            'vpc_id': 'vpc-test1234',
+            'subnet_id': 'subnet-test1234',
+            'subnet_cidr': '10.8.0.0/24',
           };
         case 'tencent_prepare':
           if (failAfterPrepare) {
@@ -83,6 +88,10 @@ class Harness {
             (request['cloud'] as Map)['client_token'],
           );
           expectSync(job['securityGroupId'], 'sg-test1234');
+          expectSync(job['vpcId'], 'vpc-test1234');
+          expectSync(job['subnetId'], 'subnet-test1234');
+          expectSync((request['cloud'] as Map)['vpc_id'], job['vpcId']);
+          expectSync((request['cloud'] as Map)['subnet_id'], job['subnetId']);
           if (!created.isCompleted) created.complete();
           if (createGate != null) await createGate!.future;
           if (failAfterResponse) {
@@ -107,7 +116,6 @@ class Harness {
     await c.initialize();
     await c.saveCredential(
       CloudProvider.tencent,
-      alias: '测试',
       accessKeyId: 'TestAccessId',
       accessKeySecret: 'TestSecret',
     );
@@ -196,7 +204,6 @@ void main() {
       await expectLater(
         h.c.saveCredential(
           CloudProvider.tencent,
-          alias: '其他',
           accessKeyId: 'OtherId',
           accessKeySecret: 'OtherSecret',
         ),

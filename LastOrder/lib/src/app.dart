@@ -654,15 +654,15 @@ class _ControlCenterState extends State<ControlCenter> {
   }
 
   Widget overview() {
-    final online = c.state.machines
+    final online = c.currentMachines
         .where(
           (m) =>
               c.lastSeen.containsKey(m.id) &&
               !c.connectionErrors.containsKey(m.id),
         )
         .length;
-    final active = c.statuses.values
-        .expand((s) => s.tasks)
+    final active = c.currentMachines
+        .expand((m) => c.statuses[m.id]?.tasks ?? <TaskStatus>[])
         .where(
           (t) =>
               t.state == TaskState.TASK_STATE_RUNNING ||
@@ -693,7 +693,7 @@ class _ControlCenterState extends State<ControlCenter> {
                     LucideIcons.server,
                     '在线 Sisters',
                     '$online',
-                    '共 ${c.state.machines.length} 台机器',
+                    '共 ${c.currentMachines.length} 台机器',
                   ),
                   (
                     LucideIcons.ticket,
@@ -851,7 +851,7 @@ class _ControlCenterState extends State<ControlCenter> {
       heading(
         'SISTERS',
         '连接你的执行节点',
-        '支持 Linux 与 macOS；部署时验证 SSH 主机指纹。',
+        '支持 Linux 与 macOS；部署时自动记录并校验服务器身份。',
         trailing: Wrap(
           spacing: 12,
           runSpacing: 10,
@@ -872,20 +872,162 @@ class _ControlCenterState extends State<ControlCenter> {
           ],
         ),
       ),
-      if (c.state.machines.isEmpty && c.cloud.jobs.isEmpty)
+      if (c.currentMachines.isEmpty && c.cloud.visibleJobs.isEmpty)
         empty(LucideIcons.server, '还没有 Sisters', '添加第一台机器，建立安全的任务执行连接。')
       else
         responsiveCards([
-          for (final m in c.cloud.jobs.reversed)
-            CloudMachineCard(
-              key: ValueKey(m.id),
-              machine: m,
-              controller: c.cloud,
-            ),
-          for (final m in c.state.machines) machineCard(m),
+          for (final m in c.cloud.visibleJobs.reversed) cloudMachineCard(m),
+          for (final m in c.currentMachines)
+            if (!hasCloudCard(m)) machineCard(m),
         ]),
     ],
   );
+
+  bool hasCloudCard(Machine machine) {
+    final cloudId = c.cloudIdForMachine(machine);
+    return cloudId != null &&
+        c.cloud.jobs.any(
+          (cloud) =>
+              cloud.id == cloudId &&
+              cloud.isReal &&
+              cloud.provider == CloudProvider.tencent,
+        );
+  }
+
+  Widget cloudMachineCard(CloudMachine cloud) {
+    final machine = cloud.isReal && cloud.provider == CloudProvider.tencent
+        ? c.tencentMachine(cloud.id)
+        : null;
+    final deployment = machine == null ? null : c.deployments[machine.id];
+    return CloudMachineCard(
+      key: ValueKey(cloud.id),
+      machine: cloud,
+      controller: c.cloud,
+      onDeploy: () => deployTencent(cloud.id),
+      sistersLinked: machine != null,
+      sistersReady:
+          machine?.canConnect == true && c.cloudMachineUsable(machine!),
+      sistersProgress: deployment?.active == true
+          ? deploymentProgress(deployment!)
+          : null,
+      sistersDetails: machine == null ? null : cloudSistersDetails(machine),
+      onRemoveConnection: machine == null
+          ? null
+          : () => removeCloudConnection(machine),
+    );
+  }
+
+  Widget cloudSistersDetails(Machine machine) {
+    final deployment = c.deployments[machine.id];
+    final active = deployment?.active ?? false;
+    final deploymentError =
+        deployment?.error ??
+        (machine.deploymentError.isEmpty ? null : machine.deploymentError);
+    final error = deploymentError ?? c.connectionErrors[machine.id];
+    final status = c.statuses[machine.id];
+    final label = active
+        ? '正在部署 Sisters'
+        : deploymentError != null
+        ? '部署失败'
+        : error != null
+        ? '连接异常'
+        : status == null
+        ? '等待同步'
+        : '在线';
+    return Column(
+      key: ValueKey('cloud-sisters-${machine.id}'),
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Divider(height: 1),
+        const SizedBox(height: 14),
+        Wrap(
+          spacing: 10,
+          runSpacing: 8,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            const Text(
+              'Sisters 执行节点',
+              style: TextStyle(fontWeight: FontWeight.w600),
+            ),
+            CloudPill(
+              label,
+              color: active
+                  ? colors.primary
+                  : error != null
+                  ? colors.error
+                  : status == null
+                  ? colors.onSurfaceVariant
+                  : colors.primary,
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        SelectableText(
+          '${machine.host}:${machine.port}',
+          style: TextStyle(fontSize: 13, color: colors.onSurface),
+        ),
+        if (!active && error != null) ...[
+          const SizedBox(height: 10),
+          CloudNotice(error, error: true),
+        ] else if (!active && status != null) ...[
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 14,
+            runSpacing: 6,
+            children: [
+              for (final detail in [
+                status.platform,
+                'Sisters ${status.version}',
+                'biliTickerBuy ${status.biliVersion}',
+                '并发上限 ${status.maxConcurrency}',
+              ])
+                Text(
+                  detail,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: colors.onSurfaceVariant,
+                  ),
+                ),
+            ],
+          ),
+          if (!status.runtimeReady) ...[
+            const SizedBox(height: 8),
+            Text(
+              '运行时尚未就绪，请重新部署完整安装包。',
+              style: TextStyle(color: colors.warning, fontSize: 12),
+            ),
+          ],
+        ] else if (!active) ...[
+          const SizedBox(height: 8),
+          Text(
+            '等待下一次状态同步。',
+            style: TextStyle(fontSize: 12, color: colors.onSurfaceVariant),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Future<void> removeCloudConnection(Machine machine) async {
+    if (await confirm(
+      '移除 Sisters 连接',
+      '仅移除本地 Sisters 连接，云服务器记录仍会保留。远程 Sisters 与已启动任务会继续运行，服务器不会释放或停止计费。',
+    )) {
+      await action(() => c.removeMachine(machine), success: '已移除 Sisters 连接');
+    }
+  }
+
+  Future<void> deployTencent(String id) async {
+    final existing = c.tencentMachine(id);
+    if (existing?.canConnect == true &&
+        !await confirm(
+          '重新部署 Sisters',
+          '重新部署会停止服务器上正在执行的任务，并更新 Sisters 与内嵌运行时。确认继续？',
+        )) {
+      return;
+    }
+    await action(() => c.startTencentDeployment(id));
+  }
 
   Widget responsiveCards(List<Widget> cards) => LayoutBuilder(
     builder: (context, constraints) {
@@ -925,7 +1067,6 @@ class _ControlCenterState extends State<ControlCenter> {
     final status = c.statuses[m.id];
     final deployment = c.deployments[m.id];
     final deploying = deployment?.active ?? false;
-    final awaiting = deployment?.awaitingConfirmation ?? false;
     final deploymentError =
         deployment?.error ??
         (m.deploymentError.isEmpty ? null : m.deploymentError);
@@ -1073,18 +1214,7 @@ class _ControlCenterState extends State<ControlCenter> {
                     runSpacing: 8,
                     crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
-                      if (awaiting) ...[
-                        FilledButton.icon(
-                          onPressed: () => confirmMachineFingerprint(m),
-                          icon: const Icon(LucideIcons.shieldCheck, size: 16),
-                          label: const Text('核对 SSH 指纹'),
-                        ),
-                        TextButton(
-                          onPressed: () =>
-                              action(() => c.rejectDeployment(m.id)),
-                          child: const Text('取消部署'),
-                        ),
-                      ] else if (deploying)
+                      if (deploying)
                         Padding(
                           padding: const EdgeInsets.symmetric(vertical: 8),
                           child: Row(
@@ -1190,45 +1320,6 @@ class _ControlCenterState extends State<ControlCenter> {
       ],
     ),
   );
-
-  Future<void> confirmMachineFingerprint(Machine machine) async {
-    final deployment = c.deployments[machine.id];
-    if (deployment == null || !deployment.awaitingConfirmation) return;
-    final approved = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        scrollable: true,
-        title: const Text('确认 SSH 主机指纹'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('${machine.name} · ${machine.host}'),
-            const SizedBox(height: 12),
-            const Text('请与服务器管理员提供的指纹核对一致后继续。'),
-            const SizedBox(height: 16),
-            SelectableText(
-              deployment.fingerprint,
-              style: const TextStyle(fontFamily: 'Menlo', fontSize: 12),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('指纹一致，部署'),
-          ),
-        ],
-      ),
-    );
-    if (approved == true && mounted) {
-      await action(() => c.confirmDeployment(machine.id));
-    }
-  }
 
   Widget tasks() => Column(
     crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1436,7 +1527,7 @@ class _ControlCenterState extends State<ControlCenter> {
                 Row(
                   children: [
                     FilledButton.tonalIcon(
-                      onPressed: busy || c.state.machines.isEmpty
+                      onPressed: busy || c.currentMachines.isEmpty
                           ? null
                           : () => dispatchDialog(task),
                       icon: const Icon(LucideIcons.send, size: 16),
@@ -1649,6 +1740,9 @@ class _ControlCenterState extends State<ControlCenter> {
   }
 
   Widget monitor() {
+    final connectionErrorCount = c.currentMachines
+        .where((machine) => c.connectionErrors.containsKey(machine.id))
+        .length;
     final items = [
       for (final m in c.state.machines)
         for (final t in c.statuses[m.id]?.tasks ?? <TaskStatus>[])
@@ -1668,15 +1762,13 @@ class _ControlCenterState extends State<ControlCenter> {
             alignment: Alignment.centerRight,
             child: OutlinedButton(
               key: const ValueKey('clear-finished-executions'),
-              onPressed: busy ||
-                      !items.any((item) => c.canClearExecution(item.$2))
+              onPressed:
+                  busy || !items.any((item) => c.canClearExecution(item.$2))
                   ? null
                   : () => action(() async {
                       final count = await c.clearFinishedExecutions();
                       message(
-                        count == 0
-                            ? '暂无可清除的已结束任务'
-                            : '已清除 $count 条执行记录，订单入口仍保留',
+                        count == 0 ? '暂无可清除的已结束任务' : '已清除 $count 条执行记录，订单入口仍保留',
                       );
                     }),
               child: const Padding(
@@ -1687,10 +1779,7 @@ class _ControlCenterState extends State<ControlCenter> {
                     Icon(LucideIcons.trash2, size: 16),
                     SizedBox(width: 8),
                     Flexible(
-                      child: Text(
-                        '清除全部已结束任务',
-                        textAlign: TextAlign.center,
-                      ),
+                      child: Text('清除全部已结束任务', textAlign: TextAlign.center),
                     ),
                   ],
                 ),
@@ -1698,12 +1787,12 @@ class _ControlCenterState extends State<ControlCenter> {
             ),
           ),
         ),
-        if (c.connectionErrors.isNotEmpty)
+        if (connectionErrorCount > 0)
           Padding(
             padding: const EdgeInsets.only(bottom: 16),
             child: panel(
               Text(
-                '${c.connectionErrors.length} 台机器连接异常，以下记录可能不是最新状态。',
+                '$connectionErrorCount 台机器连接异常，以下记录可能不是最新状态。',
                 style: TextStyle(color: colors.warning),
               ),
             ),
@@ -1858,6 +1947,11 @@ class _ControlCenterState extends State<ControlCenter> {
   }
 
   Future<void> machineDialog({Machine? existing}) async {
+    final cloudId = existing == null ? null : c.cloudIdForMachine(existing);
+    if (cloudId != null) {
+      await deployTencent(cloudId);
+      return;
+    }
     final warning = await showDialog<String>(
       context: context,
       builder: (_) => MachineDialog(controller: c, existing: existing),
@@ -1905,7 +1999,7 @@ class _ControlCenterState extends State<ControlCenter> {
       await action(() async {
         final errors = await c.dispatch(
           task,
-          c.state.machines.where((m) => chosen.contains(m.id)).toList(),
+          c.currentMachines.where((m) => chosen.contains(m.id)).toList(),
         );
         if (errors.isNotEmpty) {
           message(
@@ -2179,7 +2273,7 @@ class _MachineDialogState extends State<MachineDialog> {
       ],
       Text(
         '点击安全部署后，可在机器列表查看进度并继续添加其他机器。'
-        '首次连接需在卡片上核对 SSH 主机指纹。部署期间请保持应用运行。',
+        '应用会自动记录并校验服务器身份。部署期间请保持应用运行。',
         style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
       ),
       const SizedBox(height: 16),

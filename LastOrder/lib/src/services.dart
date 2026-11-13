@@ -12,6 +12,7 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
 import '../generated/misaka/v1/sisters.pbgrpc.dart';
+import 'encrypted_vault.dart';
 import 'models.dart';
 
 abstract class StateStore {
@@ -27,28 +28,85 @@ abstract class StateStore {
 }
 
 class LocalStore implements StateStore {
-  LocalStore({this.protect = restrictPermissions});
+  LocalStore({
+    this.protect = restrictPermissions,
+    this.supportDirectory = getApplicationSupportDirectory,
+    bool? useEncryptedVault,
+    FlutterSecureStorage? secure,
+  }) : useEncryptedVault = useEncryptedVault ?? Platform.isMacOS,
+       secure =
+           secure ??
+           const FlutterSecureStorage(
+             mOptions: MacOsOptions(
+               usesDataProtectionKeychain: false,
+               accountName: 'MisakaNetwork.LastOrder.vault',
+               label: 'LastOrder 本地资料加密密钥',
+             ),
+             // Never reset existing credentials after a platform storage error.
+             aOptions: AndroidOptions(resetOnError: false),
+             wOptions: WindowsOptions(useBackwardCompatibility: false),
+           );
   final Future<void> Function(String path, String mode) protect;
+  final Future<Directory> Function() supportDirectory;
+  final bool useEncryptedVault;
+  final FlutterSecureStorage secure;
   static const stateFilename = 'state-v2.json';
   static const secretNamespace = 'v2.';
-  // Preserve credentials on storage errors; do not silently reset Android keys.
-  final FlutterSecureStorage secure = const FlutterSecureStorage(
-    mOptions: MacOsOptions(usesDataProtectionKeychain: false),
-    aOptions: AndroidOptions(resetOnError: false),
-    wOptions: WindowsOptions(useBackwardCompatibility: false),
-  );
+  static const macosStorageDirectory = 'macos-vault-v1';
+  static const masterKeyName = 'macos.vault.master.v1';
+
+  // All LocalStores for a directory share one unlock result for this process,
+  // including a denied unlock. Background checks must not repeatedly prompt.
+  static final _vaults = <String, EncryptedVault>{};
+
+  Future<T> _withVault<T>(Future<T> Function(EncryptedVault) action) async {
+    try {
+      final path = p.normalize(p.absolute(await directory()));
+      final vault = _vaults.putIfAbsent(
+        path,
+        () => EncryptedVault(
+          directory: Directory(path),
+          metadataFile: File(p.join(path, stateFilename)),
+          readMasterKey: () => secure.read(key: masterKeyName),
+          writeMasterKey: (value) =>
+              secure.write(key: masterKeyName, value: value),
+          protect: protect,
+        ),
+      );
+      return await action(vault);
+    } on VaultException catch (error) {
+      throw UserError(error.message);
+    }
+  }
+
   @override
   Future<String> directory() async {
-    final d = Directory(
-      p.join((await getApplicationSupportDirectory()).path, 'MisakaNetwork'),
+    final root = Directory(
+      p.join((await supportDirectory()).path, 'MisakaNetwork'),
     );
-    await d.create(recursive: true);
-    await protect(d.path, '700');
-    return d.path;
+    final directories = [
+      root,
+      if (useEncryptedVault)
+        Directory(p.join(root.path, macosStorageDirectory)),
+    ];
+    for (final directory in directories) {
+      final type = await FileSystemEntity.type(
+        directory.path,
+        followLinks: false,
+      );
+      if (type != FileSystemEntityType.notFound &&
+          type != FileSystemEntityType.directory) {
+        throw const UserError('本地资料目录不可用，原有资料未修改。');
+      }
+      await directory.create(recursive: true);
+      await protect(directory.path, '700');
+    }
+    return directories.last.path;
   }
 
   @override
   Future<SavedState> load() async {
+    if (useEncryptedVault) await _withVault((vault) => vault.open());
     final f = File(p.join(await directory(), stateFilename));
     if (!await f.exists()) return SavedState();
     try {
@@ -67,13 +125,19 @@ class LocalStore implements StateStore {
   }
 
   @override
-  Future<String?> readSecret(String key) =>
-      secure.read(key: '$secretNamespace$key');
+  Future<String?> readSecret(String key) => useEncryptedVault
+      ? _withVault((vault) => vault.read(key))
+      : secure.read(key: '$secretNamespace$key');
   @override
-  Future<void> writeSecret(String key, String value) =>
-      secure.write(key: '$secretNamespace$key', value: value);
+  Future<void> writeSecret(String key, String value) => useEncryptedVault
+      ? _withVault((vault) => vault.write(key, value))
+      : secure.write(key: '$secretNamespace$key', value: value);
   @override
   Future<void> deleteSecret(String key) async {
+    if (useEncryptedVault) {
+      await _withVault((vault) => vault.delete(key));
+      return;
+    }
     final storedKey = '$secretNamespace$key';
     // The Darwin plugin also queries synchronizable items during deletion and
     // can report an entitlement error when the login-Keychain item is absent.
@@ -571,9 +635,11 @@ abstract class DeploymentHelper {
 /// Deploy bounds its own stages (stall detection, a staging budget, health
 /// check and rollback); this only catches a helper hung beyond them.
 Duration helperTimeout(Map<String, dynamic> request) =>
-    request['action'] == 'deploy'
-    ? const Duration(minutes: 30)
-    : const Duration(seconds: 300);
+    switch (request['action']) {
+      'deploy' => const Duration(minutes: 30),
+      'verify_cloud_credential' => const Duration(seconds: 35),
+      _ => const Duration(seconds: 300),
+    };
 
 class LocalHelper implements DeploymentHelper {
   @override

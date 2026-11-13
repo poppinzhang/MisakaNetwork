@@ -22,6 +22,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/MisakaNetwork/MisakaNetwork/internal/cloud/credentials"
 	"github.com/MisakaNetwork/MisakaNetwork/internal/cloud/tencent"
 	"golang.org/x/crypto/ssh"
 )
@@ -66,23 +67,26 @@ func (c *stallConn) Write(p []byte) (int, error) {
 }
 
 type Request struct {
-	Action               string         `json:"action"`
-	Cloud                *tencent.Input `json:"cloud,omitempty"`
-	Directory            string         `json:"directory,omitempty"`
-	Host                 string         `json:"host,omitempty"`
-	Port                 int            `json:"port,omitempty"`
-	Username             string         `json:"username,omitempty"`
-	Password             string         `json:"password,omitempty"`
-	PrivateKeyPath       string         `json:"private_key_path,omitempty"`
-	PrivateKeyPassphrase string         `json:"private_key_passphrase,omitempty"`
-	HostKeyFingerprint   string         `json:"host_key_fingerprint,omitempty"`
-	BundlePath           string         `json:"bundle_path,omitempty"`
-	BundlesDirectory     string         `json:"bundles_directory,omitempty"`
-	RemoteDirectory      string         `json:"remote_directory,omitempty"`
-	PKIDirectory         string         `json:"pki_directory,omitempty"`
-	ServerName           string         `json:"server_name,omitempty"`
-	GRPCPort             int            `json:"grpc_port,omitempty"`
-	ProgressPath         string         `json:"progress_path,omitempty"`
+	Action               string             `json:"action"`
+	Cloud                *tencent.Input     `json:"cloud,omitempty"`
+	CloudCredential      *credentials.Input `json:"cloud_credential,omitempty"`
+	Directory            string             `json:"directory,omitempty"`
+	Host                 string             `json:"host,omitempty"`
+	Port                 int                `json:"port,omitempty"`
+	Username             string             `json:"username,omitempty"`
+	Password             string             `json:"password,omitempty"`
+	PrivateKeyPath       string             `json:"private_key_path,omitempty"`
+	PrivateKey           string             `json:"private_key,omitempty"`
+	PrivateKeyPassphrase string             `json:"private_key_passphrase,omitempty"`
+	EnableLingerWithSudo bool               `json:"enable_linger_with_sudo,omitempty"`
+	HostKeyFingerprint   string             `json:"host_key_fingerprint,omitempty"`
+	BundlePath           string             `json:"bundle_path,omitempty"`
+	BundlesDirectory     string             `json:"bundles_directory,omitempty"`
+	RemoteDirectory      string             `json:"remote_directory,omitempty"`
+	PKIDirectory         string             `json:"pki_directory,omitempty"`
+	ServerName           string             `json:"server_name,omitempty"`
+	GRPCPort             int                `json:"grpc_port,omitempty"`
+	ProgressPath         string             `json:"progress_path,omitempty"`
 }
 type Response struct {
 	OK          bool   `json:"ok"`
@@ -104,9 +108,20 @@ type pinError struct{ fingerprint string }
 
 func (e *pinError) Error() string { return "SSH 主机指纹尚未确认" }
 
+var errHostKeyMismatch = errors.New("SSH 主机指纹不匹配，已拒绝连接")
+
 func Handle(r Request) Response {
 	switch r.Action {
-	case "tencent_prepare", "tencent_create", "tencent_describe", "tencent_release", "tencent_recover":
+	case "verify_cloud_credential":
+		if r.CloudCredential == nil {
+			return Response{Error: "缺少云凭证验证参数"}
+		}
+		v, e := credentials.Verify(*r.CloudCredential)
+		if e != nil {
+			return Response{Error: e.Error()}
+		}
+		return Response{OK: true, Result: v}
+	case "tencent_prepare", "tencent_create", "tencent_describe", "tencent_release", "tencent_recover", "tencent_network_lookup", "tencent_network_create", "tencent_zones":
 		if r.Cloud == nil {
 			return Response{Error: "缺少腾讯云操作参数"}
 		}
@@ -157,7 +172,7 @@ func hostCallback(pin string) ssh.HostKeyCallback {
 			return &pinError{actual}
 		}
 		if subtle.ConstantTimeCompare([]byte(pin), []byte(actual)) != 1 {
-			return errors.New("SSH 主机指纹不匹配，已拒绝连接")
+			return errHostKeyMismatch
 		}
 		return nil
 	}
@@ -192,6 +207,9 @@ func validate(r *Request) error {
 	}
 	if r.PKIDirectory == "" {
 		return errors.New("缺少证书目录")
+	}
+	if r.EnableLingerWithSudo && (r.Username != "ubuntu" || r.PrivateKey == "" || r.PrivateKeyPath != "" || r.Password != "" || r.PrivateKeyPassphrase != "") {
+		return errors.New("自动开启 linger 仅适用于使用内置 SSH 密钥的 Ubuntu 云服务器")
 	}
 	return nil
 }
@@ -286,15 +304,24 @@ func remotePlatform(c *ssh.Client) (string, string, error) {
 
 // Without linger, systemd stops user services shortly after the last session
 // ends, so a Linux deployment would pass its checks and then die with SSH.
-func ensureLinger(c *ssh.Client, username string) error {
+func ensureLinger(c *ssh.Client, username string, enableWithSudo bool) error {
 	const query = `loginctl show-user "$(id -u)" --property=Linger --value`
 	if out, e := run(c, query, nil); e == nil && out == "yes" {
 		return nil
 	}
-	// polkit decides whether an account may enable its own linger; never escalate.
+	// Give polkit the first opportunity to enable linger for the current user.
 	run(c, "loginctl enable-linger >/dev/null 2>&1", nil)
 	if out, e := run(c, query, nil); e == nil && out == "yes" {
 		return nil
+	}
+	// App-managed Ubuntu cloud instances use their unprivileged default account.
+	// The explicit opt-in permits this one noninteractive administrator action,
+	// never a sudo shell, a password prompt, or changes to another account.
+	if enableWithSudo && username == "ubuntu" {
+		run(c, "sudo -n loginctl enable-linger "+shellQuote(username)+" >/dev/null 2>&1", nil)
+		if out, e := run(c, query, nil); e == nil && out == "yes" {
+			return nil
+		}
 	}
 	return fmt.Errorf("无法确认远程账号已开启 linger；未开启时 SSH 断开后 Sisters 会被系统停止。请让管理员执行 sudo loginctl enable-linger %s 后重新部署；当前版本未变更", username)
 }
@@ -313,6 +340,73 @@ func archiveFiles(files map[string][]byte) ([]byte, error) {
 	return b.Bytes(), e
 }
 
+// deploymentAuth keeps app-managed cloud keys in memory. They arrive through
+// the helper's private stdin/native bridge, never through filenames or argv.
+func deploymentAuth(r Request) ([]ssh.AuthMethod, error) {
+	if r.PrivateKey != "" && (r.PrivateKeyPath != "" || r.Password != "" || r.PrivateKeyPassphrase != "") {
+		return nil, errors.New("内置 SSH 私钥不能与其他登录凭据混用")
+	}
+	if len(r.PrivateKey) > 64<<10 {
+		return nil, errors.New("SSH 私钥格式无效")
+	}
+	auth := []ssh.AuthMethod{}
+	if r.PrivateKeyPath != "" || r.PrivateKey != "" {
+		b := []byte(r.PrivateKey)
+		if r.PrivateKeyPath != "" {
+			var err error
+			b, err = os.ReadFile(r.PrivateKeyPath)
+			if err != nil {
+				return nil, errors.New("无法读取 SSH 私钥")
+			}
+		}
+		var signer ssh.Signer
+		var err error
+		if r.PrivateKeyPassphrase != "" {
+			signer, err = ssh.ParsePrivateKeyWithPassphrase(b, []byte(r.PrivateKeyPassphrase))
+		} else {
+			signer, err = ssh.ParsePrivateKey(b)
+		}
+		clear(b)
+		if err != nil {
+			return nil, errors.New("SSH 私钥格式或口令无效")
+		}
+		auth = append(auth, ssh.PublicKeys(signer))
+	}
+	if r.Password != "" {
+		auth = append(auth, ssh.Password(r.Password))
+	}
+	if len(auth) == 0 {
+		return nil, errors.New("请提供 SSH 密码或私钥")
+	}
+	return auth, nil
+}
+
+// Keep transport diagnostics useful without exposing server-controlled error
+// text or mistaking an incomplete handshake for rejected credentials.
+func deploymentHandshakeError(err error) error {
+	var pin *pinError
+	if errors.As(err, &pin) {
+		return pin
+	}
+	if errors.Is(err, errHostKeyMismatch) {
+		return errHostKeyMismatch
+	}
+	var networkError net.Error
+	if errors.As(err, &networkError) && networkError.Timeout() {
+		return errors.New("SSH 握手超时，请稍后重试并检查网络与 SSH 服务状态")
+	}
+	// x/crypto/ssh does not export a client authentication error type. Match
+	// only its complete local exhaustion diagnostic, not arbitrary substrings
+	// in server disconnect messages. No underlying error text is returned.
+	for cause := err; cause != nil; cause = errors.Unwrap(cause) {
+		message := cause.Error()
+		if strings.HasPrefix(message, "ssh: unable to authenticate, attempted methods [") && strings.HasSuffix(message, "], no supported methods remain") {
+			return errors.New("SSH 认证被拒绝，请检查登录账号及该账号绑定的密钥或密码")
+		}
+	}
+	return errors.New("SSH 握手未完成，请检查网络、SSH 服务状态及加密算法兼容性后重试")
+}
+
 func Deploy(r Request) (Deployment, error) {
 	var result Deployment
 	if e := validate(&r); e != nil {
@@ -323,28 +417,10 @@ func Deploy(r Request) (Deployment, error) {
 		return result, e
 	}
 	progress.report(2, "准备部署")
-	auth := []ssh.AuthMethod{}
-	if r.PrivateKeyPath != "" {
-		b, e := os.ReadFile(r.PrivateKeyPath)
-		if e != nil {
-			return result, errors.New("无法读取 SSH 私钥")
-		}
-		var signer ssh.Signer
-		if r.PrivateKeyPassphrase != "" {
-			signer, e = ssh.ParsePrivateKeyWithPassphrase(b, []byte(r.PrivateKeyPassphrase))
-		} else {
-			signer, e = ssh.ParsePrivateKey(b)
-		}
-		if e != nil {
-			return result, errors.New("SSH 私钥格式或口令无效")
-		}
-		auth = append(auth, ssh.PublicKeys(signer))
-	}
-	if r.Password != "" {
-		auth = append(auth, ssh.Password(r.Password))
-	}
-	if len(auth) == 0 {
-		return result, errors.New("请提供 SSH 密码或私钥")
+	auth, e := deploymentAuth(r)
+	r.PrivateKey = ""
+	if e != nil {
+		return result, e
 	}
 	progress.report(5, "连接 SSH")
 	config := &ssh.ClientConfig{User: r.Username, Auth: auth, HostKeyCallback: hostCallback(r.HostKeyFingerprint), Timeout: 15 * time.Second}
@@ -358,14 +434,7 @@ func Deploy(r Request) (Deployment, error) {
 	raw.SetDeadline(time.Now().Add(handshakeTimeout))
 	sc, ch, req, e := ssh.NewClientConn(conn, address, config)
 	if e != nil {
-		var pin *pinError
-		if errors.As(e, &pin) {
-			return result, pin
-		}
-		if r.HostKeyFingerprint != "" && strings.Contains(e.Error(), "指纹不匹配") {
-			return result, errors.New("SSH 主机指纹不匹配，已拒绝连接")
-		}
-		return result, errors.New("SSH 认证失败，请检查凭据和主机指纹")
+		return result, deploymentHandshakeError(e)
 	}
 	conn.watch()
 	var expired atomic.Bool
@@ -412,7 +481,7 @@ func Deploy(r Request) (Deployment, error) {
 		return result, e
 	}
 	if platform == "linux" {
-		if e = ensureLinger(client, r.Username); e != nil {
+		if e = ensureLinger(client, r.Username, r.EnableLingerWithSudo); e != nil {
 			return result, e
 		}
 	}

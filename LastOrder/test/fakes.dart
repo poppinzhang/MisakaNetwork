@@ -163,6 +163,12 @@ class FakeHelper implements DeploymentHelper {
       progressCallbacks[request['host'] as String] = onProgress;
     }
     if (handler != null) return handler!(request, onProgress);
+    if (request['action'] == 'verify_cloud_credential') {
+      return {
+        'verified': true,
+        'provider': (request['cloud_credential'] as Map)['provider'],
+      };
+    }
     if (request['action'] == 'deploy') {
       await deployGate;
       if (failDeploy) throw const UserError('部署失败');

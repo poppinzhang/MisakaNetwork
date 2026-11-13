@@ -60,12 +60,14 @@ class _DispatchDialogState extends State<DispatchDialog> {
 
   bool _blocked(Machine machine) => c.isDispatchBlocked(_task, machine.id);
 
-  List<Machine> get _selected => c.state.machines
+  List<Machine> get _selected => c.currentMachines
       .where((m) => _chosen.contains(m.id) && !_blocked(m) && _available(m))
       .toList();
 
   bool _available(Machine machine) =>
-      machine.canConnect && !c.isDeploying(machine.id);
+      machine.canConnect &&
+      c.cloudMachineUsable(machine) &&
+      !c.isDeploying(machine.id);
 
   MachineWorkload _workload(Machine machine) => MachineWorkload.fromState(
     machineId: machine.id,
@@ -196,8 +198,8 @@ class _DispatchDialogState extends State<DispatchDialog> {
             ],
             if (_error != null)
               Text(_error!, style: TextStyle(color: colors.error)),
-            if (c.state.machines.isEmpty) const Text('请先添加 Sisters 服务器。'),
-            for (final machine in c.state.machines) ...[
+            if (c.currentMachines.isEmpty) const Text('请先添加 Sisters 服务器。'),
+            for (final machine in c.currentMachines) ...[
               const SizedBox(height: 8),
               CheckboxListTile(
                 key: ValueKey('dispatch-machine-${machine.id}'),

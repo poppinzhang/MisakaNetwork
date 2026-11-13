@@ -15,18 +15,11 @@ Map<String, dynamic> validTencentTemplate() => {
   'os': 'Ubuntu 24.04 LTS',
   'regionLabel': '模拟地域',
   'region': 'ap-guangzhou',
-  'sshUsername': 'ubuntu',
-  'sshCidr': '203.0.113.8/32',
-  'grpcCidr': '203.0.113.0/24',
   'runInstances': {
     'Placement': {'Zone': 'ap-guangzhou-6'},
     'InstanceType': 'S5.MEDIUM4',
     'ImageId': 'img-test0001',
     'SystemDisk': {'DiskType': 'CLOUD_SSD', 'DiskSize': 40},
-    'VirtualPrivateCloud': {
-      'VpcId': 'vpc-test0001',
-      'SubnetId': 'subnet-test0001',
-    },
     'InternetAccessible': {
       'InternetChargeType': 'TRAFFIC_POSTPAID_BY_HOUR',
       'InternetMaxBandwidthOut': 5,
@@ -52,7 +45,7 @@ void main() {
   test(
     'loads exact packaged asset and permits an empty unconfigured catalog',
     () async {
-      final bundle = _TemplateBundle('{"schemaVersion":1,"templates":[]}');
+      final bundle = _TemplateBundle('{"schemaVersion":3,"templates":[]}');
       expect(await TencentTemplateCatalog.load(bundle: bundle), isEmpty);
       expect(bundle.requestedKey, TencentTemplateCatalog.assetPath);
       // Administrators may fill the real asset before packaging; loading it
@@ -83,7 +76,10 @@ void main() {
       final value = validTencentTemplate();
       value['runInstances']['InstanceType'] = instanceType;
       final parsed = TencentTemplateCatalog.parse(
-        jsonEncode({'schemaVersion': 1, 'templates': [value]}),
+        jsonEncode({
+          'schemaVersion': 3,
+          'templates': [value],
+        }),
       );
       expect(parsed.single['runInstances']['InstanceType'], instanceType);
     }
@@ -110,7 +106,10 @@ void main() {
       value['runInstances']['InstanceType'] = instanceType;
       expect(
         () => TencentTemplateCatalog.parse(
-          jsonEncode({'schemaVersion': 1, 'templates': [value]}),
+          jsonEncode({
+            'schemaVersion': 3,
+            'templates': [value],
+          }),
         ),
         throwsFormatException,
         reason: instanceType,
@@ -120,15 +119,16 @@ void main() {
 
   test('rejects unsupported catalog version, unknown keys, invalid lists and duplicates', () {
     for (final catalog in [
+      {'schemaVersion': 1, 'templates': []},
       {'schemaVersion': 2, 'templates': []},
-      {'schemaVersion': 1, 'templates': [], 'secret': 'no'},
-      {'schemaVersion': 1, 'templates': {}},
+      {'schemaVersion': 3, 'templates': [], 'secret': 'no'},
+      {'schemaVersion': 3, 'templates': {}},
       {
-        'schemaVersion': 1,
+        'schemaVersion': 3,
         'templates': List.filled(101, validTencentTemplate()),
       },
       {
-        'schemaVersion': 1,
+        'schemaVersion': 3,
         'templates': [validTencentTemplate(), validTencentTemplate()],
       },
     ]) {
@@ -170,33 +170,22 @@ void main() {
     },
   );
 
-  test('rejects invalid source networks and noncanonical CIDR', () {
-    for (final cidr in [
-      '::/0',
-      '0.0.0.0',
-      '203.0.113.8/24',
-      '256.0.0.1/32',
-      '203.0.113.1/33',
-      '203.0.113.1/-1',
-      '203.0.113.001/32',
-      '203.0.113.1/032',
-      '0.0.0.0/1',
-      '0.0.0.0/24',
-      '0.0.0.0/32',
-    ]) {
-      final value = validTencentTemplate()..['grpcCidr'] = cidr;
-      expect(
-        () => TencentTemplateCatalog.validateTemplate(value),
-        throwsFormatException,
-        reason: cidr,
-      );
+  test('fixed access fields cannot be supplied or overridden by templates', () {
+    for (final entry in {
+      'sshUsername': ['root', 'ubuntu', 'user;command'],
+      'sshCidr': ['0.0.0.0/0', '203.0.113.8/32'],
+      'grpcCidr': ['0.0.0.0/0', '203.0.113.0/24'],
+    }.entries) {
+      for (final value in entry.value) {
+        expect(
+          () => TencentTemplateCatalog.validateTemplate(
+            validTencentTemplate()..[entry.key] = value,
+          ),
+          throwsFormatException,
+          reason: '${entry.key}=$value',
+        );
+      }
     }
-    expect(
-      TencentTemplateCatalog.validateTemplate(
-        validTencentTemplate()..['grpcCidr'] = '0.0.0.0/0',
-      ),
-      isNotEmpty,
-    );
   });
 
   test('rejects malformed display metadata, architecture, disk, networking and region', () {
@@ -207,7 +196,6 @@ void main() {
       (t) => t['memoryGb'] = 0,
       (t) => t['architecture'] = 'riscv',
       (t) => t['os'] = 'Ubuntu 22.04 LTS',
-      (t) => t['sshUsername'] = 'user;command',
       (t) => t['runInstances']['Placement']['Zone'] = 'ap-beijing-1',
       (t) => t['runInstances']['SystemDisk']['DiskSize'] = 60,
       (t) =>
@@ -217,8 +205,10 @@ void main() {
       (t) =>
           t['runInstances']['InternetAccessible']['InternetMaxBandwidthOut'] =
               0,
-      (t) => t['runInstances']['VirtualPrivateCloud']['VpcId'] =
-          'https://example.test',
+      (t) => t['runInstances']['VirtualPrivateCloud'] = {
+        'VpcId': 'vpc-test0001',
+        'SubnetId': 'subnet-test0001',
+      },
       (t) => t['runInstances']['SystemDisk']['DiskType'] = 'LOCAL_SSD',
     ];
     for (final mutate in mutations) {

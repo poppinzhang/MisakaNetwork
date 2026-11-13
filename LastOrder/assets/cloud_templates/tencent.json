@@ -1,4 +1,33 @@
 {
-  "schemaVersion": 1,
-  "templates": []
+  "schemaVersion": 3,
+  "templates": [
+    {
+      "id": "shanghai-ubuntu-2c2g",
+      "name": "上海 S5.MEDIUM2 Linux",
+      "description": "小规格 Linux 云实例，价格实惠，适合作为抢票工作节点。",
+      "cpu": 2,
+      "memoryGb": 2,
+      "diskGb": 20,
+      "architecture": "x64",
+      "os": "Ubuntu 24.04 LTS",
+      "regionLabel": "华东地区(上海)",
+      "region": "ap-shanghai",
+      "runInstances": {
+        "Placement": {
+          "Zone": "ap-shanghai-5"
+        },
+        "InstanceType": "S5.MEDIUM2",
+        "ImageId": "img-mmytdhbn",
+        "SystemDisk": {
+          "DiskType": "CLOUD_BSSD",
+          "DiskSize": 20
+        },
+        "InternetAccessible": {
+          "InternetChargeType": "TRAFFIC_POSTPAID_BY_HOUR",
+          "InternetMaxBandwidthOut": 5,
+          "PublicIpAssigned": true
+        }
+      }
+    }
+  ]
 }
