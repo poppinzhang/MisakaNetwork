@@ -76,7 +76,7 @@ class FakeGateway implements AgentGateway {
     if (statusHandler != null) return statusHandler!(m);
     if (fail.contains(m.id)) throw const UserError('连接失败');
     return AgentStatus(
-      version: '0.2.3',
+      version: '0.3.0',
       runtimeReady: true,
       platform: 'linux/arm64',
       maxConcurrency: 2,

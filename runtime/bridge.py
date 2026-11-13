@@ -19,7 +19,7 @@ import sys
 import tempfile
 from typing import Any, Callable
 
-VERSION = "0.2.3"
+VERSION = "0.3.0"
 BILI_VERSION = "2.15.18"
 MAX_REQUEST_BYTES = 4 * 1024 * 1024
 CREATE_RETRY_LIMIT = 40

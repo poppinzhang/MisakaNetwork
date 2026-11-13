@@ -135,14 +135,14 @@ void main() {
       prepare: (c) {
         c.statuses['a'] = AgentStatus(
           platform: 'linux/arm64',
-          version: '0.2.3',
+          version: '0.3.0',
           biliVersion: '2.15.18',
           runtimeReady: true,
           maxConcurrency: 2,
         );
         c.statuses['b'] = AgentStatus(
           platform: 'darwin/arm64',
-          version: '0.2.3',
+          version: '0.3.0',
           biliVersion: '2.15.18',
           runtimeReady: false,
           maxConcurrency: 2,
