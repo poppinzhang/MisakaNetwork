@@ -13,16 +13,16 @@ import logging
 import math
 import os
 from pathlib import Path
+import re
 import signal
 import sys
 import tempfile
 from typing import Any, Callable
-from urllib.parse import urlsplit
 
 VERSION = "0.2.3"
 BILI_VERSION = "2.15.18"
 MAX_REQUEST_BYTES = 4 * 1024 * 1024
-OPERATIONS = frozenset({"ping", "qr_start", "qr_poll", "login_cookie", "login_state", "search", "purchase_context", "build_config", "validate", "run"})
+OPERATIONS = frozenset({"ping", "qr_start", "qr_poll", "payment_qr", "login_cookie", "login_state", "search", "purchase_context", "build_config", "validate", "run"})
 # Upstream stage labels mapped to the stable codes Sisters understands; any
 # other label becomes "working" so no upstream text crosses the protocol.
 STAGE_CODES = {
@@ -45,7 +45,8 @@ EXISTING_ORDER_ERRNOS = frozenset({100003, 100048, 100079})
 # Upstream waits for this Beijing-time form as is; clock-only values would be
 # dated by the host's own time zone.
 TIME_START_FORMAT = "%Y-%m-%dT%H:%M:%S"
-PAYMENT_KEYS = ("order_id", "order_detail_url", "payment_qr_url", "payment_code_url")
+ORDER_ID_PATTERN = re.compile(r"[1-9][0-9]{0,79}")
+PAYMENT_CODE_PATTERN = re.compile(r"(?:weixin://wxpay/bizpayurl\?pr=|https://qr\.alipay\.com/)[A-Za-z0-9_-]{1,512}")
 NAV_URL = "https://api.bilibili.com/x/web-interface/nav"
 
 
@@ -180,26 +181,36 @@ def bounded_number(params: dict, key: str, default: float, low: float, high: flo
     return value
 
 
+def safe_payment_code(value: Any) -> str | None:
+    """Accept only bounded native payment payloads, never arbitrary URLs.
+
+    These are QR contents, not URLs for this process to fetch or launch. Exact
+    matching rejects parser normalization, credentials, ports and redirects.
+    Keep the same rules in Sisters and LastOrder when changing this allowlist.
+    """
+    if isinstance(value, str) and len(value) <= 2048 and PAYMENT_CODE_PATTERN.fullmatch(value):
+        return value
+    return None
+
+
 def safe_payment_fields(state: Any) -> dict[str, Any]:
-    """Only return payment fields, never arbitrary state or upstream request dumps."""
-    result: dict[str, Any] = {}
-    for key in PAYMENT_KEYS:
-        value = state.get(key) if isinstance(state, dict) else getattr(state, key, None)
-        if value in (None, ""):
-            continue
-        if key == "order_id":
-            if isinstance(value, (int, str)) and str(value).isdigit() and len(str(value)) <= 80:
-                result[key] = str(value)
-            continue
-        if not isinstance(value, str) or len(value) > 8192:
-            continue
-        try:
-            url = urlsplit(value)
-            host = url.hostname or ""
-            if url.scheme == "https" and not url.username and not url.password and (host == "bilibili.com" or host.endswith(".bilibili.com")):
-                result[key] = value
-        except ValueError:
-            continue
+    """Bind payment data to a canonical order; never trust upstream page URLs."""
+    def field(key: str) -> Any:
+        return state.get(key) if isinstance(state, dict) else getattr(state, key, None)
+
+    order_id = field("order_id")
+    if type(order_id) is int and 0 < order_id < 10**80:
+        order_id = str(order_id)
+    if not isinstance(order_id, str) or not ORDER_ID_PATTERN.fullmatch(order_id):
+        return {}
+    result = {
+        "order_id": order_id,
+        "order_detail_url": f"https://show.bilibili.com/platform/orderDetail.html?order_id={order_id}",
+    }
+    code = safe_payment_code(field("payment_code_url"))
+    if code is not None:
+        result["payment_code_url"] = code
+    # Upstream's payment_qr_url is an order page, not a native payment QR.
     return result
 
 
@@ -348,9 +359,14 @@ def run_task(params: dict[str, Any], engine: Any, emit: Callable[[dict], None]) 
     for event in job.stream():
         progress = progress_event(event)
         emit(progress)
-        payment.update(safe_payment_fields(getattr(event, "state", None)))
         state_status = getattr(getattr(event, "state", None), "status", "running")
         if state_status in CONFIRMED_STATUSES:
+            fields = safe_payment_fields(getattr(event, "state", None))
+            if fields:
+                if fields["order_id"] != payment.get("order_id"):
+                    payment = fields
+                else:
+                    payment.update(fields)
             if confirmed is None or state_status == "succeeded":
                 confirmed = state_status
         elif state_status in TERMINAL_STATUSES:
@@ -368,6 +384,22 @@ def handle_request(request: Any, engine: Any, emit: Callable[[dict], None]) -> d
     params = require_object(request.get("params", {}), "params")
     if operation == "ping":
         return {"version": VERSION, "bili_version": BILI_VERSION, "protocol": 1, "ready": True}
+    if operation == "payment_qr":
+        code = safe_payment_code(params.get("payment_code_url"))
+        if set(params) != {"payment_code_url"} or code is None:
+            raise BridgeError("invalid_request", "付款码格式不受支持，请前往订单详情核对")
+        # Encode locally in memory; this operation needs no account, upstream
+        # engine, network request, temporary image file or external renderer.
+        import qrcode
+        try:
+            from qrcode.image.pil import PilImage as PaymentImage
+        except ImportError:
+            # Android ships PyPNG instead of Pillow; qrcode 8.2's default
+            # factory imports Pillow before reaching its advertised fallback.
+            from qrcode.image.pure import PyPNGImage as PaymentImage
+        buffer = io.BytesIO()
+        qrcode.make(code, box_size=6, border=4, image_factory=PaymentImage).save(buffer)
+        return {"qr_png_base64": base64.b64encode(buffer.getvalue()).decode("ascii")}
     if operation == "qr_start":
         data = engine.start_qr_login(qr_image_path=False, max_retry=2)
         if not data.get("ok"):
@@ -504,7 +536,7 @@ def main() -> int:
                 initialization_error = None
                 try:
                     try:
-                        engine = load_engine()
+                        engine = None if isinstance(request, dict) and request.get("op") == "payment_qr" else load_engine()
                     except BaseException as exc:
                         initialization_error = exc
                         if not isinstance(exc, Exception):

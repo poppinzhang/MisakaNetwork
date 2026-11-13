@@ -88,6 +88,24 @@ final $typed_data.Uint8List taskEventDescriptor = $convert.base64Decode(
     'CglUYXNrRXZlbnQSKgoRdGltZXN0YW1wX3VuaXhfbXMYASABKANSD3RpbWVzdGFtcFVuaXhNcx'
     'IUCgVsZXZlbBgCIAEoCVIFbGV2ZWwSGAoHbWVzc2FnZRgDIAEoCVIHbWVzc2FnZQ==');
 
+@$core.Deprecated('Use orderPaymentDescriptor instead')
+const OrderPayment$json = {
+  '1': 'OrderPayment',
+  '2': [
+    {'1': 'order_id', '3': 1, '4': 1, '5': 9, '10': 'orderId'},
+    {'1': 'order_detail_url', '3': 2, '4': 1, '5': 9, '10': 'orderDetailUrl'},
+    {'1': 'payment_code_url', '3': 3, '4': 1, '5': 9, '10': 'paymentCodeUrl'},
+    {'1': 'captured_unix_ms', '3': 4, '4': 1, '5': 3, '10': 'capturedUnixMs'},
+  ],
+};
+
+/// Descriptor for `OrderPayment`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List orderPaymentDescriptor = $convert.base64Decode(
+    'CgxPcmRlclBheW1lbnQSGQoIb3JkZXJfaWQYASABKAlSB29yZGVySWQSKAoQb3JkZXJfZGV0YW'
+    'lsX3VybBgCIAEoCVIOb3JkZXJEZXRhaWxVcmwSKAoQcGF5bWVudF9jb2RlX3VybBgDIAEoCVIO'
+    'cGF5bWVudENvZGVVcmwSKAoQY2FwdHVyZWRfdW5peF9tcxgEIAEoA1IOY2FwdHVyZWRVbml4TX'
+    'M=');
+
 @$core.Deprecated('Use taskStatusDescriptor instead')
 const TaskStatus$json = {
   '1': 'TaskStatus',
@@ -112,6 +130,14 @@ const TaskStatus$json = {
       '6': '.misaka.v1.TaskEvent',
       '10': 'events'
     },
+    {
+      '1': 'payment',
+      '3': 7,
+      '4': 1,
+      '5': 11,
+      '6': '.misaka.v1.OrderPayment',
+      '10': 'payment'
+    },
   ],
 };
 
@@ -120,7 +146,8 @@ final $typed_data.Uint8List taskStatusDescriptor = $convert.base64Decode(
     'CgpUYXNrU3RhdHVzEg4KAmlkGAEgASgJUgJpZBISCgRuYW1lGAIgASgJUgRuYW1lEioKBXN0YX'
     'RlGAMgASgOMhQubWlzYWthLnYxLlRhc2tTdGF0ZVIFc3RhdGUSGAoHbWVzc2FnZRgEIAEoCVIH'
     'bWVzc2FnZRImCg91cGRhdGVkX3VuaXhfbXMYBSABKANSDXVwZGF0ZWRVbml4TXMSLAoGZXZlbn'
-    'RzGAYgAygLMhQubWlzYWthLnYxLlRhc2tFdmVudFIGZXZlbnRz');
+    'RzGAYgAygLMhQubWlzYWthLnYxLlRhc2tFdmVudFIGZXZlbnRzEjEKB3BheW1lbnQYByABKAsy'
+    'Fy5taXNha2EudjEuT3JkZXJQYXltZW50UgdwYXltZW50');
 
 @$core.Deprecated('Use agentStatusDescriptor instead')
 const AgentStatus$json = {

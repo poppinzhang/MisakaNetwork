@@ -89,7 +89,11 @@ func TestGRPCRequiresMutualTLS(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer lis.Close()
-	s := testService(t, &fakeRunner{output: result{Status: "succeeded"}}, 1, 2, 3)
+	s := testService(t, &fakeRunner{output: result{Status: "succeeded", OrderID: "12", PaymentCodeURL: testPaymentCode}}, 1, 2, 3)
+	if _, err := s.SubmitTask(context.Background(), request("payment")); err != nil {
+		t.Fatal(err)
+	}
+	waitState(t, s, "payment", pb.TaskState_TASK_STATE_SUCCEEDED)
 	server := grpc.NewServer(grpc.Creds(credentials.NewTLS(serverTLS)))
 	defer server.Stop()
 	pb.RegisterSistersServer(server, s)
@@ -107,6 +111,9 @@ func TestGRPCRequiresMutualTLS(t *testing.T) {
 	got, err := call(credentials.NewTLS(clientTLS))
 	if err != nil || got.Version != Version {
 		t.Fatalf("authenticated call: %v %v", got, err)
+	}
+	if len(got.Tasks) != 1 || got.Tasks[0].GetPayment().GetPaymentCodeUrl() != testPaymentCode || got.Tasks[0].Payment.CapturedUnixMs <= 0 {
+		t.Fatal("authenticated status did not transport structured payment")
 	}
 	missing := clientTLS.Clone()
 	missing.Certificates = nil

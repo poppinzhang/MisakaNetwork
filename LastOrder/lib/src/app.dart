@@ -18,6 +18,7 @@ import 'cloud_models.dart';
 import 'cloud_ui.dart';
 import 'dispatch_dialog.dart';
 import 'models.dart';
+import 'payment_ui.dart';
 import 'services.dart';
 import 'task_messages.dart';
 import 'theme.dart';
@@ -1669,6 +1670,7 @@ class _ControlCenterState extends State<ControlCenter> {
               ),
             ),
           ),
+        OrderPayments(controller: c),
         if (items.isEmpty)
           empty(LucideIcons.activity, '尚无执行记录', '分发任务后，这里将展示节点进度和执行结果。')
         else

@@ -1,8 +1,8 @@
 """Serialized in-process client adapter for Android's embedded Python runtime.
 
 The shared protocol and upstream interface functions are identical to desktop.
-Only account, catalog, and task-configuration operations are allowed here;
-Sisters executes purchases on a remote machine.
+Only account, catalog, task-configuration and local QR-encoding operations are
+allowed here; Sisters executes purchases on a remote machine.
 """
 from __future__ import annotations
 
@@ -73,9 +73,12 @@ def invoke(raw: str, cache_directory: str) -> str:
                     with open(os.devnull, "w") as sink, redirect_stdout(sink), redirect_stderr(sink):
                         # Loguru captures its initial sink at import time, so
                         # remove it before any upstream client module is loaded.
-                        import loguru
-                        loguru.logger.remove()
-                        engine = load_client_engine()
+                        if request["op"] == "payment_qr":
+                            engine = None
+                        else:
+                            import loguru
+                            loguru.logger.remove()
+                            engine = load_client_engine()
                         bridge.process_request(request, engine, events.append)
                     if len(events) != 1:
                         return _failure("runtime_error", "内置运行时返回了无效结果")

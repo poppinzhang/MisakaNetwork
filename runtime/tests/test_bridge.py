@@ -286,10 +286,10 @@ class BridgeTests(unittest.TestCase):
         for secret in ("secret", "private address", "password"):
             self.assertNotIn(secret, json.dumps(result))
 
-    def test_payment_urls_require_safe_https_host(self):
+    def test_order_detail_is_derived_from_order_id_not_untrusted_url(self):
         for url in ("http://show.bilibili.com/order", "https://bilibili.com.example.org/order", "https://user:password@bilibili.com/order", "file:///private/file", "javascript:alert(1)"):
             self.assertEqual(bridge.safe_payment_fields({"order_detail_url": url}), {})
-        self.assertEqual(bridge.safe_payment_fields({"order_detail_url": "https://show.bilibili.com/order?id=1", "order_id": 1}), {"order_detail_url": "https://show.bilibili.com/order?id=1", "order_id": "1"})
+        self.assertEqual(bridge.safe_payment_fields({"order_detail_url": "https://show.bilibili.com/order?id=1", "order_id": 1}), {"order_detail_url": "https://show.bilibili.com/platform/orderDetail.html?order_id=1", "order_id": "1"})
 
     def test_validation_does_not_return_config_or_secret_errors(self):
         engine = SimpleNamespace(validate_config=lambda _: validation(False, {"cookies": "secret"}))

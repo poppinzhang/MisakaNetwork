@@ -36,6 +36,12 @@ Docker 限制针对上游应用的运行与服务入口，不禁止本项目为�
 - `runtime/vendor_bili.py` 的导入白名单不包含上游 Web UI、Docker 启动文件和更新器；`runtime/build.py` 不打包 Gradio。独立运行时与 Android 内嵌客户端均不得新增这些服务入口。
 - 自制 TLS 和通知模块仍可能作为核心源码的一部分出现在内嵌目录中，当前结论是调用路径未启用，并非相关缺陷已修复或代码已全部移除。默认值、导入副作用或调用方式变化后必须重新核查。
 
+### 付款码回显接入复核（未发布）
+
+本次扩展的是支付结果过滤与本地二维码编码，固定上游版本、vendor 快照、导入白名单、依赖及 `standard` 下单参数均未改变。取码仍走上游已有 `getPayParam` 与下单的同一 `BiliRequest`；新增 `payment_qr` 仅把经过严格白名单校验的字符串编码成内存 PNG，不访问支付 URL，不请求新付款参数或订单状态。Python、Go、Dart 分别检查输入，订单详情只由合法订单号构造；支付 token、链接及二维码不进入日志、事件或普通持久化文件。
+
+平台 HTTPS 验证、内存 Cookie、空通知配置和无 Web UI/Gradio 分享限制继续保留；本地编码复用既有二维码依赖，不新增推送器或服务入口。源码核查范围、白名单依据与需要覆盖的离线回归见[付款码回显](付款码回显.md#接入安全核查范围)。这些结论限于源码与离线模拟，不是全部依赖、发行二进制或真实支付业务的安全验收。
+
 ### 升级安全核查
 
 每次升级上游版本、固定提交或相关依赖，以及调整导入白名单、嵌入补丁、启动方式或运行参数时，必须完成以下核查。即使上游宣称已修复问题，也不能自动解除上述禁用约束。
@@ -62,6 +68,7 @@ Docker 限制针对上游应用的运行与服务入口，不禁止本项目为�
 | --- | --- | --- |
 | `ping` | 无 | `version`、`bili_version`、`protocol:1`、`ready:true`；导入真实引擎验证依赖，不访问网络 |
 | `qr_start` | 无 | `login_url`、`qrcode_key`、`qr_png_base64`；PNG 不落盘 |
+| `payment_qr`（未发布） | `payment_code_url`，完整字符串须符合支付白名单 | `qr_png_base64`；仅本地内存生成，不请求平台或支付网站 |
 | `qr_poll` | `qrcode_key`、可选 `timeout_seconds`（1–60，默认 5） | `status:confirmed/timeout/failed`；只有已验证的 confirmed 返回 `cookies`、`username`、`uid` |
 | `login_cookie` | `cookies` | `status:valid/expired/unknown`、`logged_in`、`username`、`uid`、`message`；valid 才返回 `cookies` |
 | `login_state` | `cookies` | `status:valid/expired/unknown`、`logged_in`、`username`、`uid`、`message` |
@@ -71,7 +78,7 @@ Docker 限制针对上游应用的运行与服务入口，不禁止本项目为�
 | `validate` | `config` | `ok`、`errors`、`warnings`、`error_count`；不回显配置及敏感字段 |
 | `run` | `config`、可选 `cookies` 覆盖配置账户、可选 `runtime_options` | `status` 及允许的订单/付款字段 |
 
-Cookie 支持 `[{"name":"...","value":"..."}]`、`{"cookie":[...]}`、`{"cookies":[...]}` 或名称到字符串值的映射。Cookie、二维码标识、购买上下文与生成配置属于敏感结果：仅通过本机管道或已认证 TLS 信道传递，禁止写入普通日志。LastOrder 持久化账户应使用系统安全凭据存储。
+Cookie 支持 `[{"name":"...","value":"..."}]`、`{"cookie":[...]}`、`{"cookies":[...]}` 或名称到字符串值的映射。Cookie、二维码标识、购买上下文、生成配置与订单支付信息属于敏感结果：仅通过本机管道或已认证 TLS 信道传递，禁止写入普通日志。LastOrder 持久化账户应使用系统安全凭据存储；付款码回显仅保留在内存，不写普通状态文件。
 
 `selection` 包含从零起的 `ticket_index`、非空 `buyer_indices`、`address_index`，以及 `buyer`（联系人）、`tel`（联系电话），可选 `phone`。当前沿用上游校验：必须选择收货地址，即使活动提供电子票。场次、实名购票人或地址不完整会真实失败，不构造虚假的可执行配置。
 
@@ -79,7 +86,7 @@ Cookie 支持 `[{"name":"...","value":"..."}]`、`{"cookie":[...]}`、`{"cookies
 
 执行期间会输出 `{"type":"progress","status":"running","stage":"preparing","message":"抢票任务执行中","attempt_current":1,"attempt_total":20}`。`stage` 是稳定的协议代码，由上游阶段名翻译而来：`starting`（启动）、`waiting`（等待开票，可带 `countdown_seconds`）、`preparing`（订单准备）、`ordering`（创建订单）、`ordered`（抢票成功）、`page_timeout`（购票页校验超时）；其他上游阶段统一为 `working`。`status` 取 `running`、`cooldown`、`succeeded`、`duplicate_order`、`failed`、`cancelled`、`completed` 之一。消息与 stage 都不转发上游原文、HTTP 响应、代理信息或原始错误字符串。上游新增阶段名时测试会失败，提醒同步更新 bridge 与 Sisters 的词表。终态 `succeeded` 表示上游结构化状态确认创建订单；`duplicate_order` 表示检测到已有订单：上游在限购已有订单（100003）、存在未完成订单（100048）或重复订单（100079）时以 `completed` 停止，bridge 启动任务时把这三条停止规则改报为 `duplicate_order`。`completed` 表示结束但尚未确认创建订单，不能向用户展示抢票成功；`failed` / `cancelled` 返回 `ok:false`。一旦出现 `succeeded` 或 `duplicate_order`，之后的上游异常或取消只会停止任务，不再改变终态。
 
-订单字段仅允许数字 `order_id` 与 HTTPS Bilibili 域名的 `order_detail_url`、`payment_qr_url`、`payment_code_url`。运行时不自动付款。调用方需提示用户前往平台订单页确认并付款。不要仅凭日志中的“成功”或进程正常退出推断下单成功。
+源码未发布的付款字段规则：`order_id` 必须是 1–80 位 ASCII 正整数且没有前导零；`order_detail_url` 从订单号固定生成为 `https://show.bilibili.com/platform/orderDetail.html?order_id=<order_id>`。`payment_code_url` 只接受 `weixin://wxpay/bizpayurl?pr=<token>` 或 `https://qr.alipay.com/<token>` 的整串匹配，token 为 1–512 个 `[A-Za-z0-9_-]` 字符，输入总长最多 2048 个 ASCII 字符；不接受额外参数、片段、端口、用户信息或编码变体。上游 `payment_qr_url` 实际是订单详情页，不能当作付款码，不再随新的付款结果透传。非法支付码不影响合法订单详情兜底；缺少合法订单号不返回支付字段。运行时不自动付款，不查询支付状态，不根据二维码推断订单已付款或出票。完整链路见[付款码回显](付款码回显.md)。
 
 ## 嵌入与隐私隔离
 

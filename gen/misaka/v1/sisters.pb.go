@@ -297,6 +297,79 @@ func (x *TaskEvent) GetMessage() string {
 	return ""
 }
 
+// Sensitive, in-memory payment information for a confirmed order. Never copy
+// payment URLs into task messages or events. Presence does not mean paid.
+type OrderPayment struct {
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	OrderId string                 `protobuf:"bytes,1,opt,name=order_id,json=orderId,proto3" json:"order_id,omitempty"`
+	// Canonical Bilibili order page, derived from the validated order ID.
+	OrderDetailUrl string `protobuf:"bytes,2,opt,name=order_detail_url,json=orderDetailUrl,proto3" json:"order_detail_url,omitempty"`
+	// Validated QR content, not an image URL. Empty falls back to the order page.
+	PaymentCodeUrl string `protobuf:"bytes,3,opt,name=payment_code_url,json=paymentCodeUrl,proto3" json:"payment_code_url,omitempty"`
+	// Time Sisters received the final result; not a payment expiry timestamp.
+	CapturedUnixMs int64 `protobuf:"varint,4,opt,name=captured_unix_ms,json=capturedUnixMs,proto3" json:"captured_unix_ms,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *OrderPayment) Reset() {
+	*x = OrderPayment{}
+	mi := &file_misaka_v1_sisters_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OrderPayment) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OrderPayment) ProtoMessage() {}
+
+func (x *OrderPayment) ProtoReflect() protoreflect.Message {
+	mi := &file_misaka_v1_sisters_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OrderPayment.ProtoReflect.Descriptor instead.
+func (*OrderPayment) Descriptor() ([]byte, []int) {
+	return file_misaka_v1_sisters_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *OrderPayment) GetOrderId() string {
+	if x != nil {
+		return x.OrderId
+	}
+	return ""
+}
+
+func (x *OrderPayment) GetOrderDetailUrl() string {
+	if x != nil {
+		return x.OrderDetailUrl
+	}
+	return ""
+}
+
+func (x *OrderPayment) GetPaymentCodeUrl() string {
+	if x != nil {
+		return x.PaymentCodeUrl
+	}
+	return ""
+}
+
+func (x *OrderPayment) GetCapturedUnixMs() int64 {
+	if x != nil {
+		return x.CapturedUnixMs
+	}
+	return 0
+}
+
 type TaskStatus struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
@@ -305,13 +378,14 @@ type TaskStatus struct {
 	Message       string                 `protobuf:"bytes,4,opt,name=message,proto3" json:"message,omitempty"`
 	UpdatedUnixMs int64                  `protobuf:"varint,5,opt,name=updated_unix_ms,json=updatedUnixMs,proto3" json:"updated_unix_ms,omitempty"`
 	Events        []*TaskEvent           `protobuf:"bytes,6,rep,name=events,proto3" json:"events,omitempty"`
+	Payment       *OrderPayment          `protobuf:"bytes,7,opt,name=payment,proto3" json:"payment,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *TaskStatus) Reset() {
 	*x = TaskStatus{}
-	mi := &file_misaka_v1_sisters_proto_msgTypes[4]
+	mi := &file_misaka_v1_sisters_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -323,7 +397,7 @@ func (x *TaskStatus) String() string {
 func (*TaskStatus) ProtoMessage() {}
 
 func (x *TaskStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_misaka_v1_sisters_proto_msgTypes[4]
+	mi := &file_misaka_v1_sisters_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -336,7 +410,7 @@ func (x *TaskStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TaskStatus.ProtoReflect.Descriptor instead.
 func (*TaskStatus) Descriptor() ([]byte, []int) {
-	return file_misaka_v1_sisters_proto_rawDescGZIP(), []int{4}
+	return file_misaka_v1_sisters_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *TaskStatus) GetId() string {
@@ -381,6 +455,13 @@ func (x *TaskStatus) GetEvents() []*TaskEvent {
 	return nil
 }
 
+func (x *TaskStatus) GetPayment() *OrderPayment {
+	if x != nil {
+		return x.Payment
+	}
+	return nil
+}
+
 type AgentStatus struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	Version        string                 `protobuf:"bytes,1,opt,name=version,proto3" json:"version,omitempty"`
@@ -399,7 +480,7 @@ type AgentStatus struct {
 
 func (x *AgentStatus) Reset() {
 	*x = AgentStatus{}
-	mi := &file_misaka_v1_sisters_proto_msgTypes[5]
+	mi := &file_misaka_v1_sisters_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -411,7 +492,7 @@ func (x *AgentStatus) String() string {
 func (*AgentStatus) ProtoMessage() {}
 
 func (x *AgentStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_misaka_v1_sisters_proto_msgTypes[5]
+	mi := &file_misaka_v1_sisters_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -424,7 +505,7 @@ func (x *AgentStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentStatus.ProtoReflect.Descriptor instead.
 func (*AgentStatus) Descriptor() ([]byte, []int) {
-	return file_misaka_v1_sisters_proto_rawDescGZIP(), []int{5}
+	return file_misaka_v1_sisters_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *AgentStatus) GetVersion() string {
@@ -503,7 +584,12 @@ const file_misaka_v1_sisters_proto_rawDesc = "" +
 	"\tTaskEvent\x12*\n" +
 	"\x11timestamp_unix_ms\x18\x01 \x01(\x03R\x0ftimestampUnixMs\x12\x14\n" +
 	"\x05level\x18\x02 \x01(\tR\x05level\x12\x18\n" +
-	"\amessage\x18\x03 \x01(\tR\amessage\"\xcc\x01\n" +
+	"\amessage\x18\x03 \x01(\tR\amessage\"\xa7\x01\n" +
+	"\fOrderPayment\x12\x19\n" +
+	"\border_id\x18\x01 \x01(\tR\aorderId\x12(\n" +
+	"\x10order_detail_url\x18\x02 \x01(\tR\x0eorderDetailUrl\x12(\n" +
+	"\x10payment_code_url\x18\x03 \x01(\tR\x0epaymentCodeUrl\x12(\n" +
+	"\x10captured_unix_ms\x18\x04 \x01(\x03R\x0ecapturedUnixMs\"\xff\x01\n" +
 	"\n" +
 	"TaskStatus\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
@@ -511,7 +597,8 @@ const file_misaka_v1_sisters_proto_rawDesc = "" +
 	"\x05state\x18\x03 \x01(\x0e2\x14.misaka.v1.TaskStateR\x05state\x12\x18\n" +
 	"\amessage\x18\x04 \x01(\tR\amessage\x12&\n" +
 	"\x0fupdated_unix_ms\x18\x05 \x01(\x03R\rupdatedUnixMs\x12,\n" +
-	"\x06events\x18\x06 \x03(\v2\x14.misaka.v1.TaskEventR\x06events\"\xb9\x02\n" +
+	"\x06events\x18\x06 \x03(\v2\x14.misaka.v1.TaskEventR\x06events\x121\n" +
+	"\apayment\x18\a \x01(\v2\x17.misaka.v1.OrderPaymentR\apayment\"\xb9\x02\n" +
 	"\vAgentStatus\x12\x18\n" +
 	"\aversion\x18\x01 \x01(\tR\aversion\x12!\n" +
 	"\fbili_version\x18\x02 \x01(\tR\vbiliVersion\x12\x1a\n" +
@@ -548,31 +635,33 @@ func file_misaka_v1_sisters_proto_rawDescGZIP() []byte {
 }
 
 var file_misaka_v1_sisters_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_misaka_v1_sisters_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
+var file_misaka_v1_sisters_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
 var file_misaka_v1_sisters_proto_goTypes = []any{
-	(TaskState)(0),      // 0: misaka.v1.TaskState
-	(*Empty)(nil),       // 1: misaka.v1.Empty
-	(*TaskId)(nil),      // 2: misaka.v1.TaskId
-	(*TaskRequest)(nil), // 3: misaka.v1.TaskRequest
-	(*TaskEvent)(nil),   // 4: misaka.v1.TaskEvent
-	(*TaskStatus)(nil),  // 5: misaka.v1.TaskStatus
-	(*AgentStatus)(nil), // 6: misaka.v1.AgentStatus
+	(TaskState)(0),       // 0: misaka.v1.TaskState
+	(*Empty)(nil),        // 1: misaka.v1.Empty
+	(*TaskId)(nil),       // 2: misaka.v1.TaskId
+	(*TaskRequest)(nil),  // 3: misaka.v1.TaskRequest
+	(*TaskEvent)(nil),    // 4: misaka.v1.TaskEvent
+	(*OrderPayment)(nil), // 5: misaka.v1.OrderPayment
+	(*TaskStatus)(nil),   // 6: misaka.v1.TaskStatus
+	(*AgentStatus)(nil),  // 7: misaka.v1.AgentStatus
 }
 var file_misaka_v1_sisters_proto_depIdxs = []int32{
 	0, // 0: misaka.v1.TaskStatus.state:type_name -> misaka.v1.TaskState
 	4, // 1: misaka.v1.TaskStatus.events:type_name -> misaka.v1.TaskEvent
-	5, // 2: misaka.v1.AgentStatus.tasks:type_name -> misaka.v1.TaskStatus
-	1, // 3: misaka.v1.Sisters.GetStatus:input_type -> misaka.v1.Empty
-	3, // 4: misaka.v1.Sisters.SubmitTask:input_type -> misaka.v1.TaskRequest
-	2, // 5: misaka.v1.Sisters.CancelTask:input_type -> misaka.v1.TaskId
-	6, // 6: misaka.v1.Sisters.GetStatus:output_type -> misaka.v1.AgentStatus
-	5, // 7: misaka.v1.Sisters.SubmitTask:output_type -> misaka.v1.TaskStatus
-	5, // 8: misaka.v1.Sisters.CancelTask:output_type -> misaka.v1.TaskStatus
-	6, // [6:9] is the sub-list for method output_type
-	3, // [3:6] is the sub-list for method input_type
-	3, // [3:3] is the sub-list for extension type_name
-	3, // [3:3] is the sub-list for extension extendee
-	0, // [0:3] is the sub-list for field type_name
+	5, // 2: misaka.v1.TaskStatus.payment:type_name -> misaka.v1.OrderPayment
+	6, // 3: misaka.v1.AgentStatus.tasks:type_name -> misaka.v1.TaskStatus
+	1, // 4: misaka.v1.Sisters.GetStatus:input_type -> misaka.v1.Empty
+	3, // 5: misaka.v1.Sisters.SubmitTask:input_type -> misaka.v1.TaskRequest
+	2, // 6: misaka.v1.Sisters.CancelTask:input_type -> misaka.v1.TaskId
+	7, // 7: misaka.v1.Sisters.GetStatus:output_type -> misaka.v1.AgentStatus
+	6, // 8: misaka.v1.Sisters.SubmitTask:output_type -> misaka.v1.TaskStatus
+	6, // 9: misaka.v1.Sisters.CancelTask:output_type -> misaka.v1.TaskStatus
+	7, // [7:10] is the sub-list for method output_type
+	4, // [4:7] is the sub-list for method input_type
+	4, // [4:4] is the sub-list for extension type_name
+	4, // [4:4] is the sub-list for extension extendee
+	0, // [0:4] is the sub-list for field type_name
 }
 
 func init() { file_misaka_v1_sisters_proto_init() }
@@ -586,7 +675,7 @@ func file_misaka_v1_sisters_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_misaka_v1_sisters_proto_rawDesc), len(file_misaka_v1_sisters_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   6,
+			NumMessages:   7,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

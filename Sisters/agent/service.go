@@ -305,14 +305,20 @@ func (s *Service) worker() {
 		clear(t.payload)
 		t.payload = nil
 		t.cancel = nil
-		if !terminal(t.status.State) {
+		// A final, successful result may race with cancellation after the order
+		// was created. Keep that confirmed order visible; progress alone never
+		// establishes success, and failed/cancelled runs cannot expose payment.
+		confirmed := err == nil && confirmedOrder(out)
+		if confirmed || !terminal(t.status.State) {
 			switch {
 			case err != nil:
 				s.update(t, pb.TaskState_TASK_STATE_FAILED, "抢票工具执行失败，请检查运行环境或任务配置")
 			case out.Status == "succeeded":
 				s.update(t, pb.TaskState_TASK_STATE_SUCCEEDED, "已下单，请到哔哩哔哩订单页确认并支付")
+				t.status.Payment = orderPayment(out, t.status.UpdatedUnixMs)
 			case out.Status == "duplicate_order":
 				s.update(t, pb.TaskState_TASK_STATE_SUCCEEDED, "检测到已有订单，请到哔哩哔哩订单页确认并支付")
+				t.status.Payment = orderPayment(out, t.status.UpdatedUnixMs)
 			default:
 				s.update(t, pb.TaskState_TASK_STATE_FAILED, "抢票工具已结束，但未确认下单成功")
 			}

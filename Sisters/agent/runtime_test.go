@@ -29,6 +29,8 @@ func TestRuntimeRequiresValidTerminalResult(t *testing.T) {
 		{"false", `echo '{"type":"result","ok":false,"error":{"message":"secret"}}'`, true},
 		{"nonzero", "echo '{\"type\":\"result\",\"ok\":true,\"data\":{\"status\":\"succeeded\"}}'\nexit 1", true},
 		{"duplicate", "echo '{\"type\":\"result\",\"ok\":true}'\necho '{\"type\":\"result\",\"ok\":true}'", true},
+		{"progress_after_result", `echo '{"type":"result","ok":true,"data":{"status":"succeeded","order_id":"12"}}'
+echo '{"type":"progress","status":"succeeded"}'`, true},
 		{"success", `echo '{"type":"progress","stage":"ordering","message":"cookie secret"}'
 echo '{"type":"result","ok":true,"data":{"status":"succeeded","order_id":"private"}}'`, false},
 	} {
@@ -130,5 +132,67 @@ func TestRuntimeCancellationKillsProcessGroup(t *testing.T) {
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("process descendants survived cancellation")
+	}
+}
+
+func TestRuntimeReadsPaymentOnlyFromFinalResult(t *testing.T) {
+	r := executableRunner{path: script(t, `echo '{"type":"progress","status":"succeeded","order_id":"99","payment_code_url":"https://evil.test","message":"private payment"}'
+echo '{"type":"result","ok":true,"data":{"status":"succeeded","order_id":"12","order_detail_url":"https://show.bilibili.com/platform/orderDetail.html?order_id=12","payment_code_url":"weixin://wxpay/bizpayurl?pr=synthetic_token"}}'`)}
+	out, err := r.run(context.Background(), []byte("{}\n"), func(p progress) {
+		if event, line := progressText(p); strings.Contains(event+line, "private") || strings.Contains(event+line, "https://") {
+			t.Fatal("payment fields leaked from progress")
+		}
+	})
+	if err != nil || out.OrderID != "12" || out.PaymentCodeURL != testPaymentCode || out.OrderDetailURL != "https://show.bilibili.com/platform/orderDetail.html?order_id=12" {
+		t.Fatalf("final payment not parsed: %v", err)
+	}
+}
+
+func TestRuntimeFinalOrderSurvivesLateCancellation(t *testing.T) {
+	for _, tc := range []struct {
+		name, frames string
+		wantSuccess  bool
+	}{
+		{"success", `echo '{"type":"result","ok":true,"data":{"status":"succeeded","order_id":"12","payment_code_url":"weixin://wxpay/bizpayurl?pr=synthetic_token"}}'`, true},
+		{"duplicate", `echo '{"type":"result","ok":true,"data":{"status":"duplicate_order","order_id":"12"}}'`, true},
+		{"progress_only", `echo '{"type":"progress","status":"succeeded"}'`, false},
+		{"completed", `echo '{"type":"result","ok":true,"data":{"status":"completed","order_id":"12"}}'`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// This marker contains no business data; it establishes that all
+			// stdout frames have been written before cancellation is requested.
+			marker := filepath.Join(t.TempDir(), "ready")
+			r := executableRunner{path: script(t, tc.frames+"\nprintf ready > '"+marker+"'\nexec sleep 60")}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			type outcome struct {
+				out result
+				err error
+			}
+			done := make(chan outcome, 1)
+			go func() { out, err := r.run(ctx, []byte("{}\n"), nil); done <- outcome{out, err} }()
+			deadline := time.Now().Add(3 * time.Second)
+			for {
+				if _, err := os.Stat(marker); err == nil {
+					break
+				}
+				if time.Now().After(deadline) {
+					t.Fatal("runtime did not emit test frames")
+				}
+				time.Sleep(time.Millisecond)
+			}
+			cancel()
+			select {
+			case got := <-done:
+				if (got.err == nil) != tc.wantSuccess {
+					t.Fatalf("late cancellation success=%v error=%v", tc.wantSuccess, got.err)
+				}
+				if tc.wantSuccess && got.out.OrderID != "12" {
+					t.Fatal("confirmed order was lost")
+				}
+			case <-time.After(3 * time.Second):
+				t.Fatal("runtime did not stop after cancellation")
+			}
+		})
 	}
 }

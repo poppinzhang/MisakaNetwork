@@ -301,6 +301,104 @@ class TaskEvent extends $pb.GeneratedMessage {
   void clearMessage() => $_clearField(3);
 }
 
+/// Sensitive, in-memory payment information for a confirmed order. Never copy
+/// payment URLs into task messages or events. Presence does not mean paid.
+class OrderPayment extends $pb.GeneratedMessage {
+  factory OrderPayment({
+    $core.String? orderId,
+    $core.String? orderDetailUrl,
+    $core.String? paymentCodeUrl,
+    $fixnum.Int64? capturedUnixMs,
+  }) {
+    final result = OrderPayment._();
+    if (orderId != null) result.orderId = orderId;
+    if (orderDetailUrl != null) result.orderDetailUrl = orderDetailUrl;
+    if (paymentCodeUrl != null) result.paymentCodeUrl = paymentCodeUrl;
+    if (capturedUnixMs != null) result.capturedUnixMs = capturedUnixMs;
+    return result;
+  }
+
+  OrderPayment._();
+
+  factory OrderPayment.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      OrderPayment()..mergeFromBuffer(data, registry);
+  factory OrderPayment.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      OrderPayment()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'OrderPayment',
+      package: const $pb.PackageName(_omitMessageNames ? '' : 'misaka.v1'),
+      createEmptyInstance: OrderPayment.$_createMessage)
+    ..aOS(1, _omitFieldNames ? '' : 'orderId')
+    ..aOS(2, _omitFieldNames ? '' : 'orderDetailUrl')
+    ..aOS(3, _omitFieldNames ? '' : 'paymentCodeUrl')
+    ..aInt64(4, _omitFieldNames ? '' : 'capturedUnixMs')
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  OrderPayment clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  OrderPayment copyWith(void Function(OrderPayment) updates) =>
+      super.copyWith((message) => updates(message as OrderPayment))
+          as OrderPayment;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated('Use OrderPayment() / OrderPayment.new instead')
+  static OrderPayment create() => OrderPayment._();
+  static $pb.GeneratedMessage $_createMessage() => OrderPayment._();
+  @$core.override
+  OrderPayment createEmptyInstance() => OrderPayment._();
+  @$core.pragma('dart2js:noInline')
+  static OrderPayment getDefault() =>
+      _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<OrderPayment>(
+          OrderPayment.$_createMessage);
+  static OrderPayment? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  $core.String get orderId => $_getSZ(0);
+  @$pb.TagNumber(1)
+  set orderId($core.String value) => $_setString(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasOrderId() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearOrderId() => $_clearField(1);
+
+  /// Canonical Bilibili order page, derived from the validated order ID.
+  @$pb.TagNumber(2)
+  $core.String get orderDetailUrl => $_getSZ(1);
+  @$pb.TagNumber(2)
+  set orderDetailUrl($core.String value) => $_setString(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasOrderDetailUrl() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearOrderDetailUrl() => $_clearField(2);
+
+  /// Validated QR content, not an image URL. Empty falls back to the order page.
+  @$pb.TagNumber(3)
+  $core.String get paymentCodeUrl => $_getSZ(2);
+  @$pb.TagNumber(3)
+  set paymentCodeUrl($core.String value) => $_setString(2, value);
+  @$pb.TagNumber(3)
+  $core.bool hasPaymentCodeUrl() => $_has(2);
+  @$pb.TagNumber(3)
+  void clearPaymentCodeUrl() => $_clearField(3);
+
+  /// Time Sisters received the final result; not a payment expiry timestamp.
+  @$pb.TagNumber(4)
+  $fixnum.Int64 get capturedUnixMs => $_getI64(3);
+  @$pb.TagNumber(4)
+  set capturedUnixMs($fixnum.Int64 value) => $_setInt64(3, value);
+  @$pb.TagNumber(4)
+  $core.bool hasCapturedUnixMs() => $_has(3);
+  @$pb.TagNumber(4)
+  void clearCapturedUnixMs() => $_clearField(4);
+}
+
 class TaskStatus extends $pb.GeneratedMessage {
   factory TaskStatus({
     $core.String? id,
@@ -309,6 +407,7 @@ class TaskStatus extends $pb.GeneratedMessage {
     $core.String? message,
     $fixnum.Int64? updatedUnixMs,
     $core.Iterable<TaskEvent>? events,
+    OrderPayment? payment,
   }) {
     final result = TaskStatus._();
     if (id != null) result.id = id;
@@ -317,6 +416,7 @@ class TaskStatus extends $pb.GeneratedMessage {
     if (message != null) result.message = message;
     if (updatedUnixMs != null) result.updatedUnixMs = updatedUnixMs;
     if (events != null) result.events.addAll(events);
+    if (payment != null) result.payment = payment;
     return result;
   }
 
@@ -341,6 +441,8 @@ class TaskStatus extends $pb.GeneratedMessage {
     ..aInt64(5, _omitFieldNames ? '' : 'updatedUnixMs')
     ..pPM<TaskEvent>(6, _omitFieldNames ? '' : 'events',
         subBuilder: TaskEvent.$_createMessage)
+    ..aOM<OrderPayment>(7, _omitFieldNames ? '' : 'payment',
+        subBuilder: OrderPayment.$_createMessage)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -410,6 +512,17 @@ class TaskStatus extends $pb.GeneratedMessage {
 
   @$pb.TagNumber(6)
   $pb.PbList<TaskEvent> get events => $_getList(5);
+
+  @$pb.TagNumber(7)
+  OrderPayment get payment => $_getN(6);
+  @$pb.TagNumber(7)
+  set payment(OrderPayment value) => $_setField(7, value);
+  @$pb.TagNumber(7)
+  $core.bool hasPayment() => $_has(6);
+  @$pb.TagNumber(7)
+  void clearPayment() => $_clearField(7);
+  @$pb.TagNumber(7)
+  OrderPayment ensurePayment() => $_ensure(6);
 }
 
 class AgentStatus extends $pb.GeneratedMessage {

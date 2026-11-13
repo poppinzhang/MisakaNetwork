@@ -32,6 +32,17 @@ message TaskEvent {
   string level = 2;
   string message = 3;
 }
+// Sensitive, in-memory payment information for a confirmed order. Never copy
+// payment URLs into task messages or events. Presence does not mean paid.
+message OrderPayment {
+  string order_id = 1;
+  // Canonical Bilibili order page, derived from the validated order ID.
+  string order_detail_url = 2;
+  // Validated QR content, not an image URL. Empty falls back to the order page.
+  string payment_code_url = 3;
+  // Time Sisters received the final result; not a payment expiry timestamp.
+  int64 captured_unix_ms = 4;
+}
 message TaskStatus {
   string id = 1;
   string name = 2;
@@ -39,6 +50,7 @@ message TaskStatus {
   string message = 4;
   int64 updated_unix_ms = 5;
   repeated TaskEvent events = 6;
+  OrderPayment payment = 7;
 }
 message AgentStatus {
   string version = 1;

@@ -27,6 +27,9 @@ type result struct {
 	Version        string `json:"bili_version"`
 	Protocol       int    `json:"protocol"`
 	Ready          bool   `json:"ready"`
+	OrderID        string `json:"order_id"`
+	OrderDetailURL string `json:"order_detail_url"`
+	PaymentCodeURL string `json:"payment_code_url"`
 }
 type frame struct {
 	Type string `json:"type"`
@@ -116,6 +119,12 @@ func (r executableRunner) invoke(ctx context.Context, input []byte, emit func(pr
 		cancel()
 	}
 	waitErr := cmd.Wait()
+	// Cancellation can arrive after a valid final frame was written. That
+	// confirmed order must survive killing the already-finishing process. A
+	// progress frame, protocol error or ordinary nonzero exit still fails.
+	if ctx.Err() != nil && !protocolErr && terminal != nil && terminal.OK && confirmedOrder(terminal.Data) {
+		return terminal.Data, nil
+	}
 	if ctx.Err() != nil || waitErr != nil || protocolErr || terminal == nil || !terminal.OK {
 		return result{}, errors.New("runtime failed or returned an invalid result")
 	}
