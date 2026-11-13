@@ -54,16 +54,14 @@ class _DispatchDialogState extends State<DispatchDialog> {
     if (mounted) setState(() {});
   }
 
-  bool _submitted(Machine machine) =>
-      (c.state.tasks.where((t) => t.id == widget.task.id).firstOrNull ??
-              widget.task)
-          .dispatchedTo
-          .contains(machine.id) ||
-      (c.statuses[machine.id]?.tasks.any((t) => t.id == widget.task.id) ??
-          false);
+  TicketTask get _task =>
+      c.state.tasks.where((t) => t.id == widget.task.id).firstOrNull ??
+      widget.task;
+
+  bool _blocked(Machine machine) => c.isDispatchBlocked(_task, machine.id);
 
   List<Machine> get _selected => c.state.machines
-      .where((m) => _chosen.contains(m.id) && !_submitted(m) && _available(m))
+      .where((m) => _chosen.contains(m.id) && !_blocked(m) && _available(m))
       .toList();
 
   bool _available(Machine machine) =>
@@ -78,7 +76,7 @@ class _DispatchDialogState extends State<DispatchDialog> {
 
   Set<(String, String?)> _risks(Machine machine, MachineWorkload workload) => {
     for (final task in workload.tasks)
-      if (task.id != widget.task.id) (machine.id, task.id),
+      if (!_task.ownsExecution(machine.id, task.id)) (machine.id, task.id),
     if (workload.statusUnknown || workload.stale) (machine.id, null),
   };
 
@@ -183,7 +181,7 @@ class _DispatchDialogState extends State<DispatchDialog> {
           children: [
             const Text(
               '提交后将执行真实抢票任务。相同任务可分发到多台机器，请留意重复订单并及时支付。'
-              '每台机器只提交一次，需要重新执行时请新建任务。',
+              '上次执行确认结束后可重新分发，重新分发会启动新一轮执行；已下单时请先核对订单。',
             ),
             const SizedBox(height: 12),
             Text(
@@ -205,7 +203,7 @@ class _DispatchDialogState extends State<DispatchDialog> {
                 key: ValueKey('dispatch-machine-${machine.id}'),
                 contentPadding: EdgeInsets.zero,
                 value: selected.any((m) => m.id == machine.id),
-                onChanged: _busy || _submitted(machine) || !_available(machine)
+                onChanged: _busy || _blocked(machine) || !_available(machine)
                     ? null
                     : (value) => setState(() {
                         if (value == true) {
@@ -219,10 +217,13 @@ class _DispatchDialogState extends State<DispatchDialog> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      _submitted(machine)
-                          ? '${machine.host}:${machine.port} · 已提交，不会重复执行'
+                      _blocked(machine)
+                          ? '${machine.host}:${machine.port} · 执行未结束或结果待确认'
                           : '${machine.host}:${machine.port}',
                     ),
+                    if (!_blocked(machine) &&
+                        _task.latestDispatch(machine.id) != null)
+                      const Text('上次执行已结束，可重新分发。'),
                     const SizedBox(height: 6),
                     if (!_available(machine))
                       const Text('部署尚未完成，暂不可分发任务。')

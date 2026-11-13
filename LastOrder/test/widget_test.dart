@@ -30,7 +30,7 @@ void main() {
       expect(find.text('暂无抢票任务'), findsOneWidget);
       await tester.tap(find.text('任务监控').first);
       await tester.pumpAndSettle();
-      expect(find.text('尚无执行记录'), findsOneWidget);
+      expect(find.text('暂无可显示的执行记录'), findsOneWidget);
     },
   );
   testWidgets('compact desktop navigation has no overflow', (tester) async {
@@ -238,7 +238,7 @@ void main() {
       find.byType(CheckboxListTile),
     );
     expect(tiles.map((t) => t.onChanged == null), [true, false]);
-    expect(find.text('node.example:20001 · 已提交，不会重复执行'), findsOneWidget);
+    expect(find.text('node.example:20001 · 执行未结束或结果待确认'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
   testWidgets('phone dialogs stay usable with the soft keyboard visible', (
@@ -649,6 +649,15 @@ void main() {
         tester.widget<TextField>(start).controller!.text,
         '2026-11-20 20:00:00',
       );
+      final interval = find.byWidgetPredicate(
+        (w) => w is TextField && w.decoration?.labelText == '抢票请求间隔（毫秒）',
+      );
+      expect(tester.widget<TextField>(interval).controller!.text, '1000');
+      expect(
+        tester.widget<TextField>(interval).keyboardType,
+        TextInputType.number,
+      );
+      expect(find.textContaining('每轮下单最多尝试 40 次'), findsOneWidget);
       await tester.tap(find.text('保存任务'));
       await tester.pumpAndSettle();
       expect(find.textContaining('请至少选择一位购票人'), findsOneWidget);
@@ -673,10 +682,22 @@ void main() {
       expect(find.textContaining('开售时间应为北京时间'), findsOneWidget);
       expect(runtime.calls, isNot(contains('build_config')));
       await tester.enterText(start, '2026-11-20 20:00');
+      for (final value in ['', '99', '60001', '100.5', 'abc']) {
+        await tester.ensureVisible(interval);
+        await tester.enterText(interval, value);
+        await tester.tap(find.text('保存任务'));
+        await tester.pumpAndSettle();
+        expect(find.text(requestIntervalError), findsOneWidget);
+        expect(runtime.calls, isNot(contains('build_config')));
+        expect(c.state.tasks, isEmpty);
+      }
+      await tester.ensureVisible(interval);
+      await tester.enterText(interval, '750');
       await tester.tap(find.text('保存任务'));
       await tester.pumpAndSettle();
       expect(c.state.tasks.single.name, '测试演出');
       expect(c.state.tasks.single.startAt, '2026-11-20T20:00:00');
+      expect(c.state.tasks.single.requestIntervalMs, 750);
       final summary = c.state.tasks.single.summary!;
       expect(summary.projectName, '测试演出');
       expect(summary.screenName, '周六晚场');

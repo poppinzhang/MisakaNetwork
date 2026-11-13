@@ -274,7 +274,7 @@ void main() {
     );
     c.dispose();
   });
-  test('redispatch of a terminal task reports existing result without inventing a new id', () async {
+  test('an immediate terminal response releases the first execution', () async {
     final gateway = FakeGateway()..submitState = TaskState.TASK_STATE_FAILED;
     final c = controller(gateway: gateway);
     await c.initialize(poll: false);
@@ -283,8 +283,10 @@ void main() {
     ], uid: '123');
     final t = await c.addTask('t', a, {});
     final errors = await c.dispatch(t, [machine('a')]);
-    expect(errors['节点 a'], contains('未重新执行'));
+    expect(errors, isEmpty);
     expect(gateway.submitted['a']?.id, t.id);
+    expect(c.activeDispatchCount(t), 0);
+    expect(c.state.tasks.single.latestDispatch('a')!.finished, isTrue);
     c.dispose();
   });
   test('sale start accepts only real Beijing date-times', () {
@@ -350,7 +352,7 @@ void main() {
       c.dispose();
     },
   );
-  test('a task is submitted to each machine at most once', () async {
+  test('unconfirmed executions cannot be submitted again', () async {
     final store = MemoryStore()
       ..state = SavedState(machines: [machine('a'), machine('b')]);
     // The fake keeps no task history, like a Sisters that restarted.
@@ -370,7 +372,7 @@ void main() {
     final errors = await c.dispatch(t, c.state.machines);
     expect(gateway.submitted.keys, ['b']);
     expect(errors.keys, ['节点 a']);
-    expect(errors['节点 a'], contains('新建任务'));
+    expect(errors['节点 a'], contains('状态待确认'));
     expect(store.state.tasks.single.dispatchedTo, ['a', 'b']);
     final checks = runtime.calls.length;
     final repeated = await c.dispatch(t, [machine('a')]);
@@ -394,30 +396,27 @@ void main() {
     expect(store.state.tasks.single.dispatchedTo, ['a']);
     final errors = await c.dispatch(t, [machine('a')]);
     expect(gateway.submitted, isEmpty);
-    expect(errors['节点 a'], contains('新建任务'));
+    expect(errors['节点 a'], contains('状态待确认'));
     c.dispose();
   });
-  test(
-    'an unsaved dispatch record is reported for accepted machines',
-    () async {
-      final store = MemoryStore();
-      final gateway = FakeGateway();
-      final c = controller(store: store, gateway: gateway);
-      await c.initialize(poll: false);
-      final a = await c.addAccount('a', [
-        {'name': 's', 'value': 'v'},
-      ], uid: '123');
-      final t = await c.addTask('t', a, {});
-      store.beforeSave = (next) async {
-        if (next.tasks.any((t) => t.dispatchedTo.isNotEmpty)) {
-          throw const UserError('写入失败');
-        }
-      };
-      final errors = await c.dispatch(t, [machine('a')]);
-      expect(gateway.submitted.keys, ['a']);
-      expect(errors['节点 a'], contains('请勿再次分发'));
-      expect(store.state.tasks.single.dispatchedTo, isEmpty);
-      c.dispose();
-    },
-  );
+  test('a failed intent save prevents submission', () async {
+    final store = MemoryStore();
+    final gateway = FakeGateway();
+    final c = controller(store: store, gateway: gateway);
+    await c.initialize(poll: false);
+    final a = await c.addAccount('a', [
+      {'name': 's', 'value': 'v'},
+    ], uid: '123');
+    final t = await c.addTask('t', a, {});
+    store.beforeSave = (next) async {
+      if (next.tasks.any((t) => t.dispatchedTo.isNotEmpty)) {
+        throw const UserError('写入失败');
+      }
+    };
+    final errors = await c.dispatch(t, [machine('a')]);
+    expect(gateway.submitted, isEmpty);
+    expect(errors['节点 a'], contains('写入失败'));
+    expect(store.state.tasks.single.dispatchedTo, isEmpty);
+    c.dispose();
+  });
 }

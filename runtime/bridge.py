@@ -22,6 +22,7 @@ from typing import Any, Callable
 VERSION = "0.2.3"
 BILI_VERSION = "2.15.18"
 MAX_REQUEST_BYTES = 4 * 1024 * 1024
+CREATE_RETRY_LIMIT = 40
 OPERATIONS = frozenset({"ping", "qr_start", "qr_poll", "payment_qr", "login_cookie", "login_state", "search", "purchase_context", "build_config", "validate", "run"})
 # Upstream stage labels mapped to the stable codes Sisters understands; any
 # other label becomes "working" so no upstream text crosses the protocol.
@@ -328,21 +329,20 @@ def run_task(params: dict[str, Any], engine: Any, emit: Callable[[dict], None]) 
     if not validation.ok:
         raise BridgeError("invalid_config", "任务配置不完整，请重新选择场次、购票人与收货地址")
     options = dict(require_object(params.get("runtime_options", {}), "runtime_options"))
-    # v0.1 accepts a small, explicit set; no credentials, notification channels,
+    # Accept only this explicit set; no credentials, notification channels,
     # arbitrary local file paths or extra background work enter the runtime.
-    if set(options) - {"interval", "time_start", "create_retry_limit", "wait_for_buy_button"}:
+    if set(options) - {"interval", "time_start", "wait_for_buy_button"}:
         raise BridgeError("invalid_request", "runtime_options 包含未支持的选项")
     interval = bounded_number(options, "interval", 1000, 100, 60000)
-    retries = bounded_number(options, "create_retry_limit", 20, 1, 100)
-    if int(interval) != interval or int(retries) != retries:
-        raise BridgeError("invalid_request", "interval 和 create_retry_limit 必须是整数")
+    if int(interval) != interval:
+        raise BridgeError("invalid_request", "interval 必须是整数")
     time_start = options.get("time_start", "")
     if not isinstance(time_start, str) or not isinstance(options.get("wait_for_buy_button", False), bool):
         raise BridgeError("invalid_request", "开始时间或购买按钮选项格式错误")
     if time_start and not valid_time_start(time_start):
         raise BridgeError("invalid_request", "开始时间必须是北京时间 YYYY-MM-DDTHH:MM:SS")
     runtime = engine.build_runtime_options(
-        interval=int(interval), create_retry_limit=int(retries),
+        interval=int(interval), create_retry_limit=CREATE_RETRY_LIMIT,
         time_start=time_start, wait_for_buy_button=options.get("wait_for_buy_button", False),
         show_qrcode=False, show_random_message=False, auto_open_payment_url=False,
         create_request_batch_size=1,

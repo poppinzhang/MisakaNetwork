@@ -11,8 +11,8 @@ class LoadedTask {
 }
 
 /// The workload shown before dispatch, using remote state whenever available.
-/// Historical local submissions alone do not imply work is still running
-/// after a successful status query (for example after a Sisters restart).
+/// Confirmed terminal executions never count as work. A submitted execution
+/// missing from remote history remains unconfirmed until its outcome is known.
 class MachineWorkload {
   MachineWorkload._({
     required List<LoadedTask> tasks,
@@ -26,7 +26,19 @@ class MachineWorkload {
     AgentStatus? status,
     bool connectionFailed = false,
   }) {
-    final localById = {for (final task in localTasks) task.id: task};
+    final localById = {
+      for (final task in localTasks) ...{
+        task.id: task,
+        for (final dispatch in task.dispatches)
+          if (dispatch.machineId == machineId) dispatch.executionId: task,
+      },
+    };
+    final finishedIds = {
+      for (final task in localTasks)
+        for (final dispatch in task.dispatches)
+          if (dispatch.machineId == machineId && dispatch.finished)
+            dispatch.executionId,
+    };
     final remoteById = {
       for (final task in status?.tasks ?? const <TaskStatus>[]) task.id: task,
     };
@@ -38,7 +50,8 @@ class MachineWorkload {
 
     final tasks = <LoadedTask>[
       for (final task in remoteById.values)
-        if (task.state != TaskState.TASK_STATE_SUCCEEDED &&
+        if (!finishedIds.contains(task.id) &&
+            task.state != TaskState.TASK_STATE_SUCCEEDED &&
             task.state != TaskState.TASK_STATE_FAILED &&
             task.state != TaskState.TASK_STATE_CANCELLED)
           LoadedTask(
@@ -46,11 +59,15 @@ class MachineWorkload {
             name: name(task.id, task.name),
             state: task.state,
           ),
-      if (status == null || connectionFailed)
-        for (final task in localById.values)
-          if (task.dispatchedTo.contains(machineId) &&
-              !remoteById.containsKey(task.id))
-            LoadedTask(id: task.id, name: name(task.id, ''), state: null),
+      for (final task in localTasks)
+        if (task.latestDispatch(machineId) case final dispatch?)
+          if (!dispatch.finished &&
+              !remoteById.containsKey(dispatch.executionId))
+            LoadedTask(
+              id: dispatch.executionId,
+              name: name(dispatch.executionId, ''),
+              state: null,
+            ),
     ];
     return MachineWorkload._(
       tasks: tasks,

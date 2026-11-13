@@ -68,7 +68,7 @@ Future<void> openCloudCreation(WidgetTester tester) async {
 
 Future<void> chooseTemplate(
   WidgetTester tester, {
-  CloudProvider provider = CloudProvider.tencent,
+  CloudProvider provider = CloudProvider.aliyun,
   String template = 'balanced',
 }) async {
   await tapVisible(tester, find.text('创建'));
@@ -241,7 +241,7 @@ void main() {
         find.byKey(const ValueKey('cloud-save-credential')),
       );
 
-      expect(find.text('凭证未能保存，请检查填写内容或系统安全存储后重试。'), findsOneWidget);
+      expect(find.textContaining('公有云信息无法保存'), findsOneWidget);
       expect(find.text('格式检查通过，已安全保存。云端身份与权限尚未验证。'), findsNothing);
       expect(store.secrets[CloudController.workspaceKey], original);
       final retained = c.cloud.credentialFor(CloudProvider.tencent)!;
@@ -269,10 +269,7 @@ void main() {
   testWidgets(
     'template confirmation immediately adds independent creating machines',
     (tester) async {
-      final c = await openCloudApp(
-        tester,
-        credentials: [CloudProvider.tencent],
-      );
+      final c = await openCloudApp(tester, credentials: [CloudProvider.aliyun]);
       await openCloudCreation(tester);
       await chooseTemplate(tester);
       await tapVisible(
@@ -308,10 +305,7 @@ void main() {
   testWidgets(
     'creation failure is visible and its failed machine can be deleted',
     (tester) async {
-      final c = await openCloudApp(
-        tester,
-        credentials: [CloudProvider.tencent],
-      );
+      final c = await openCloudApp(tester, credentials: [CloudProvider.aliyun]);
       await openCloudCreation(tester);
       await chooseTemplate(tester);
       await tapVisible(
@@ -337,13 +331,10 @@ void main() {
   testWidgets(
     'release requires confirmation and can be cancelled before previewing release',
     (tester) async {
-      final c = await openCloudApp(
-        tester,
-        credentials: [CloudProvider.tencent],
-      );
+      final c = await openCloudApp(tester, credentials: [CloudProvider.aliyun]);
       await c.cloud.startPreviewCreation(
-        CloudProvider.tencent,
-        CloudTemplate.forProvider(CloudProvider.tencent).first,
+        CloudProvider.aliyun,
+        CloudTemplate.forProvider(CloudProvider.aliyun).first,
       );
       await goToPage(tester, '机器管理');
       await advancePreview(tester);
@@ -374,9 +365,13 @@ void main() {
           width: 390,
           textScale: textScale,
           dark: true,
-          credentials: [CloudProvider.tencent],
+          credentials: [CloudProvider.aliyun],
         );
         await goToPage(tester, '公有云部署');
+        await tapVisible(
+          tester,
+          find.byKey(const ValueKey('cloud-provider-aliyun')),
+        );
         expect(find.byType(CloudCredentialsPage), findsOneWidget);
         expect(tester.takeException(), isNull);
         await tapVisible(tester, find.text('去创建云服务器'));

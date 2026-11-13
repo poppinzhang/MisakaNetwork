@@ -197,7 +197,7 @@ void main() {
     for (final entry in [
       ('机器管理', '还没有 Sisters'),
       ('账号与任务', '还没有登录账号'),
-      ('任务监控', '尚无执行记录'),
+      ('任务监控', '暂无可显示的执行记录'),
     ]) {
       await tester.tap(find.text(entry.$1).first);
       await tester.pumpAndSettle();

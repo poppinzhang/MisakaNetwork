@@ -419,12 +419,39 @@ class BridgeTests(unittest.TestCase):
                 self.assertEqual(events[-1]["error"]["code"], "invalid_request")
                 self.assertEqual(self.built_options, [])
 
+    def test_run_interval_defaults_and_bounds_keep_fixed_attempt_limit(self):
+        for options, expected in ((None, 1000), ({"interval": 100}, 100), ({"interval": 1250}, 1250), ({"interval": 60000}, 60000)):
+            with self.subTest(options=options):
+                code, _ = self.run_stream(lambda: iter([]), runtime_options=options)
+                self.assertEqual(code, 0)
+                self.assertEqual(self.built_options[-1]["interval"], expected)
+                self.assertEqual(self.built_options[-1]["create_retry_limit"], 40)
+                self.assertEqual(self.built_options[-1]["create_request_batch_size"], 1)
+
+    def test_run_rejects_invalid_interval_before_starting_task(self):
+        for value in (True, False, None, "1000", [], {}, -1, 0, 99, 60001, 100.5, float("nan"), float("inf")):
+            with self.subTest(value=value):
+                code, events = self.run_stream(lambda: iter([]), runtime_options={"interval": value})
+                self.assertEqual(code, 1)
+                self.assertEqual(events[-1]["error"]["code"], "invalid_request")
+                self.assertEqual(self.built_options, [])
+
+    def test_run_rejects_attempt_limit_override(self):
+        for value in (1, 20, 40, 100, None):
+            with self.subTest(value=value):
+                code, events = self.run_stream(lambda: iter([]), runtime_options={"create_retry_limit": value})
+                self.assertEqual(code, 1)
+                self.assertEqual(events[-1]["error"]["code"], "invalid_request")
+                self.assertEqual(self.built_options, [])
+
     def test_run_rejects_notification_options(self):
-        engine = SimpleNamespace(validate_config=lambda c: validation(True, c))
-        code, events = self.invoke({"op": "run", "params": {"config": {}, "cookies": {"a": "b"}, "runtime_options": {"audio_path": "secret-path"}}}, engine)
-        self.assertEqual(code, 1)
-        self.assertEqual(events[-1]["error"]["code"], "invalid_request")
-        self.assertNotIn("secret-path", json.dumps(events))
+        for option in ("audio_path", "pushplusToken", "serverchanKey", "serverchan3ApiUrl", "barkToken", "meowNickname", "ntfy_url", "ntfy_username", "ntfy_password", "telegram_bot_token", "telegram_chat_id", "telegram_http_proxy", "notify_proxy_exhausted", "create_request_proxy_strategy", "create_request_batch_size", "https_proxys", "proxy_api_url", "share"):
+            with self.subTest(option=option):
+                code, events = self.run_stream(lambda: iter([]), runtime_options={option: "synthetic-secret"})
+                self.assertEqual(code, 1)
+                self.assertEqual(events[-1]["error"]["code"], "invalid_request")
+                self.assertEqual(self.built_options, [])
+                self.assertNotIn("synthetic-secret", json.dumps(events))
 
     def test_cancel_produces_terminal_result(self):
         def cancel(*a, **kw):
@@ -495,6 +522,24 @@ class SourceIntegrityTests(unittest.TestCase):
         table = next(node.value for node in ast.parse(source).body if isinstance(node, ast.AnnAssign) and getattr(node.target, "id", None) == "CREATE_ORDER_TERMINAL_RULES")
         statuses = {ast.literal_eval(key): next(ast.literal_eval(item.value) for item in value.keywords if item.arg == "status") for key, value in zip(table.keys, table.values)}
         self.assertEqual(statuses, dict.fromkeys(bridge.EXISTING_ORDER_ERRNOS, "completed"))
+
+    def test_embedded_sources_and_dependencies_exclude_upstream_web_ui(self):
+        vendor = ROOT / "vendor" / "biliTickerBuy"
+        self.assertNotIn("app_ui", vendor_bili.PACKAGES)
+        for path in vendor.rglob("*"):
+            if not path.is_file() or "__pycache__" in path.parts:
+                continue
+            self.assertNotIn(path.name.lower(), {"dockerfile", "docker-compose.yml", "main.py"})
+            if path.suffix == ".py":
+                imports = set()
+                for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+                    if isinstance(node, ast.Import):
+                        imports.update(alias.name.split(".")[0] for alias in node.names)
+                    elif isinstance(node, ast.ImportFrom) and node.module:
+                        imports.add(node.module.split(".")[0])
+                self.assertFalse(imports & {"gradio", "app_ui"}, path.relative_to(vendor))
+        for path in ROOT.glob("requirements*.lock"):
+            self.assertNotRegex(path.read_text(encoding="utf-8"), r"(?im)^gradio(?:[-=]|$)")
 
     def test_stage_codes_cover_every_upstream_stage(self):
         # Review STAGE_CODES (and Sisters' messages) whenever the vendored engine names a new stage.

@@ -23,6 +23,7 @@ TicketTask sampleTask(
   'name': longText ? '非常长的任务名称用于检查双列布局中的完整换行与操作可见性' : '同名任务',
   'accountId': accountId,
   'startAt': '2026-12-01T20:00:00',
+  'requestIntervalMs': 750,
   'dispatchedTo': ['machine-a', 'machine-b'],
   if (summary)
     'summary': {
@@ -228,7 +229,8 @@ void main() {
           '2026-12-20',
           '2 张',
           '2026-12-01 20:00:00',
-          '已分发',
+          '750 毫秒',
+          '未结束',
         ]) {
           expect(inside(card, value), findsWidgets);
         }
@@ -236,6 +238,83 @@ void main() {
       expect(inside(taskCard('task-c'), '未记录场次与票档信息'), findsOneWidget);
       expect(inside(taskCard('task-c'), '账号已移除'), findsOneWidget);
       expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'task counts release only machines whose executions have finished',
+    (tester) async {
+      final fixture = await openTaskPage(tester, page: '账号与任务');
+      final card = taskCard('task-a');
+      expect(inside(card, '未结束 2 台'), findsOneWidget);
+
+      fixture.gateway.snapshots['machine-a']!.tasks.first.state =
+          TaskState.TASK_STATE_SUCCEEDED;
+      await fixture.controller.refresh();
+      await tester.pumpAndSettle();
+      expect(inside(card, '未结束 1 台'), findsOneWidget);
+
+      await fixture.controller.cancel(machine('machine-b'), 'task-a');
+      await tester.pumpAndSettle();
+      expect(inside(card, '未结束 0 台'), findsOneWidget);
+      expect(inside(card, '分发'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'monitor joins repeated execution IDs and stops the selected execution',
+    (tester) async {
+      final fixture = await openTaskPage(tester, page: '任务监控');
+      final state = fixture.controller.state;
+      fixture.controller.state = SavedState(
+        machines: state.machines,
+        accounts: state.accounts,
+        tasks: [
+          for (final task in state.tasks)
+            task.id == 'task-a'
+                ? task.withDispatches([
+                    const TaskDispatch(
+                      machineId: 'machine-a',
+                      executionId: 'task-a',
+                      finished: true,
+                    ),
+                    const TaskDispatch(
+                      machineId: 'machine-a',
+                      executionId: 'repeat-execution',
+                    ),
+                  ])
+                : task,
+        ],
+      );
+      fixture.gateway.snapshots['machine-a']!.tasks.first.state =
+          TaskState.TASK_STATE_SUCCEEDED;
+      fixture.gateway.snapshots['machine-a']!.tasks.add(
+        TaskStatus(
+          id: 'repeat-execution',
+          name: '同名任务',
+          state: TaskState.TASK_STATE_RUNNING,
+        ),
+      );
+      await fixture.controller.refresh();
+      await tester.pumpAndSettle();
+
+      final repeated = monitorCard('machine-a', 'repeat-execution');
+      expect(inside(repeated, '账号甲'), findsOneWidget);
+      expect(inside(repeated, '晚场 task-a'), findsOneWidget);
+      expect(inside(repeated, '本地任务已移除'), findsNothing);
+      final stop = inside(repeated, '停止');
+      await tester.ensureVisible(stop);
+      await tester.tap(stop);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('确认'));
+      await tester.pumpAndSettle();
+      expect(fixture.gateway.cancelled, ['machine-a:repeat-execution']);
+      expect(inside(repeated, '已停止'), findsOneWidget);
+      expect(inside(monitorCard('machine-b', 'task-a'), '执行中'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await tester.pump(const Duration(seconds: 7));
+      await tester.pumpAndSettle();
     },
   );
 

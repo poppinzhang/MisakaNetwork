@@ -102,6 +102,12 @@ abstract class AgentGateway {
   Future<TaskStatus> cancel(Machine machine, String id);
 }
 
+/// The server explicitly rejected a submission before accepting the task.
+/// Transport failures and ambiguous outcomes must keep their submission intent.
+class TaskSubmissionRejected extends UserError {
+  const TaskSubmissionRejected(super.message);
+}
+
 class MutualTlsCredentials extends ChannelCredentials {
   MutualTlsCredentials(this.ca, this.cert, this.key, String name)
     : super.secure(authority: name);
@@ -158,7 +164,11 @@ class GrpcGateway implements AgentGateway {
   /// drops its connection after grpc's idle timeout.
   final _channels = <String, Future<ClientChannel>>{};
 
-  Future<T> _call<T>(Machine m, Future<T> Function(SistersClient c) fn) async {
+  Future<T> _call<T>(
+    Machine m,
+    Future<T> Function(SistersClient c) fn, {
+    bool submission = false,
+  }) async {
     final key = jsonEncode([
       m.host,
       m.port,
@@ -180,6 +190,19 @@ class GrpcGateway implements AgentGateway {
       if (identical(_channels[key], opening)) _channels.remove(key);
       throw const UserError('无法读取 mTLS 证书或私钥，请检查配置。');
     } on GrpcError catch (e) {
+      // These codes mean SubmitTask refused to accept this execution. In
+      // particular, UNAVAILABLE may be a lost response after acceptance, and
+      // ALREADY_EXISTS refers to an execution whose outcome is still unknown.
+      if (submission &&
+          const {
+            StatusCode.invalidArgument,
+            StatusCode.resourceExhausted,
+            StatusCode.failedPrecondition,
+            StatusCode.permissionDenied,
+            StatusCode.unauthenticated,
+          }.contains(e.code)) {
+        throw TaskSubmissionRejected(describeGrpcFailure(e));
+      }
       throw UserError(describeGrpcFailure(e));
     } on TlsException {
       throw const UserError('TLS 验证失败，请检查证书、主机名和系统时间。');
@@ -191,7 +214,7 @@ class GrpcGateway implements AgentGateway {
       _call(m, (c) => c.getStatus(Empty()));
   @override
   Future<TaskStatus> submit(Machine m, TaskRequest task) =>
-      _call(m, (c) => c.submitTask(task));
+      _call(m, (c) => c.submitTask(task), submission: true);
   @override
   Future<TaskStatus> cancel(Machine m, String id) =>
       _call(m, (c) => c.cancelTask(TaskId(id: id)));

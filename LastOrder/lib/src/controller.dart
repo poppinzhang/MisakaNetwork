@@ -10,6 +10,7 @@ import '../generated/misaka/v1/sisters.pbgrpc.dart';
 import 'models.dart';
 import 'services.dart';
 import 'cloud_controller.dart';
+import 'cloud_models.dart';
 
 enum DeploymentPhase { deploying, awaitingConfirmation, failed, succeeded }
 
@@ -64,8 +65,13 @@ class AppController extends ChangeNotifier {
     required this.gateway,
     required this.runtime,
     required this.helper,
+    Future<List<CloudTemplate>> Function()? cloudTemplateLoader,
   }) {
-    cloud = CloudController(store: store, helper: helper)..addListener(_notify);
+    cloud = CloudController(
+      store: store,
+      helper: helper,
+      templateLoader: cloudTemplateLoader,
+    )..addListener(_notify);
   }
   final StateStore store;
   late final CloudController cloud;
@@ -97,6 +103,169 @@ class AppController extends ChangeNotifier {
   final Map<String, Future<void>> _accountOperations = {};
   Future<void> _stateOperation = Future<void>.value();
   Future<void>? _refreshOperation;
+  final Set<(String, String)> _dispatching = {};
+
+  static bool _terminal(TaskState state) =>
+      state == TaskState.TASK_STATE_SUCCEEDED ||
+      state == TaskState.TASK_STATE_FAILED ||
+      state == TaskState.TASK_STATE_CANCELLED;
+
+  bool _unfinishedDispatch(TicketTask task, String machineId) {
+    final dispatch = task.latestDispatch(machineId);
+    if (dispatch?.finished == true) return false;
+    final remote = statuses[machineId]?.tasks
+        .where((t) => t.id == (dispatch?.executionId ?? task.id))
+        .firstOrNull;
+    if (remote != null) return !_terminal(remote.state);
+    return dispatch != null;
+  }
+
+  bool isDispatchBlocked(TicketTask task, String machineId) =>
+      _dispatching.contains((task.id, machineId)) ||
+      _unfinishedDispatch(
+        state.tasks.where((t) => t.id == task.id).firstOrNull ?? task,
+        machineId,
+      );
+
+  int activeDispatchCount(TicketTask task) {
+    final current =
+        state.tasks.where((t) => t.id == task.id).firstOrNull ?? task;
+    return {
+      ...current.dispatchedTo,
+      ...state.machines.map((m) => m.id),
+      for (final (taskId, machineId) in _dispatching)
+        if (taskId == task.id) machineId,
+    }.where((id) => isDispatchBlocked(current, id)).length;
+  }
+
+  bool canClearExecution(TaskStatus status) => _terminal(status.state);
+
+  bool isExecutionCleared(String machineId, TaskStatus status) =>
+      canClearExecution(status) &&
+      state.isExecutionCleared(machineId, status.id, status.state.name);
+
+  Future<void> clearExecution(Machine machine, TaskStatus snapshot) async {
+    final executionId = snapshot.id;
+    final expectedState = snapshot.state;
+    if (!_terminal(expectedState)) {
+      throw const UserError('只能清除已结束的执行记录。');
+    }
+    await _save(() {
+      if (!state.machines.any((m) => m.id == machine.id)) {
+        throw const UserError('机器已被移除，请刷新任务监控。');
+      }
+      final current = statuses[machine.id]?.tasks
+          .where((t) => t.id == executionId)
+          .firstOrNull;
+      if (current == null || current.state != expectedState) {
+        throw const UserError('执行状态已更新，请核对最新结果后再清除。');
+      }
+      return _withClearedExecutions([
+        ClearedExecution(
+          machineId: machine.id,
+          executionId: executionId,
+          state: expectedState.name,
+        ),
+      ]);
+    });
+  }
+
+  Future<int> clearFinishedExecutions() async {
+    // Snapshot what the user can see before waiting for any other save.
+    final candidates = [
+      for (final machine in state.machines)
+        for (final execution in statuses[machine.id]?.tasks ?? <TaskStatus>[])
+          if (canClearExecution(execution) &&
+              !isExecutionCleared(machine.id, execution))
+            ClearedExecution(
+              machineId: machine.id,
+              executionId: execution.id,
+              state: execution.state.name,
+            ),
+    ];
+    if (candidates.isEmpty) return 0;
+    var count = 0;
+    await _save(() {
+      final current = {
+        for (final machine in state.machines)
+          for (final execution in statuses[machine.id]?.tasks ?? <TaskStatus>[])
+            (machine.id, execution.id): execution.state.name,
+      };
+      final unchanged = {
+        for (final record in candidates)
+          if (current[(record.machineId, record.executionId)] == record.state &&
+              !state.isExecutionCleared(
+                record.machineId,
+                record.executionId,
+                record.state,
+              ))
+            (record.machineId, record.executionId): record,
+      };
+      count = unchanged.length;
+      return _withClearedExecutions(unchanged.values.toList());
+    });
+    return count;
+  }
+
+  SavedState _withClearedExecutions(List<ClearedExecution> records) {
+    final keys = {
+      for (final record in records) (record.machineId, record.executionId),
+    };
+    return _next(
+      // Keep dispatch acknowledgements even if an earlier poll could not save.
+      // Clearing cards must never reopen their old execution IDs.
+      tasks: [
+        for (final task in state.tasks)
+          task.withDispatches([
+            for (final record in records)
+              if (task.ownsExecution(record.machineId, record.executionId))
+                TaskDispatch(
+                  machineId: record.machineId,
+                  executionId: record.executionId,
+                  finished: true,
+                ),
+          ]),
+      ],
+      clearedExecutions: [
+        for (final record in state.clearedExecutions)
+          if (!keys.contains((record.machineId, record.executionId))) record,
+        ...records,
+      ],
+    );
+  }
+
+  void _cacheStatus(String machineId, AgentStatus incoming) {
+    incoming = AgentStatus.fromBuffer(incoming.writeToBuffer());
+    final previous = statuses[machineId];
+    // A poll started before cancellation must not resurrect a completed run.
+    for (var i = 0; i < incoming.tasks.length; i++) {
+      final newer = previous?.tasks
+          .where((t) => t.id == incoming.tasks[i].id && _terminal(t.state))
+          .firstOrNull;
+      if (newer != null &&
+          (!_terminal(incoming.tasks[i].state) ||
+              (newer.state == TaskState.TASK_STATE_SUCCEEDED &&
+                  incoming.tasks[i].state != TaskState.TASK_STATE_SUCCEEDED))) {
+        incoming.tasks[i] = newer;
+      }
+    }
+    statuses[machineId] = incoming;
+  }
+
+  void _cacheTaskStatus(String machineId, TaskStatus task) {
+    final next = AgentStatus.fromBuffer(
+      (statuses[machineId] ?? AgentStatus()).writeToBuffer(),
+    );
+    final index = next.tasks.indexWhere((t) => t.id == task.id);
+    if (index < 0) {
+      next.tasks.add(task);
+    } else {
+      next.tasks[index] = task;
+    }
+    _cacheStatus(machineId, next);
+    _notify();
+  }
+
   Future<void> initialize({bool poll = true}) async {
     try {
       state = await store.load();
@@ -203,11 +372,13 @@ class AppController extends ChangeNotifier {
     List<Machine>? machines,
     List<Account>? accounts,
     List<TicketTask>? tasks,
+    List<ClearedExecution>? clearedExecutions,
     AppThemeMode? themeMode,
   }) => SavedState(
     machines: machines ?? state.machines,
     accounts: accounts ?? state.accounts,
     tasks: tasks ?? state.tasks,
+    clearedExecutions: clearedExecutions ?? state.clearedExecutions,
     themeMode: themeMode ?? state.themeMode,
   );
 
@@ -296,6 +467,9 @@ class AppController extends ChangeNotifier {
       }
       return _next(
         machines: state.machines.where((e) => e.id != machine.id).toList(),
+        clearedExecutions: state.clearedExecutions
+            .where((record) => record.machineId != machine.id)
+            .toList(),
       );
     });
     await _pruneCredentials();
@@ -356,7 +530,7 @@ class AppController extends ChangeNotifier {
                 isDeploying(m.id)) {
               return;
             }
-            statuses[m.id] = s;
+            _cacheStatus(m.id, s);
             connectionErrors.remove(m.id);
             lastSeen[m.id] = DateTime.now();
           } catch (e) {
@@ -368,14 +542,8 @@ class AppController extends ChangeNotifier {
         }),
       );
       // Also covers submissions whose response was lost before it was recorded.
-      final held = <String, Set<String>>{};
-      for (final m in state.machines) {
-        for (final t in statuses[m.id]?.tasks ?? const <TaskStatus>[]) {
-          (held[t.id] ??= {}).add(m.id);
-        }
-      }
       try {
-        if (!disposed) await _recordDispatches(held);
+        if (!disposed) await _recordDispatches();
       } catch (_) {
         // Retried on the next poll; dispatch reports its own recording failures.
       }
@@ -386,19 +554,34 @@ class AppController extends ChangeNotifier {
     }
   }
 
-  /// Persists the machines known to hold each task, so dispatch never submits
-  /// the task to them again.
-  Future<void> _recordDispatches(
-    Map<String, Set<String>> machinesByTask,
-  ) async {
-    bool unrecorded(TicketTask t) => (machinesByTask[t.id] ?? const <String>{})
-        .any((id) => !t.dispatchedTo.contains(id));
-    if (!state.tasks.any(unrecorded)) return;
+  /// Persist terminal acknowledgements separately from the remote history,
+  /// which disappears when Sisters restarts or evicts a completed execution.
+  Future<void> _recordDispatches() async {
+    List<TaskDispatch> updates(TicketTask task) => [
+      for (final entry in statuses.entries)
+        for (final remote in entry.value.tasks)
+          if (task.ownsExecution(entry.key, remote.id) &&
+              !task.dispatches.any(
+                (d) =>
+                    d.machineId == entry.key &&
+                    d.executionId == remote.id &&
+                    (d.finished || !_terminal(remote.state)),
+              ))
+            TaskDispatch(
+              machineId: entry.key,
+              executionId: remote.id,
+              finished: _terminal(remote.state),
+            ),
+    ];
+    // Capture acknowledgements now: a different poll may omit the record
+    // while this save waits behind another local state operation.
+    final observed = {for (final task in state.tasks) task.id: updates(task)};
+    if (!observed.values.any((value) => value.isNotEmpty)) return;
     await _save(
       () => _next(
         tasks: [
           for (final t in state.tasks)
-            unrecorded(t) ? t.withDispatched(machinesByTask[t.id]!) : t,
+            t.withDispatches(observed[t.id] ?? const []),
         ],
       ),
     );
@@ -720,11 +903,13 @@ class AppController extends ChangeNotifier {
     Account account,
     Map<String, dynamic> config, {
     String startAt = '',
+    int requestIntervalMs = defaultRequestIntervalMs,
     TaskSummary? summary,
   }) => _forAccount(account.id, () async {
     final current = _requireAccount(account.id);
     if (name.trim().isEmpty) throw const UserError('请填写任务名称。');
     final start = normalizeStartAt(startAt);
+    validateRequestIntervalMs(requestIntervalMs);
     if (current.authStatus != AccountAuthStatus.valid) {
       throw const UserError('账号未处于有效登录状态，请先检查或重新登录。');
     }
@@ -744,6 +929,7 @@ class AppController extends ChangeNotifier {
       name: name.trim(),
       accountId: current.id,
       startAt: start,
+      requestIntervalMs: requestIntervalMs,
       summary: summary,
     );
     await store.writeSecret('task.${task.id}', jsonEncode(clean));
@@ -774,8 +960,6 @@ class AppController extends ChangeNotifier {
   ) async {
     if (machines.isEmpty) throw const UserError('请至少选择一台 Sisters。');
     final errors = <String, String>{};
-    // Sisters forgets accepted task IDs when it restarts or evicts history, so
-    // resubmitting the same ID could run the task, and place orders, again.
     final saved = _requireTask(task.id);
     final pending = <Machine>[];
     final revisions = {
@@ -790,101 +974,179 @@ class AppController extends ChangeNotifier {
           !machine.canConnect ||
           (current != null && !current.canConnect)) {
         errors[machine.name] = '该机器部署尚未完成，请部署成功后再分发任务。';
-      } else if (saved.dispatchedTo.contains(machine.id)) {
-        errors[machine.name] = '此任务已提交到该机器，为避免重复执行不会再次提交。如需重新执行，请新建任务。';
+      } else if (isDispatchBlocked(saved, machine.id)) {
+        errors[machine.name] = '此任务在该机器上的执行尚未结束或状态待确认，请刷新状态后再分发。';
       } else {
+        // Reserve before any await, including account checks and local saves.
+        _dispatching.add((task.id, machine.id));
         pending.add(machine);
       }
     }
     if (pending.isEmpty) return errors;
-    final account = _requireAccount(task.accountId);
-    await ensureAccountValid(account);
-    final (cookie, config, revision) = await _forAccount(account.id, () async {
-      final current = _requireAccount(account.id);
-      if (current.authStatus != AccountAuthStatus.valid) {
-        throw const UserError('账号状态已变化，请重新检查后分发。');
-      }
-      final revision = _credentialRevisions[account.id] ?? 0;
-      final raw = await store.readSecret('account.${account.id}');
-      if (raw == null) throw const UserError('登录凭据不存在，请重新登录。');
-      final stored = await store.readSecret('task.${task.id}');
-      if (stored == null) throw const UserError('安全存储中没有任务配置，请重新创建任务。');
-      return (
-        jsonDecode(raw) as List<dynamic>,
-        jsonEncode(_configWithoutCookies(stored)),
-        revision,
-      );
-    });
-    void requireUnchanged() {
-      if (revision != (_credentialRevisions[account.id] ?? 0) ||
-          _account(account.id)?.authStatus != AccountAuthStatus.valid) {
-        throw const UserError('账号凭据或登录状态已变化，本次未继续分发，请重新检查后重试。');
-      }
-    }
-
-    requireUnchanged();
-    void requireMachineReady(Machine machine) {
-      if (revisions[machine.id] != (_deploymentRevisions[machine.id] ?? 0)) {
-        throw const UserError('该机器的部署状态已变化，请重新选择后再分发任务。');
-      }
-      final current = state.machines
-          .where((m) => m.id == machine.id)
-          .firstOrNull;
-      if (isDeploying(machine.id) ||
-          !machine.canConnect ||
-          (current != null && !current.canConnect)) {
-        throw const UserError('该机器部署尚未完成，请部署成功后再分发任务。');
-      }
-    }
-
-    final accepted = <String>{};
-    await Future.wait(
-      pending.map((machine) async {
-        try {
-          requireUnchanged();
-          requireMachineReady(machine);
-          // An older agent would drop time_start and start buying immediately.
-          if (saved.startAt.isNotEmpty &&
-              !(await gateway.status(machine)).supportsTimeStart) {
-            errors[machine.name] = '该机器上的 Sisters 不支持开售时间，请重新部署后再分发，以免立即开始抢票。';
-            return;
-          }
-          requireUnchanged();
-          requireMachineReady(machine);
-          final result = await gateway.submit(
-            machine,
-            TaskRequest(
-              id: task.id,
-              name: task.name,
-              cookieJson: jsonEncode(cookie),
-              configJson: config,
-              timeStart: saved.startAt,
-            ),
-          );
-          accepted.add(machine.id);
-          if (result.state == TaskState.TASK_STATE_SUCCEEDED ||
-              result.state == TaskState.TASK_STATE_FAILED ||
-              result.state == TaskState.TASK_STATE_CANCELLED) {
-            errors[machine.name] = '此任务已有执行结果，本次未重新执行。请新建任务后重试。';
-          }
-        } catch (e) {
-          errors[machine.name] = readableError(e);
-        }
-      }),
-    );
+    _notify();
     try {
-      await _recordDispatches({task.id: accepted});
-    } catch (_) {
-      for (final machine in pending.where((m) => accepted.contains(m.id))) {
-        errors[machine.name] = '已提交，但本地分发记录未能保存。Sisters 重启后请勿再次分发此任务，以免重复执行。';
+      final account = _requireAccount(saved.accountId);
+      await ensureAccountValid(account);
+      final (cookie, config, revision) = await _forAccount(
+        account.id,
+        () async {
+          final current = _requireAccount(account.id);
+          if (current.authStatus != AccountAuthStatus.valid) {
+            throw const UserError('账号状态已变化，请重新检查后分发。');
+          }
+          final revision = _credentialRevisions[account.id] ?? 0;
+          final raw = await store.readSecret('account.${account.id}');
+          if (raw == null) throw const UserError('登录凭据不存在，请重新登录。');
+          final stored = await store.readSecret('task.${task.id}');
+          if (stored == null) throw const UserError('安全存储中没有任务配置，请重新创建任务。');
+          return (
+            jsonDecode(raw) as List<dynamic>,
+            jsonEncode(_configWithoutCookies(stored)),
+            revision,
+          );
+        },
+      );
+      void requireUnchanged() {
+        if (revision != (_credentialRevisions[account.id] ?? 0) ||
+            _account(account.id)?.authStatus != AccountAuthStatus.valid) {
+          throw const UserError('账号凭据或登录状态已变化，本次未继续分发，请重新检查后重试。');
+        }
       }
+
+      void requireMachineReady(Machine machine) {
+        if (revisions[machine.id] != (_deploymentRevisions[machine.id] ?? 0)) {
+          throw const UserError('该机器的部署状态已变化，请重新选择后再分发任务。');
+        }
+        final current = state.machines
+            .where((m) => m.id == machine.id)
+            .firstOrNull;
+        if (isDeploying(machine.id) ||
+            !machine.canConnect ||
+            (current != null && !current.canConnect)) {
+          throw const UserError('该机器部署尚未完成，请部署成功后再分发任务。');
+        }
+      }
+
+      requireUnchanged();
+      await Future.wait(
+        pending.map((machine) async {
+          String? executionId;
+          var reserved = false, sent = false;
+          try {
+            requireUnchanged();
+            requireMachineReady(machine);
+            final capabilities = await gateway.status(machine);
+            requireUnchanged();
+            requireMachineReady(machine);
+            _cacheStatus(machine.id, capabilities);
+            connectionErrors.remove(machine.id);
+            lastSeen[machine.id] = DateTime.now();
+            await _recordDispatches();
+            // Older agents silently drop unknown request fields.
+            if (saved.startAt.isNotEmpty && !capabilities.supportsTimeStart) {
+              throw const UserError(
+                '该机器上的 Sisters 不支持开售时间，请重新部署后再分发，以免立即开始抢票。',
+              );
+            }
+            if (!capabilities.supportsRequestInterval) {
+              throw const UserError('该机器上的 Sisters 不支持抢票请求间隔设置，请重新部署后再分发。');
+            }
+            await _save(() {
+              requireUnchanged();
+              requireMachineReady(machine);
+              final current = _requireTask(task.id);
+              if (_unfinishedDispatch(current, machine.id)) {
+                throw const UserError('此任务在该机器上的执行尚未结束或状态待确认，请刷新状态后再分发。');
+              }
+              // The first execution uses the configuration ID; every later
+              // execution has a new ID so Sisters cannot return an old result.
+              executionId = current.latestDispatch(machine.id) == null
+                  ? current.id
+                  : const Uuid().v4();
+              return _next(
+                tasks: [
+                  for (final t in state.tasks)
+                    if (t.id == task.id)
+                      t.withDispatches([
+                        TaskDispatch(
+                          machineId: machine.id,
+                          executionId: executionId!,
+                        ),
+                      ])
+                    else
+                      t,
+                ],
+              );
+            });
+            reserved = true;
+            requireUnchanged();
+            requireMachineReady(machine);
+            _requireTask(task.id);
+            sent = true;
+            final result = await gateway.submit(
+              machine,
+              TaskRequest(
+                id: executionId,
+                name: saved.name,
+                cookieJson: jsonEncode(cookie),
+                configJson: config,
+                timeStart: saved.startAt,
+                requestIntervalMs: saved.requestIntervalMs,
+              ),
+            );
+            if (result.id != executionId) {
+              throw const UserError('Sisters 返回了不匹配的执行记录，请刷新并核对任务状态。');
+            }
+            requireMachineReady(machine);
+            _cacheTaskStatus(machine.id, result);
+            await _recordDispatches();
+          } catch (e) {
+            errors[machine.name] = readableError(e);
+            if (reserved && (!sent || e is TaskSubmissionRejected)) {
+              // No execution was accepted. A network/response failure is not
+              // enough evidence to roll this intent back.
+              try {
+                await _save(
+                  () => _next(
+                    tasks: [
+                      for (final t in state.tasks)
+                        t.id == task.id
+                            ? t.withoutDispatch(machine.id, executionId!)
+                            : t,
+                    ],
+                  ),
+                );
+              } catch (_) {
+                errors[machine.name] = '任务未提交，但本地分发记录未能清理，请检查存储后重试。';
+              }
+            } else if (reserved && sent) {
+              errors[machine.name] =
+                  '${readableError(e)} 执行结果未确认，请刷新状态核对；不会自动重复提交。';
+            }
+          }
+        }),
+      );
+      await refresh();
+      return errors;
+    } finally {
+      for (final machine in pending) {
+        _dispatching.remove((task.id, machine.id));
+      }
+      _notify();
     }
-    await refresh();
-    return errors;
   }
 
   Future<void> cancel(Machine m, String id) async {
-    await gateway.cancel(m, id);
+    final revision = _deploymentRevisions[m.id] ?? 0;
+    final result = await gateway.cancel(m, id);
+    if (revision != (_deploymentRevisions[m.id] ?? 0) || isDeploying(m.id)) {
+      return;
+    }
+    if (result.id != id) {
+      throw const UserError('Sisters 返回了不匹配的执行记录，请刷新并核对任务状态。');
+    }
+    _cacheTaskStatus(m.id, result);
+    await _recordDispatches();
     await refresh();
   }
 

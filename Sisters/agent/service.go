@@ -114,7 +114,7 @@ func (s *Service) GetStatus(ctx context.Context, _ *pb.Empty) (*pb.AgentStatus, 
 	if s.closed {
 		return nil, status.Error(codes.Unavailable, "agent is shutting down")
 	}
-	out := &pb.AgentStatus{Version: Version, BiliVersion: version, Platform: runtime.GOOS + "/" + runtime.GOARCH, StartedUnixMs: s.started, MaxConcurrency: int32(s.config.MaxConcurrency), RuntimeReady: ready, SupportsTimeStart: true}
+	out := &pb.AgentStatus{Version: Version, BiliVersion: version, Platform: runtime.GOOS + "/" + runtime.GOARCH, StartedUnixMs: s.started, MaxConcurrency: int32(s.config.MaxConcurrency), RuntimeReady: ready, SupportsTimeStart: true, SupportsRequestInterval: true}
 	for _, id := range s.order {
 		out.Tasks = append(out.Tasks, snapshot(s.tasks[id]))
 	}
@@ -127,12 +127,13 @@ var taskID = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$`)
 const timeStartLayout = "2006-01-02T15:04:05"
 
 type runOptions struct {
-	TimeStart string `json:"time_start"`
+	TimeStart string `json:"time_start,omitempty"`
+	Interval  int32  `json:"interval"`
 }
 type runParams struct {
 	Cookies json.RawMessage `json:"cookies"`
 	Config  json.RawMessage `json:"config"`
-	Options *runOptions     `json:"runtime_options,omitempty"`
+	Options runOptions      `json:"runtime_options"`
 }
 
 func validateRequest(req *pb.TaskRequest) ([]byte, [32]byte, error) {
@@ -153,13 +154,20 @@ func validateRequest(req *pb.TaskRequest) ([]byte, [32]byte, error) {
 	if len(config) < 2 || config[0] != '{' || !json.Valid([]byte(config)) {
 		return nil, [32]byte{}, errors.New("config must be a JSON object")
 	}
-	params := runParams{Cookies: json.RawMessage(cookie), Config: json.RawMessage(config)}
+	interval := req.RequestIntervalMs
+	if interval == 0 {
+		interval = 1000
+	}
+	if interval < 100 || interval > 60000 {
+		return nil, [32]byte{}, errors.New("request_interval_ms must be between 100 and 60000 milliseconds")
+	}
+	params := runParams{Cookies: json.RawMessage(cookie), Config: json.RawMessage(config), Options: runOptions{Interval: interval}}
 	if req.TimeStart != "" {
 		// Parse alone also accepts fractional seconds, which the runtime rejects.
 		if _, err := time.Parse(timeStartLayout, req.TimeStart); err != nil || len(req.TimeStart) != len(timeStartLayout) {
 			return nil, [32]byte{}, errors.New("time_start must be YYYY-MM-DDTHH:MM:SS in Beijing time")
 		}
-		params.Options = &runOptions{TimeStart: req.TimeStart}
+		params.Options.TimeStart = req.TimeStart
 	}
 	payload, err := json.Marshal(struct {
 		Op     string    `json:"op"`

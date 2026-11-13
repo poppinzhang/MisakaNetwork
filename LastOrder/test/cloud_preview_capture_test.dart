@@ -78,10 +78,12 @@ void main() {
 
     await tester.tap(find.byTooltip('公有云部署'));
     await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('cloud-provider-aliyun')));
+    await tester.pumpAndSettle();
     await capture('01-credentials-desktop');
     await c.cloud.saveCredential(
-      CloudProvider.tencent,
-      alias: '腾讯云演示账号',
+      CloudProvider.aliyun,
+      alias: '阿里云演示账号',
       accessKeyId: 'ExampleAccessId12345',
       accessKeySecret: 'ExampleSecret12345',
     );
@@ -92,7 +94,7 @@ void main() {
     await tester.tap(find.text('创建').first);
     await tester.pumpAndSettle();
     await tester.tap(
-      find.byKey(const ValueKey('cloud-template-tencent-balanced')),
+      find.byKey(const ValueKey('cloud-template-aliyun-balanced')),
     );
     await tester.pumpAndSettle();
     await capture('03-templates-desktop');
@@ -101,21 +103,21 @@ void main() {
     await tester.tap(find.byTooltip('机器管理'));
     await tester.pumpAndSettle();
     await c.cloud.startPreviewCreation(
-      CloudProvider.tencent,
-      CloudTemplate.forProvider(CloudProvider.tencent)[0],
+      CloudProvider.aliyun,
+      CloudTemplate.forProvider(CloudProvider.aliyun)[0],
       outcome: CloudPreviewOutcome.createFailure,
     );
     await tester.pump(const Duration(seconds: 3));
     await tester.pump();
     await c.cloud.startPreviewCreation(
-      CloudProvider.tencent,
-      CloudTemplate.forProvider(CloudProvider.tencent)[1],
+      CloudProvider.aliyun,
+      CloudTemplate.forProvider(CloudProvider.aliyun)[1],
     );
     await tester.pump(const Duration(seconds: 3));
     await tester.pump();
     await c.cloud.startPreviewCreation(
-      CloudProvider.tencent,
-      CloudTemplate.forProvider(CloudProvider.tencent)[2],
+      CloudProvider.aliyun,
+      CloudTemplate.forProvider(CloudProvider.aliyun)[2],
     );
     await tester.pump();
     await capture('04-machines-desktop');

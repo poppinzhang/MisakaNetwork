@@ -1395,6 +1395,7 @@ class _ControlCenterState extends State<ControlCenter> {
               ? '分发后立即开始'
               : '${task.startAt.replaceFirst('T', ' ')}（北京时间）',
         ),
+        taskDetail(LucideIcons.timer, '请求间隔', '${task.requestIntervalMs} 毫秒'),
       ],
     );
   }
@@ -1416,8 +1417,8 @@ class _ControlCenterState extends State<ControlCenter> {
                 pill(
                   task.dispatchedTo.isEmpty
                       ? '未分发'
-                      : '已分发 ${task.dispatchedTo.length} 台',
-                  color: task.dispatchedTo.isEmpty
+                      : '未结束 ${c.activeDispatchCount(task)} 台',
+                  color: c.activeDispatchCount(task) == 0
                       ? colors.onSurfaceVariant
                       : colors.primary,
                 ),
@@ -1650,7 +1651,8 @@ class _ControlCenterState extends State<ControlCenter> {
   Widget monitor() {
     final items = [
       for (final m in c.state.machines)
-        for (final t in c.statuses[m.id]?.tasks ?? <TaskStatus>[]) (m, t),
+        for (final t in c.statuses[m.id]?.tasks ?? <TaskStatus>[])
+          if (!c.isExecutionCleared(m.id, t)) (m, t),
     ];
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1659,6 +1661,42 @@ class _ControlCenterState extends State<ControlCenter> {
           'LIVE ACTIVITY',
           '每一步执行，都有回响',
           '展示 Sisters 返回的任务状态；连接失败时保留最后一次结果。',
+        ),
+        Padding(
+          padding: const EdgeInsets.only(bottom: 16),
+          child: Align(
+            alignment: Alignment.centerRight,
+            child: OutlinedButton(
+              key: const ValueKey('clear-finished-executions'),
+              onPressed: busy ||
+                      !items.any((item) => c.canClearExecution(item.$2))
+                  ? null
+                  : () => action(() async {
+                      final count = await c.clearFinishedExecutions();
+                      message(
+                        count == 0
+                            ? '暂无可清除的已结束任务'
+                            : '已清除 $count 条执行记录，订单入口仍保留',
+                      );
+                    }),
+              child: const Padding(
+                padding: EdgeInsets.symmetric(vertical: 4),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(LucideIcons.trash2, size: 16),
+                    SizedBox(width: 8),
+                    Flexible(
+                      child: Text(
+                        '清除全部已结束任务',
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
         ),
         if (c.connectionErrors.isNotEmpty)
           Padding(
@@ -1672,7 +1710,7 @@ class _ControlCenterState extends State<ControlCenter> {
           ),
         OrderPayments(controller: c),
         if (items.isEmpty)
-          empty(LucideIcons.activity, '尚无执行记录', '分发任务后，这里将展示节点进度和执行结果。')
+          empty(LucideIcons.activity, '暂无可显示的执行记录', '分发任务后，这里将展示节点进度和执行结果。')
         else
           responsiveCards([for (final (m, t) in items) monitorCard(m, t)]),
       ],
@@ -1708,7 +1746,9 @@ class _ControlCenterState extends State<ControlCenter> {
     final active =
         status.state == TaskState.TASK_STATE_RUNNING ||
         status.state == TaskState.TASK_STATE_QUEUED;
-    final task = c.state.tasks.where((t) => t.id == status.id).firstOrNull;
+    final task = c.state.tasks
+        .where((t) => t.ownsExecution(machine.id, status.id))
+        .firstOrNull;
     return KeyedSubtree(
       key: ValueKey('monitor-card-${machine.id}-${status.id}'),
       child: panel(
@@ -1789,6 +1829,21 @@ class _ControlCenterState extends State<ControlCenter> {
                                 },
                           icon: const Icon(LucideIcons.square, size: 14),
                           label: const Text('停止'),
+                        ),
+                      ] else if (c.canClearExecution(status)) ...[
+                        const SizedBox(width: 8),
+                        TextButton.icon(
+                          key: ValueKey(
+                            'clear-execution-${machine.id}-${status.id}',
+                          ),
+                          onPressed: busy
+                              ? null
+                              : () => action(
+                                  () => c.clearExecution(machine, status),
+                                  success: '已清除执行记录，订单入口仍保留',
+                                ),
+                          icon: const Icon(LucideIcons.trash2, size: 14),
+                          label: const Text('清除'),
                         ),
                       ],
                     ],
@@ -2101,7 +2156,7 @@ class _MachineDialogState extends State<MachineDialog> {
                       ? null
                       : () => Navigator.pop(context, 'cloud-create'),
                   icon: const Icon(LucideIcons.cloud, size: 18),
-                  label: const Text('云服务器创建&部署'),
+                  label: const Text('云服务器创建'),
                 ),
               ),
               const SizedBox(height: 8),
@@ -2168,6 +2223,7 @@ Widget field(
   String? hint,
   bool secret = false,
   int lines = 1,
+  TextInputType? keyboardType,
 }) => Padding(
   padding: const EdgeInsets.only(bottom: 14),
   child: TextField(
@@ -2175,6 +2231,7 @@ Widget field(
     decoration: InputDecoration(labelText: label, hintText: hint),
     obscureText: secret,
     maxLines: lines,
+    keyboardType: keyboardType,
     autocorrect: false,
     enableSuggestions: !secret,
   ),
@@ -2428,7 +2485,10 @@ class _TaskDialogState extends State<TaskDialog> {
       date = TextEditingController(),
       buyer = TextEditingController(),
       tel = TextEditingController(),
-      startAt = TextEditingController();
+      startAt = TextEditingController(),
+      requestInterval = TextEditingController(
+        text: '$defaultRequestIntervalMs',
+      );
   late String accountId = widget.controller.state.accounts.first.id;
   Map<String, dynamic>? purchase;
   int ticketIndex = 0, addressIndex = 0;
@@ -2440,7 +2500,15 @@ class _TaskDialogState extends State<TaskDialog> {
       widget.controller.state.accounts.firstWhere((a) => a.id == accountId);
   @override
   void dispose() {
-    for (final c in [name, project, date, buyer, tel, startAt]) {
+    for (final c in [
+      name,
+      project,
+      date,
+      buyer,
+      tel,
+      startAt,
+      requestInterval,
+    ]) {
       c.dispose();
     }
     super.dispose();
@@ -2506,6 +2574,7 @@ class _TaskDialogState extends State<TaskDialog> {
           throw const UserError('联系人和联系电话为必填项。');
         }
         final start = normalizeStartAt(startAt.text);
+        final interval = parseRequestIntervalMs(requestInterval.text);
         final config = await widget.controller.runtime.call('build_config', {
           'purchase_context': purchase,
           'selection': {
@@ -2521,6 +2590,7 @@ class _TaskDialogState extends State<TaskDialog> {
           account,
           config,
           startAt: start,
+          requestIntervalMs: interval,
           summary: TaskSummary.fromSelection(
             purchase!,
             ticketIndex,
@@ -2626,6 +2696,20 @@ class _TaskDialogState extends State<TaskDialog> {
           field(startAt, '开售时间（北京时间）', hint: '2026-11-20 20:00:00'),
           Text(
             '默认使用所选票档的起售时间，Sisters 按此倒计时后开始抢票；留空则分发后立即开始。',
+            style: TextStyle(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+              fontSize: 12,
+            ),
+          ),
+          const SizedBox(height: 20),
+          field(
+            requestInterval,
+            '抢票请求间隔（毫秒）',
+            hint: '100–60000，默认 1000',
+            keyboardType: TextInputType.number,
+          ),
+          Text(
+            '100–60000 毫秒，默认 1000 毫秒。每轮下单最多尝试 40 次；实际请求时间还受网络和冷却等待影响。',
             style: TextStyle(
               color: Theme.of(context).colorScheme.onSurfaceVariant,
               fontSize: 12,

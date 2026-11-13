@@ -18,6 +18,9 @@ message TaskRequest {
   // Purchase start in Beijing time (UTC+8) as YYYY-MM-DDTHH:MM:SS, whatever
   // the agent's own time zone. Empty starts immediately after submission.
   string time_start = 5;
+  // Ticket request interval in integer milliseconds, 100..60000.
+  // Zero uses the default of 1000 ms.
+  int32 request_interval_ms = 6;
 }
 enum TaskState {
   TASK_STATE_UNSPECIFIED = 0;
@@ -63,4 +66,7 @@ message AgentStatus {
   // Agents without this flag ignore TaskRequest.time_start and would start a
   // timed task immediately, so clients must not send timed tasks to them.
   bool supports_time_start = 8;
+  // Clients must not send tasks to agents that would ignore the configured
+  // request interval. Redeploy those agents before submitting tasks.
+  bool supports_request_interval = 9;
 }

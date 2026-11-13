@@ -30,6 +30,7 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   assets:
+    - assets/cloud_templates/tencent.json
     - assets/licenses/third_party_licenses.json
     - assets/cloud_providers/tencent.png
     - assets/cloud_providers/aliyun.png

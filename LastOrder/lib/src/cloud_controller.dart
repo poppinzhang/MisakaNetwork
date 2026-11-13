@@ -5,20 +5,30 @@ import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
 
 import 'cloud_models.dart';
+import 'cloud_templates.dart';
 import 'models.dart';
 import 'services.dart';
 
-/// Local UI preview only. This class never sends cloud API requests or invokes
-/// SSH deployment. Cloud jobs intentionally do not enter SavedState.machines.
+/// Tencent resource operations use the embedded helper. Other providers remain
+/// local previews. Created resources are not yet deployed Sisters machines.
 class CloudController extends ChangeNotifier {
   CloudController({
     required this.store,
     required this.helper,
+    this.templateLoader,
+    this.cloudPollInterval = const Duration(seconds: 5),
     this.stageDuration = const Duration(seconds: 3),
     this.releaseDuration = const Duration(seconds: 2),
   });
   static const workspaceKey = 'cloud.preview.v1';
   static const sshIdentityKey = 'cloud.ssh-identity.v1';
+  final Future<List<CloudTemplate>> Function()? templateLoader;
+  final Duration cloudPollInterval;
+  List<CloudTemplate> _tencentTemplates = [];
+  String? templateError;
+  final Set<String> _realBusy = {};
+  final Map<String, int> _pollAttempts = {};
+  Future<void> _preparation = Future<void>.value();
   final StateStore store;
   final DeploymentHelper helper;
   final Duration stageDuration, releaseDuration;
@@ -49,6 +59,7 @@ class CloudController extends ChangeNotifier {
   }
 
   Future<void> _initialize() async {
+    await _loadTemplates();
     try {
       final stored = await store.readSecret(workspaceKey);
       if (_disposed) return;
@@ -76,8 +87,16 @@ class CloudController extends ChangeNotifier {
           for (final job in _jobs)
             job.active
                 ? job.copyWith(
-                    phase: CloudMachinePhase.interrupted,
-                    error: '上次交互预览已中断，没有创建或释放真实云资源。可删除此记录后重新预览。',
+                    phase: job.isReal
+                        ? (job.phase == CloudMachinePhase.releasing
+                              ? CloudMachinePhase.releaseFailed
+                              : job.createSubmitted
+                              ? CloudMachinePhase.unknown
+                              : CloudMachinePhase.createFailed)
+                        : CloudMachinePhase.interrupted,
+                    error: job.isReal
+                        ? '上次云操作已中断，请刷新查询。关闭应用不释放资源，可能继续计费。'
+                        : '上次交互预览已中断，没有创建或释放真实云资源。可删除此记录后重新预览。',
                   )
                 : job,
         ];
@@ -93,6 +112,11 @@ class CloudController extends ChangeNotifier {
     }
     _notify();
     if (!_disposed) await ensureSshIdentity();
+    if (initialized && !_disposed) {
+      for (final job in _jobs.where((job) => job.isReal && !job.canRemove)) {
+        _scheduleRealPoll(job.id);
+      }
+    }
   }
 
   Future<void> ensureSshIdentity() {
@@ -184,6 +208,10 @@ class CloudController extends ChangeNotifier {
     ]) {
       if (check != null) throw UserError(check);
     }
+    if (_hasResources(provider) &&
+        _credentials[provider]?.accessKeyId != accessKeyId.trim()) {
+      throw const UserError('请先释放或核实该账号创建的云资源，再更换 SecretId。');
+    }
     final next = Map<CloudProvider, _StoredCredential>.of(_credentials);
     next[provider] = _StoredCredential(
       provider: provider,
@@ -200,6 +228,9 @@ class CloudController extends ChangeNotifier {
 
   Future<void> removeCredential(CloudProvider provider) => _serialize(() async {
     _requireInitialized();
+    if (_hasResources(provider)) {
+      throw const UserError('仍有未释放或待核实的云资源，不能移除管理凭证。');
+    }
     final next = Map<CloudProvider, _StoredCredential>.of(_credentials)
       ..remove(provider);
     await _persist(next, _jobs);
@@ -214,6 +245,9 @@ class CloudController extends ChangeNotifier {
     CloudPreviewOutcome outcome = CloudPreviewOutcome.success,
   }) => _serialize(() async {
     _requireInitialized();
+    if (provider == CloudProvider.tencent) {
+      throw const UserError('腾讯云请使用真实创建入口，不能创建演示节点。');
+    }
     if (credentialFor(provider) == null) {
       throw const UserError('请先保存该云厂商的凭证并完成格式检查。');
     }
@@ -274,6 +308,7 @@ class CloudController extends ChangeNotifier {
   Future<void> requestPreviewRelease(String id) => _serialize(() async {
     _requireInitialized();
     final job = _requireJob(id);
+    if (job.isReal) throw const UserError('请使用云资源释放入口。');
     if (job.active ||
         job.phase == CloudMachinePhase.released ||
         job.phase == CloudMachinePhase.createFailed) {
@@ -297,13 +332,391 @@ class CloudController extends ChangeNotifier {
 
   Future<void> removeMachine(String id) => _serialize(() async {
     _requireInitialized();
-    _requireJob(id);
+    if (!_requireJob(id).canRemove) {
+      throw const UserError('请先确认云资源已释放，不能仅删除本地记录。');
+    }
     final next = _jobs.where((job) => job.id != id).toList();
     await _persist(_credentials, next);
     _timers.remove(id)?.cancel();
     _jobs = next;
     _notify();
   });
+
+  List<CloudTemplate> templatesFor(CloudProvider provider) =>
+      provider == CloudProvider.tencent
+      ? List.unmodifiable(_tencentTemplates)
+      : CloudTemplate.forProvider(provider);
+
+  Future<void> _loadTemplates() async {
+    try {
+      final loaded = templateLoader != null
+          ? await templateLoader!()
+          : (await TencentTemplateCatalog.load())
+                .map(CloudTemplate.tencent)
+                .toList();
+      _tencentTemplates = [
+        for (final item in loaded)
+          CloudTemplate.tencent(
+            TencentTemplateCatalog.validateTemplate(item.tencent!),
+          ),
+      ];
+    } catch (_) {
+      _tencentTemplates = [];
+      templateError = '腾讯云配置模板无法读取或格式无效，请联系管理员重新打包。';
+    }
+  }
+
+  bool _hasResources(CloudProvider provider) => _jobs.any(
+    (job) => job.provider == provider && job.isReal && !job.canRemove,
+  );
+
+  Future<CloudMachine> startTencentCreation(CloudTemplate template) =>
+      _serialize(() async {
+        _requireInitialized();
+        final credential = _credentials[CloudProvider.tencent];
+        if (credential == null) throw const UserError('请先保存腾讯云凭证。');
+        if (!sshReady) throw const UserError('请先完成 SSH 登录密钥准备。');
+        final canonical = _tencentTemplates
+            .where((item) => item.id == template.id)
+            .firstOrNull;
+        if (canonical == null ||
+            jsonEncode(canonical.toJson()) != jsonEncode(template.toJson())) {
+          throw const UserError('模板不属于当前应用，请重新选择。');
+        }
+        final token = const Uuid().v4();
+        final job = CloudMachine(
+          id: token,
+          name: 'MisakaNetwork-$token',
+          provider: CloudProvider.tencent,
+          template: CloudTemplate.tencent(
+            TencentTemplateCatalog.validateTemplate(canonical.tencent!),
+          ),
+          phase: CloudMachinePhase.creating,
+          isReal: true,
+          region: canonical.tencent!['region'] as String,
+          credentialId: credential.accessKeyId,
+          clientToken: token,
+        );
+        final next = [..._jobs, job];
+        await _persist(_credentials, next);
+        _jobs = next;
+        _notify();
+        unawaited(_createTencent(job.id));
+        return job;
+      });
+
+  Map<String, dynamic> _cloudRequest(CloudMachine job) {
+    final credential = _credentials[job.provider];
+    if (credential == null || credential.accessKeyId != job.credentialId) {
+      throw const UserError('请恢复创建此实例时使用的腾讯云凭证。');
+    }
+    return {
+      'secret_id': credential.accessKeyId,
+      'secret_key': credential.accessKeySecret,
+      'region': job.region,
+      'client_token': job.clientToken,
+      if (job.instanceId.isNotEmpty) 'instance_id': job.instanceId,
+    };
+  }
+
+  // Serializing preparation within this app avoids competing helpers creating
+  // the same reusable regional security group and public key simultaneously.
+  Future<Map<String, dynamic>> _prepareTencent(CloudMachine job) async {
+    final previous = _preparation;
+    final done = Completer<void>();
+    _preparation = done.future;
+    await previous;
+    try {
+      if (_disposed) throw const UserError('应用已关闭。');
+      return await helper.call({
+        'action': 'tencent_prepare',
+        'cloud': {
+          ..._cloudRequest(job),
+          'template': job.template.tencent,
+          'public_key': sshPublicKey,
+        },
+      });
+    } finally {
+      done.complete();
+    }
+  }
+
+  Future<void> _createTencent(String id) async {
+    _realBusy.add(id);
+    var purchaseSubmitted = false;
+    try {
+      var job = _requireJob(id);
+      final prepared = await _prepareTencent(job);
+      if (_disposed) return;
+      final group = prepared['security_group_id'];
+      final key = prepared['key_id'];
+      if (group is! String ||
+          !RegExp(r'^sg-[a-zA-Z0-9]+$').hasMatch(group) ||
+          key is! String ||
+          !RegExp(r'^skey-[a-zA-Z0-9]+$').hasMatch(key)) {
+        throw const FormatException();
+      }
+      // Durably record the exact inputs and submission intent before purchase.
+      job = job.copyWith(
+        securityGroupId: group,
+        keyId: key,
+        createSubmitted: true,
+      );
+      await _saveReal(job);
+      if (_disposed) return;
+      purchaseSubmitted = true;
+      final result = await helper.call({
+        'action': 'tencent_create',
+        'cloud': {
+          ..._cloudRequest(job),
+          'template': job.template.tencent,
+          'security_group_id': group,
+          'key_id': key,
+          'instance_name': job.name,
+        },
+      });
+      if (_disposed) return;
+      final instanceId = result['instance_id'];
+      if (instanceId is! String ||
+          !RegExp(r'^ins-[a-zA-Z0-9]+$').hasMatch(instanceId)) {
+        throw const FormatException();
+      }
+      await _saveReal(
+        job.copyWith(
+          instanceId: instanceId,
+          requestId: result['request_id'] as String? ?? '',
+        ),
+      );
+      _scheduleRealPoll(id);
+    } catch (_) {
+      if (!_disposed) {
+        final job = _requireJob(id);
+        await _saveRealError(
+          job.copyWith(
+            createSubmitted: purchaseSubmitted,
+            phase: purchaseSubmitted
+                ? CloudMachinePhase.unknown
+                : CloudMachinePhase.createFailed,
+            error: purchaseSubmitted
+                ? '创建结果尚未确认，可能已经产生费用。请刷新查询；不要重复创建，必要时到腾讯云控制台核对。'
+                : '创建准备失败，尚未提交购买。请检查凭证权限、模板与网络；已准备的共享安全组或公钥会保留。',
+          ),
+        );
+      }
+    } finally {
+      _realBusy.remove(id);
+    }
+  }
+
+  // If persistence fails after an API response, retain the returned resource ID
+  // in memory. The previously persisted token enables recovery after restart.
+  Future<void> _saveReal(CloudMachine job) => _serialize(() async {
+    final next = [for (final item in _jobs) item.id == job.id ? job : item];
+    try {
+      await _persist(_credentials, next);
+    } catch (_) {
+      _jobs = [
+        for (final item in next)
+          item.id == job.id
+              ? item.copyWith(error: '云操作信息无法保存，请保留实例信息并检查安全存储；云资源可能继续计费。')
+              : item,
+      ];
+      _notify();
+      rethrow;
+    }
+    _jobs = next;
+    _notify();
+  });
+
+  Future<void> _saveRealError(CloudMachine job) async {
+    try {
+      await _saveReal(job);
+    } catch (_) {
+      /* Keep the in-memory recovery record. */
+    }
+  }
+
+  Future<void> refreshTencentMachine(String id) async {
+    _requireInitialized();
+    if (_disposed || !_realBusy.add(id)) return;
+    _timers.remove(id)?.cancel();
+    try {
+      final job = _requireJob(id);
+      if (!job.isReal || job.phase == CloudMachinePhase.released) return;
+      if (!job.createSubmitted) return;
+      final result = await helper.call({
+        'action': job.instanceId.isEmpty
+            ? 'tencent_recover'
+            : 'tencent_describe',
+        'cloud': _cloudRequest(job),
+      });
+      if (_disposed) return;
+      if (result['exists'] != true) {
+        if (result['exists'] != false) throw const FormatException();
+        // A failed lookup is not proof that a lost purchase response created
+        // nothing. Only a known exact instance may be confirmed absent.
+        await _saveReal(
+          job.copyWith(
+            phase:
+                job.instanceId.isNotEmpty &&
+                    (job.phase == CloudMachinePhase.releasing ||
+                        job.phase == CloudMachinePhase.releaseFailed)
+                ? CloudMachinePhase.released
+                : CloudMachinePhase.unknown,
+            error:
+                job.instanceId.isEmpty ||
+                    (job.phase != CloudMachinePhase.releasing &&
+                        job.phase != CloudMachinePhase.releaseFailed)
+                ? '暂未查询到创建结果，仍需到腾讯云控制台核实；请勿重复购买。'
+                : '云端已查不到此实例；请在控制台核对账单及自行添加的附属资源。',
+          ),
+        );
+        return;
+      }
+      final found = result['instance_id'];
+      if (found is! String ||
+          !RegExp(r'^ins-[a-zA-Z0-9]+$').hasMatch(found) ||
+          (job.instanceId.isNotEmpty && found != job.instanceId)) {
+        throw const FormatException();
+      }
+      final state = result['state'];
+      final releasing =
+          job.phase == CloudMachinePhase.releasing ||
+          job.phase == CloudMachinePhase.releaseFailed;
+      final phase = switch (state) {
+        'TERMINATED' => CloudMachinePhase.released,
+        'RUNNING' || 'STOPPED'
+            when job.phase == CloudMachinePhase.releaseFailed =>
+          CloudMachinePhase.releaseFailed,
+        'RUNNING' when !releasing => CloudMachinePhase.created,
+        'STOPPED' when !releasing => CloudMachinePhase.created,
+        'LAUNCH_FAILED' => CloudMachinePhase.createFailed,
+        _ =>
+          releasing ? CloudMachinePhase.releasing : CloudMachinePhase.creating,
+      };
+      await _saveReal(
+        job.copyWith(
+          instanceId: found,
+          publicIp: result['public_ip'] as String? ?? '',
+          phase: phase,
+          requestId: result['request_id'] as String? ?? job.requestId,
+          error: state == 'LAUNCH_FAILED'
+              ? '云端报告创建失败，请释放或到控制台核实资源与费用。'
+              : phase == CloudMachinePhase.releaseFailed
+              ? '实例仍在运行或停止状态，尚未确认释放。请核对后重试释放。'
+              : '',
+        ),
+      );
+      if (phase == CloudMachinePhase.creating ||
+          phase == CloudMachinePhase.releasing) {
+        _scheduleRealPoll(id);
+      } else {
+        _pollAttempts.remove(id);
+      }
+    } catch (_) {
+      if (!_disposed) {
+        final job = _requireJob(id);
+        await _saveRealError(
+          job.copyWith(
+            phase: job.phase == CloudMachinePhase.releasing
+                ? CloudMachinePhase.releaseFailed
+                : job.phase == CloudMachinePhase.creating
+                ? CloudMachinePhase.unknown
+                : job.phase,
+            error: '无法确认云端状态，请检查网络与凭证权限后刷新；现有资源可能继续计费。',
+          ),
+        );
+      }
+    } finally {
+      _realBusy.remove(id);
+    }
+  }
+
+  Future<void> requestTencentRelease(String id) async {
+    _requireInitialized();
+    final job = _requireJob(id);
+    if (!job.isReal ||
+        job.instanceId.isEmpty ||
+        job.phase == CloudMachinePhase.released ||
+        job.phase == CloudMachinePhase.releasing ||
+        !_realBusy.add(id)) {
+      throw const UserError('当前实例不能释放，请先刷新云端状态。');
+    }
+    try {
+      _cloudRequest(job);
+      await _saveReal(
+        job.copyWith(phase: CloudMachinePhase.releasing, error: ''),
+      );
+      _timers.remove(id)?.cancel();
+      if (_disposed) {
+        _realBusy.remove(id);
+        return;
+      }
+      unawaited(_releaseTencent(id));
+    } catch (_) {
+      if (!_disposed) {
+        await _saveRealError(
+          job.copyWith(error: '释放意图无法保存，尚未提交释放；请修复安全存储后重试。'),
+        );
+      }
+      _realBusy.remove(id);
+      rethrow;
+    }
+  }
+
+  Future<void> _releaseTencent(String id) async {
+    try {
+      final job = _requireJob(id);
+      final result = await helper.call({
+        'action': 'tencent_release',
+        'cloud': _cloudRequest(job),
+      });
+      if (_disposed) return;
+      await _saveReal(
+        job.copyWith(
+          requestId: result['request_id'] as String? ?? job.requestId,
+        ),
+      );
+      _pollAttempts.remove(id);
+      _scheduleRealPoll(id);
+    } catch (_) {
+      if (!_disposed) {
+        await _saveRealError(
+          _requireJob(id).copyWith(
+            phase: CloudMachinePhase.releaseFailed,
+            error: '释放结果尚未确认。请刷新查询；若实例仍在，请检查权限、释放保护、额外磁盘或独立公网 IP 后重试。资源可能继续计费。',
+          ),
+        );
+      }
+    } finally {
+      _realBusy.remove(id);
+    }
+  }
+
+  void _scheduleRealPoll(String id) {
+    if (_disposed) return;
+    final count = (_pollAttempts[id] ?? 0) + 1;
+    _pollAttempts[id] = count;
+    if (count > 60) {
+      final job = _requireJob(id);
+      unawaited(
+        _saveRealError(
+          job.copyWith(
+            phase: job.phase == CloudMachinePhase.releasing
+                ? CloudMachinePhase.releaseFailed
+                : CloudMachinePhase.unknown,
+            error: '等待云端状态超时，请手动刷新或到控制台核对，资源可能继续计费。',
+          ),
+        ),
+      );
+      return;
+    }
+    _timers.remove(id)?.cancel();
+    _timers[id] = Timer(cloudPollInterval, () {
+      _timers.remove(id);
+      unawaited(refreshTencentMachine(id));
+    });
+  }
 
   Future<void> _transition(
     String id,
@@ -335,8 +748,16 @@ class CloudController extends ChangeNotifier {
           for (final job in _jobs)
             job.id == id
                 ? job.copyWith(
-                    phase: CloudMachinePhase.interrupted,
-                    error: '无法保存预览进度，请检查系统安全存储。没有操作真实云资源。',
+                    phase: job.isReal
+                        ? (job.phase == CloudMachinePhase.releasing
+                              ? CloudMachinePhase.releaseFailed
+                              : job.createSubmitted
+                              ? CloudMachinePhase.unknown
+                              : CloudMachinePhase.createFailed)
+                        : CloudMachinePhase.interrupted,
+                    error: job.isReal
+                        ? '上次云操作已中断，请刷新查询。关闭应用不释放资源，可能继续计费。'
+                        : '无法保存预览进度，请检查系统安全存储。没有操作真实云资源。',
                   )
                 : job,
         ];

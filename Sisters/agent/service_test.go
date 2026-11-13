@@ -227,7 +227,7 @@ func TestTimeStartIsValidatedAndBoundToPayload(t *testing.T) {
 		}
 	}
 	plain, plainFingerprint, err := validateRequest(request("task"))
-	if err != nil || strings.Contains(string(plain), "runtime_options") {
+	if err != nil || strings.Contains(string(plain), "time_start") {
 		t.Fatalf("payload without time_start: %s %v", plain, err)
 	}
 	timed := request("task")
@@ -238,10 +238,10 @@ func TestTimeStartIsValidatedAndBoundToPayload(t *testing.T) {
 	}
 	var decoded struct {
 		Params struct {
-			Options map[string]string `json:"runtime_options"`
+			Options runOptions `json:"runtime_options"`
 		} `json:"params"`
 	}
-	if json.Unmarshal(payload, &decoded) != nil || decoded.Params.Options["time_start"] != "2026-11-20T20:00:00" {
+	if json.Unmarshal(payload, &decoded) != nil || decoded.Params.Options.TimeStart != "2026-11-20T20:00:00" || decoded.Params.Options.Interval != 1000 {
 		t.Fatalf("time_start not forwarded: %s", payload)
 	}
 	if timedFingerprint == plainFingerprint {
@@ -258,6 +258,78 @@ func TestTimeStartIsValidatedAndBoundToPayload(t *testing.T) {
 	moved.TimeStart = "2026-11-20T21:00:00"
 	if _, err := s.SubmitTask(context.Background(), moved); status.Code(err) != codes.AlreadyExists {
 		t.Fatalf("changed time_start reused the task: %v", err)
+	}
+}
+
+func TestRequestIntervalIsValidatedAndForwarded(t *testing.T) {
+	for _, interval := range []int32{-2147483648, -1, 1, 99, 60001, 2147483647} {
+		t.Run(fmt.Sprint(interval), func(t *testing.T) {
+			r := request("bad")
+			r.RequestIntervalMs = interval
+			s := testService(t, &fakeRunner{}, 1, 1, 2)
+			if _, err := s.SubmitTask(context.Background(), r); status.Code(err) != codes.InvalidArgument {
+				t.Fatalf("invalid interval was not rejected: %v", err)
+			}
+		})
+	}
+	for _, interval := range []int32{0, 100, 750, 1000, 60000} {
+		for _, start := range []string{"", "2026-11-20T20:00:00"} {
+			t.Run(fmt.Sprint(interval)+start, func(t *testing.T) {
+				r := request("task")
+				r.RequestIntervalMs = interval
+				r.TimeStart = start
+				payload, _, err := validateRequest(r)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var decoded struct {
+					Params struct {
+						Options map[string]any `json:"runtime_options"`
+					} `json:"params"`
+				}
+				if err := json.Unmarshal(payload, &decoded); err != nil {
+					t.Fatal(err)
+				}
+				want := interval
+				if want == 0 {
+					want = 1000
+				}
+				if decoded.Params.Options["interval"] != float64(want) {
+					t.Fatalf("interval not forwarded: %s", payload)
+				}
+				if start == "" {
+					if _, exists := decoded.Params.Options["time_start"]; exists {
+						t.Fatalf("empty time_start was forwarded: %s", payload)
+					}
+				} else if decoded.Params.Options["time_start"] != start {
+					t.Fatalf("time_start not forwarded with interval: %s", payload)
+				}
+				if _, exists := decoded.Params.Options["create_retry_limit"]; exists {
+					t.Fatal("Sisters must leave the fixed retry limit to the runtime")
+				}
+			})
+		}
+	}
+}
+
+func TestRequestIntervalBoundToIdempotency(t *testing.T) {
+	s := testService(t, &fakeRunner{}, 1, 1, 2)
+	got, err := s.GetStatus(context.Background(), &pb.Empty{})
+	if err != nil || !got.SupportsRequestInterval {
+		t.Fatalf("agent does not advertise request interval support: %v %v", got, err)
+	}
+	if _, err := s.SubmitTask(context.Background(), request("task")); err != nil {
+		t.Fatal(err)
+	}
+	explicitDefault := request("task")
+	explicitDefault.RequestIntervalMs = 1000
+	if _, err := s.SubmitTask(context.Background(), explicitDefault); err != nil {
+		t.Fatalf("default and explicit 1000 ms must be idempotent: %v", err)
+	}
+	changed := request("task")
+	changed.RequestIntervalMs = 750
+	if _, err := s.SubmitTask(context.Background(), changed); status.Code(err) != codes.AlreadyExists {
+		t.Fatalf("changed request interval reused the task: %v", err)
 	}
 }
 

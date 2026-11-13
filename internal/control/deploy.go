@@ -22,6 +22,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/MisakaNetwork/MisakaNetwork/internal/cloud/tencent"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -65,22 +66,23 @@ func (c *stallConn) Write(p []byte) (int, error) {
 }
 
 type Request struct {
-	Action               string `json:"action"`
-	Directory            string `json:"directory,omitempty"`
-	Host                 string `json:"host,omitempty"`
-	Port                 int    `json:"port,omitempty"`
-	Username             string `json:"username,omitempty"`
-	Password             string `json:"password,omitempty"`
-	PrivateKeyPath       string `json:"private_key_path,omitempty"`
-	PrivateKeyPassphrase string `json:"private_key_passphrase,omitempty"`
-	HostKeyFingerprint   string `json:"host_key_fingerprint,omitempty"`
-	BundlePath           string `json:"bundle_path,omitempty"`
-	BundlesDirectory     string `json:"bundles_directory,omitempty"`
-	RemoteDirectory      string `json:"remote_directory,omitempty"`
-	PKIDirectory         string `json:"pki_directory,omitempty"`
-	ServerName           string `json:"server_name,omitempty"`
-	GRPCPort             int    `json:"grpc_port,omitempty"`
-	ProgressPath         string `json:"progress_path,omitempty"`
+	Action               string         `json:"action"`
+	Cloud                *tencent.Input `json:"cloud,omitempty"`
+	Directory            string         `json:"directory,omitempty"`
+	Host                 string         `json:"host,omitempty"`
+	Port                 int            `json:"port,omitempty"`
+	Username             string         `json:"username,omitempty"`
+	Password             string         `json:"password,omitempty"`
+	PrivateKeyPath       string         `json:"private_key_path,omitempty"`
+	PrivateKeyPassphrase string         `json:"private_key_passphrase,omitempty"`
+	HostKeyFingerprint   string         `json:"host_key_fingerprint,omitempty"`
+	BundlePath           string         `json:"bundle_path,omitempty"`
+	BundlesDirectory     string         `json:"bundles_directory,omitempty"`
+	RemoteDirectory      string         `json:"remote_directory,omitempty"`
+	PKIDirectory         string         `json:"pki_directory,omitempty"`
+	ServerName           string         `json:"server_name,omitempty"`
+	GRPCPort             int            `json:"grpc_port,omitempty"`
+	ProgressPath         string         `json:"progress_path,omitempty"`
 }
 type Response struct {
 	OK          bool   `json:"ok"`
@@ -104,6 +106,15 @@ func (e *pinError) Error() string { return "SSH 主机指纹尚未确认" }
 
 func Handle(r Request) Response {
 	switch r.Action {
+	case "tencent_prepare", "tencent_create", "tencent_describe", "tencent_release", "tencent_recover":
+		if r.Cloud == nil {
+			return Response{Error: "缺少腾讯云操作参数"}
+		}
+		v, e := tencent.Execute(r.Action, *r.Cloud)
+		if e != nil {
+			return Response{Error: e.Error()}
+		}
+		return Response{OK: true, Result: v}
 	case "generate_cloud_ssh_key":
 		return cloudSSHKeyResponse(GenerateCloudSSHKey)
 	case "protect_path":

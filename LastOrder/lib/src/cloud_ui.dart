@@ -162,8 +162,8 @@ class _CloudCredentialsPageState extends State<CloudCredentialsPage> {
           ),
           const SizedBox(height: 24),
           const CloudNotice(
-            '交互预览 · 凭证仅在本机检查格式；创建、部署和释放均为演示，不会购买云资源或产生费用。',
-            icon: LucideIcons.flaskConical,
+            '凭证仅在本机检查格式。腾讯云支持创建和释放按量计费服务器，会产生云费用；阿里云和火山引擎仍为交互预览。',
+            icon: LucideIcons.info,
           ),
           const SizedBox(height: 24),
           if (widget.controller.startupError != null) ...[
@@ -452,8 +452,8 @@ class _CloudCredentialFormState extends State<CloudCredentialForm> {
       keyId.clear();
       secret.clear();
       setState(() => saved = '格式检查通过，已安全保存。云端身份与权限尚未验证。');
-    } catch (_) {
-      if (mounted) setState(() => error = '凭证未能保存，请检查填写内容或系统安全存储后重试。');
+    } catch (e) {
+      if (mounted) setState(() => error = readableError(e));
     } finally {
       if (mounted) setState(() => busy = false);
     }
@@ -464,7 +464,9 @@ class _CloudCredentialFormState extends State<CloudCredentialForm> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('移除云凭证'),
-        content: Text('从本机移除${widget.provider.displayName}凭证。已添加的演示机器仍会保留。'),
+        content: Text(
+          '从本机移除${widget.provider.displayName}凭证。尚有未释放的真实云资源时不能移除；演示机器仍会保留。',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
@@ -485,8 +487,8 @@ class _CloudCredentialFormState extends State<CloudCredentialForm> {
     try {
       await widget.controller.removeCredential(widget.provider);
       if (mounted) setState(() => saved = null);
-    } catch (_) {
-      if (mounted) setState(() => error = '移除失败，请检查系统安全存储后重试。');
+    } catch (e) {
+      if (mounted) setState(() => error = readableError(e));
     } finally {
       if (mounted) setState(() => busy = false);
     }
@@ -557,7 +559,7 @@ class _CloudCredentialFormState extends State<CloudCredentialForm> {
             const SizedBox(height: 20),
             if (credential != null) ...[
               CloudNotice(
-                '已保存 ${credential.alias} · ${credential.maskedId}\n格式已检查，未联网验证。填写新密钥可替换现有凭证。',
+                '已保存 ${credential.alias} · ${credential.maskedId}\n格式已检查，未联网验证。${widget.provider == CloudProvider.tencent ? '存在未释放资源时只可更新同一 SecretId 的密钥。' : '填写新密钥可替换现有凭证。'}',
                 icon: LucideIcons.shieldCheck,
               ),
               const SizedBox(height: 20),
@@ -815,7 +817,7 @@ class _CloudSshIdentityState extends State<CloudSshIdentity> {
 }
 
 /// The dialog returns a provider when credentials need editing, and true after
-/// a preview machine has been saved. It never starts a real cloud operation.
+/// a cloud operation or a preview machine has been saved.
 class CloudCreateDialog extends StatefulWidget {
   const CloudCreateDialog({super.key, required this.controller});
   final CloudController controller;
@@ -837,11 +839,15 @@ class _CloudCreateDialogState extends State<CloudCreateDialog> {
       error = null;
     });
     try {
-      await widget.controller.startPreviewCreation(
-        provider!,
-        selected!,
-        outcome: outcome,
-      );
+      if (provider == CloudProvider.tencent) {
+        await widget.controller.startTencentCreation(selected!);
+      } else {
+        await widget.controller.startPreviewCreation(
+          provider!,
+          selected!,
+          outcome: outcome,
+        );
+      }
       if (mounted) Navigator.pop(context, true);
     } catch (e) {
       if (mounted) setState(() => error = readableError(e));
@@ -890,7 +896,7 @@ class _CloudCreateDialogState extends State<CloudCreateDialog> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              provider == null ? '云服务器创建&部署' : '选择一套内置配置',
+                              provider == null ? '云服务器创建' : '选择一套内置配置',
                               style: const TextStyle(
                                 fontSize: 23,
                                 fontWeight: FontWeight.w700,
@@ -922,9 +928,15 @@ class _CloudCreateDialogState extends State<CloudCreateDialog> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          const CloudNotice(
-                            '交互预览 · 本轮不会创建、部署或释放真实资源，也不会产生费用。',
-                            icon: LucideIcons.flaskConical,
+                          CloudNotice(
+                            provider == CloudProvider.tencent
+                                ? '腾讯云 · 创建真实的按量计费 CVM，每次创建一台。确认后开始云端创建并产生费用，关闭应用不会释放服务器。'
+                                : provider == null
+                                ? '腾讯云支持真实创建和释放按量计费服务器。阿里云、火山引擎为交互预览。'
+                                : '交互预览 · 不会创建、部署或释放真实资源，也不会产生费用。',
+                            icon: provider == CloudProvider.tencent
+                                ? LucideIcons.info
+                                : LucideIcons.flaskConical,
                           ),
                           const SizedBox(height: 20),
                           if (provider == null) ...[
@@ -959,7 +971,9 @@ class _CloudCreateDialogState extends State<CloudCreateDialog> {
                             ),
                           ] else ...[
                             Text(
-                              '示例模板',
+                              provider == CloudProvider.tencent
+                                  ? '管理员配置模板'
+                                  : '示例模板',
                               style: TextStyle(
                                 color: colors.onSurfaceVariant,
                                 fontSize: 12,
@@ -967,15 +981,30 @@ class _CloudCreateDialogState extends State<CloudCreateDialog> {
                               ),
                             ),
                             const SizedBox(height: 10),
+                            if (provider == CloudProvider.tencent &&
+                                widget.controller
+                                    .templatesFor(provider!)
+                                    .isEmpty)
+                              CloudNotice(
+                                widget.controller.templateError ??
+                                    '管理员尚未配置腾讯云模板，请填写模板并重新打包应用。',
+                                error: widget.controller.templateError != null,
+                              ),
                             LayoutBuilder(
                               builder: (context, constraints) {
                                 final horizontal =
                                     constraints.maxWidth >= 680 &&
+                                    widget.controller
+                                            .templatesFor(provider!)
+                                            .length <=
+                                        3 &&
                                     MediaQuery.textScalerOf(context).scale(14) <
                                         22;
                                 final cards = [
                                   for (final template
-                                      in CloudTemplate.forProvider(provider!))
+                                      in widget.controller.templatesFor(
+                                        provider!,
+                                      ))
                                     _templateCard(template),
                                 ];
                                 if (!horizontal) {
@@ -1011,7 +1040,9 @@ class _CloudCreateDialogState extends State<CloudCreateDialog> {
                             ),
                             const SizedBox(height: 16),
                             Text(
-                              '模板参数为界面示例，地域、机型、网络与费用将在后续确定。',
+                              provider == CloudProvider.tencent
+                                  ? '模板由管理员维护并随应用打包。库存、权限与实际价格以腾讯云为准。'
+                                  : '模板参数为界面示例，地域、机型、网络与费用将在后续确定。',
                               style: TextStyle(
                                 fontSize: 12,
                                 height: 1.6,
@@ -1031,7 +1062,9 @@ class _CloudCreateDialogState extends State<CloudCreateDialog> {
                                 Expanded(
                                   child: Text(
                                     widget.controller.sshReady
-                                        ? '自动使用本机 SSH 公钥 · RSA 2048\n创建后自动衔接 Sisters 部署，无需再次填写登录信息。'
+                                        ? provider == CloudProvider.tencent
+                                              ? '导入并复用本机 SSH 公钥 · RSA 2048\n创建后保留实例信息。Sisters 需另行部署，首次 SSH 连接仍需核对服务器主机指纹。'
+                                              : '自动使用本机 SSH 公钥 · RSA 2048\n创建后演示 Sisters 部署。'
                                         : '本机 SSH 登录密钥尚未就绪，请先前往公有云凭证页面完成准备。',
                                     style: TextStyle(
                                       fontSize: 12,
@@ -1052,31 +1085,36 @@ class _CloudCreateDialogState extends State<CloudCreateDialog> {
                                 ),
                               ),
                             const SizedBox(height: 20),
-                            DropdownButtonFormField<CloudPreviewOutcome>(
-                              key: const ValueKey('cloud-preview-outcome'),
-                              initialValue: outcome,
-                              isExpanded: true,
-                              decoration: const InputDecoration(
-                                labelText: '预览结果',
+                            if (provider == CloudProvider.tencent &&
+                                selected != null)
+                              _tencentSummary(selected!),
+                            if (provider != CloudProvider.tencent)
+                              DropdownButtonFormField<CloudPreviewOutcome>(
+                                key: const ValueKey('cloud-preview-outcome'),
+                                initialValue: outcome,
+                                isExpanded: true,
+                                decoration: const InputDecoration(
+                                  labelText: '预览结果',
+                                ),
+                                items: const [
+                                  DropdownMenuItem(
+                                    value: CloudPreviewOutcome.success,
+                                    child: Text('正常创建与部署'),
+                                  ),
+                                  DropdownMenuItem(
+                                    value: CloudPreviewOutcome.createFailure,
+                                    child: Text('创建失败'),
+                                  ),
+                                  DropdownMenuItem(
+                                    value: CloudPreviewOutcome.deployFailure,
+                                    child: Text('部署失败'),
+                                  ),
+                                ],
+                                onChanged: busy
+                                    ? null
+                                    : (value) =>
+                                          setState(() => outcome = value!),
                               ),
-                              items: const [
-                                DropdownMenuItem(
-                                  value: CloudPreviewOutcome.success,
-                                  child: Text('正常创建与部署'),
-                                ),
-                                DropdownMenuItem(
-                                  value: CloudPreviewOutcome.createFailure,
-                                  child: Text('创建失败'),
-                                ),
-                                DropdownMenuItem(
-                                  value: CloudPreviewOutcome.deployFailure,
-                                  child: Text('部署失败'),
-                                ),
-                              ],
-                              onChanged: busy
-                                  ? null
-                                  : (value) => setState(() => outcome = value!),
-                            ),
                           ],
                           if (error != null)
                             Padding(
@@ -1113,7 +1151,13 @@ class _CloudCreateDialogState extends State<CloudCreateDialog> {
                             busy ? LucideIcons.loaderCircle : LucideIcons.plus,
                             size: 18,
                           ),
-                          label: Text(busy ? '正在添加' : '确认创建（预览）'),
+                          label: Text(
+                            busy
+                                ? '正在添加'
+                                : provider == CloudProvider.tencent
+                                ? '确认按量付费创建'
+                                : '确认创建（预览）',
+                          ),
                         ),
                       ],
                     )
@@ -1134,6 +1178,22 @@ class _CloudCreateDialogState extends State<CloudCreateDialog> {
     },
   );
 
+  Widget _tencentSummary(CloudTemplate template) {
+    final value = template.tencent!;
+    final parameters = value['runInstances'] as Map;
+    final placement = parameters['Placement'] as Map;
+    final internet = parameters['InternetAccessible'] as Map;
+    return CloudNotice(
+      '本次创建：1 台 · 按量计费（按小时后付费）\n'
+      '${value['region']} / ${placement['Zone']} · ${parameters['InstanceType']}\n'
+      '镜像 ${parameters['ImageId']} · ${template.diskGb} GB 系统盘\n'
+      '公网按流量计费 · 出网带宽上限 ${internet['InternetMaxBandwidthOut']} Mbps\n'
+      'SSH 22：${value['sshCidr']}\n'
+      'Sisters 20001：${value['grpcCidr']}\n'
+      '创建会产生云费用；尚未接入自动部署和费用查询。',
+    );
+  }
+
   Widget _providerOption(CloudProvider item) {
     final colors = Theme.of(context).colorScheme;
     final credential = widget.controller.credentialFor(item);
@@ -1152,6 +1212,7 @@ class _CloudCreateDialogState extends State<CloudCreateDialog> {
                   child: const Text('录入凭证'),
                 )
               : FilledButton.tonal(
+                  key: ValueKey('cloud-select-provider-${item.name}'),
                   onPressed: () => setState(() {
                     provider = item;
                     selected = null;
@@ -1177,7 +1238,7 @@ class _CloudCreateDialogState extends State<CloudCreateDialog> {
                     Text(
                       credential == null
                           ? '添加凭证后即可选择配置'
-                          : '${credential.alias} · 格式已检查',
+                          : '${credential.alias} · ${item == CloudProvider.tencent ? '按量付费' : '交互预览'}',
                       style: TextStyle(
                         fontSize: 12,
                         color: colors.onSurfaceVariant,
@@ -1333,7 +1394,12 @@ class _CloudMachineCardState extends State<CloudMachineCard> {
       builder: (context) => AlertDialog(
         title: const Text('释放云服务器'),
         content: Text(
-          '确认演示释放「${widget.machine.name}」？\n\n真实接入后，释放会删除服务器及随实例释放的磁盘，正在执行的任务也会结束。当前仅演示此流程，不操作云端资源。',
+          widget.machine.isReal
+              ? '确认释放「${widget.machine.name}」？\n'
+                    '地域：${widget.machine.region}\n实例：${widget.machine.instanceId}\n\n'
+                    '释放将结束此实例上的所有任务并删除系统盘数据，无法恢复。共享安全组、SSH 公钥、VPC 和子网会保留。\n\n'
+                    '提交后还需查询云端确认；确认按钮不代表费用已停止。额外绑定的磁盘、弹性公网 IP 等资源需在腾讯云控制台另行核对。'
+              : '确认演示释放「${widget.machine.name}」？\n\n当前仅演示此流程，不操作云端资源。',
         ),
         actions: [
           TextButton(
@@ -1342,14 +1408,16 @@ class _CloudMachineCardState extends State<CloudMachineCard> {
           ),
           FilledButton(
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('确认释放（预览）'),
+            child: Text(widget.machine.isReal ? '确认释放并删除数据' : '确认释放（预览）'),
           ),
         ],
       ),
     );
     if (accepted == true && mounted) {
       await act(
-        () => widget.controller.requestPreviewRelease(widget.machine.id),
+        () => widget.machine.isReal
+            ? widget.controller.requestTencentRelease(widget.machine.id)
+            : widget.controller.requestPreviewRelease(widget.machine.id),
       );
     }
   }
@@ -1416,7 +1484,10 @@ class _CloudMachineCardState extends State<CloudMachineCard> {
               runSpacing: 8,
               children: [
                 CloudPill(m.statusLabel, color: color),
-                CloudPill('交互预览', color: colors.onSurfaceVariant),
+                CloudPill(
+                  m.isReal ? '按量计费' : '交互预览',
+                  color: colors.onSurfaceVariant,
+                ),
               ],
             ),
             const SizedBox(height: 16),
@@ -1429,15 +1500,34 @@ class _CloudMachineCardState extends State<CloudMachineCard> {
               m.template.regionLabel,
               style: TextStyle(fontSize: 12, color: colors.onSurfaceVariant),
             ),
+            if (m.isReal) ...[
+              const SizedBox(height: 12),
+              SelectableText(
+                '地域：${m.region}\n实例：${m.instanceId.isEmpty ? '尚未取得实例 ID' : m.instanceId}\n'
+                '公网地址：${m.publicIp.isEmpty ? '等待云端返回' : m.publicIp}',
+                style: TextStyle(
+                  fontSize: 12,
+                  height: 1.7,
+                  color: colors.onSurfaceVariant,
+                ),
+              ),
+            ],
             const SizedBox(height: 18),
             if (m.active) ...[
               ClipRRect(
                 borderRadius: BorderRadius.circular(6),
-                child: LinearProgressIndicator(value: progress, minHeight: 5),
+                child: LinearProgressIndicator(
+                  value: m.isReal ? null : progress,
+                  minHeight: 5,
+                ),
               ),
               const SizedBox(height: 12),
               Text(
-                m.phase == CloudMachinePhase.releasing
+                m.isReal
+                    ? m.phase == CloudMachinePhase.releasing
+                          ? '正在请求释放并核对云端结果。关闭应用不会取消云端操作。'
+                          : '正在创建云服务器，请等待云端返回。关闭应用不会停止计费。'
+                    : m.phase == CloudMachinePhase.releasing
                     ? '正在演示释放，请稍候。'
                     : '流程独立进行，你可以继续添加其他机器。',
                 style: TextStyle(fontSize: 12, color: colors.onSurfaceVariant),
@@ -1446,7 +1536,11 @@ class _CloudMachineCardState extends State<CloudMachineCard> {
               CloudNotice(m.error, error: true)
             else
               Text(
-                released
+                m.isReal
+                    ? released
+                          ? '云端已确认实例释放。请在腾讯云控制台核对账单及额外关联资源。'
+                          : '云服务器已创建，可能持续产生费用。Sisters 尚未部署，此记录不能分发任务。'
+                    : released
                     ? '释放流程已演示完成，没有操作真实云资源。'
                     : '创建与部署流程已演示完成。此预览节点不能执行抢票任务。',
                 style: TextStyle(
@@ -1460,7 +1554,7 @@ class _CloudMachineCardState extends State<CloudMachineCard> {
                 padding: const EdgeInsets.only(top: 12),
                 child: CloudNotice(error!, error: true),
               ),
-            if (!m.active) ...[
+            if (!m.active || (m.isReal && m.instanceId.isNotEmpty)) ...[
               const SizedBox(height: 18),
               const Divider(height: 1),
               const SizedBox(height: 12),
@@ -1468,20 +1562,47 @@ class _CloudMachineCardState extends State<CloudMachineCard> {
                 spacing: 10,
                 runSpacing: 8,
                 children: [
-                  if (!released && m.phase != CloudMachinePhase.createFailed)
+                  if (m.isReal &&
+                      !released &&
+                      (m.instanceId.isNotEmpty || m.createSubmitted))
+                    OutlinedButton.icon(
+                      key: ValueKey('cloud-refresh-${m.id}'),
+                      onPressed: busy
+                          ? null
+                          : () => act(
+                              () =>
+                                  widget.controller.refreshTencentMachine(m.id),
+                            ),
+                      icon: const Icon(LucideIcons.refreshCw, size: 16),
+                      label: const Text('查询云端状态'),
+                    ),
+                  if (!released &&
+                      (m.isReal
+                          ? m.instanceId.isNotEmpty && !m.active
+                          : m.phase != CloudMachinePhase.createFailed))
                     OutlinedButton.icon(
                       onPressed: busy ? null : release,
                       icon: const Icon(LucideIcons.power, size: 16),
                       label: const Text('释放云服务器'),
                     ),
-                  TextButton.icon(
-                    onPressed: busy
-                        ? null
-                        : () =>
-                              act(() => widget.controller.removeMachine(m.id)),
-                    icon: const Icon(LucideIcons.trash2, size: 15),
-                    label: Text(m.failed ? '删除失败机器' : '删除预览记录'),
-                  ),
+                  if (m.canRemove)
+                    TextButton.icon(
+                      onPressed: busy
+                          ? null
+                          : () => act(
+                              () => widget.controller.removeMachine(m.id),
+                            ),
+                      icon: const Icon(LucideIcons.trash2, size: 15),
+                      label: Text(
+                        m.isReal
+                            ? released
+                                  ? '删除已释放记录'
+                                  : '删除失败记录'
+                            : m.failed
+                            ? '删除失败机器'
+                            : '删除预览记录',
+                      ),
+                    ),
                 ],
               ),
             ],

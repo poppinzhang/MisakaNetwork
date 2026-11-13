@@ -1,5 +1,4 @@
-/// Cloud credentials are checked locally in this UI preview. No value in this
-/// model represents a successful cloud identity or permission check.
+/// Saving credentials checks local syntax, not cloud identity or permissions.
 enum CloudProvider { tencent, aliyun, volcengine }
 
 extension CloudProviderDetails on CloudProvider {
@@ -58,9 +57,25 @@ class CloudTemplate {
     this.architecture = 'x64',
     this.os = 'Ubuntu 24.04 LTS',
     this.regionLabel = '地域待配置',
+    this.tencent,
   });
   final String id, name, description, architecture, os, regionLabel;
   final int cpu, memoryGb, diskGb;
+  final Map<String, dynamic>? tencent;
+  bool get isReal => tencent != null;
+
+  factory CloudTemplate.tencent(Map<String, dynamic> value) => CloudTemplate(
+    id: value['id'] as String,
+    name: value['name'] as String,
+    description: value['description'] as String,
+    cpu: value['cpu'] as int,
+    memoryGb: value['memoryGb'] as int,
+    diskGb: value['diskGb'] as int,
+    architecture: value['architecture'] as String,
+    os: value['os'] as String,
+    regionLabel: value['regionLabel'] as String,
+    tencent: value,
+  );
 
   static List<CloudTemplate> forProvider(CloudProvider provider) => [
     CloudTemplate(
@@ -98,6 +113,7 @@ class CloudTemplate {
     'architecture': architecture,
     'os': os,
     'regionLabel': regionLabel,
+    'tencent': ?tencent,
   };
   factory CloudTemplate.fromJson(Map<String, dynamic> value) => CloudTemplate(
     id: value['id'] as String,
@@ -109,6 +125,9 @@ class CloudTemplate {
     architecture: value['architecture'] as String,
     os: value['os'] as String,
     regionLabel: value['regionLabel'] as String,
+    tencent: value['tencent'] == null
+        ? null
+        : Map<String, dynamic>.from(value['tencent'] as Map),
   );
 }
 
@@ -121,6 +140,9 @@ enum CloudMachinePhase {
   releasing,
   released,
   interrupted,
+  created,
+  releaseFailed,
+  unknown,
 }
 
 enum CloudPreviewOutcome { success, createFailure, deployFailure }
@@ -133,8 +155,31 @@ class CloudMachine {
     required this.template,
     required this.phase,
     this.error = '',
+    this.isReal = false,
+    this.createSubmitted = false,
+    this.instanceId = '',
+    this.publicIp = '',
+    this.region = '',
+    this.requestId = '',
+    this.credentialId = '',
+    this.clientToken = '',
+    this.securityGroupId = '',
+    this.keyId = '',
   });
   final String id, name, error;
+  final bool isReal, createSubmitted;
+  final String instanceId,
+      publicIp,
+      region,
+      requestId,
+      credentialId,
+      clientToken,
+      securityGroupId,
+      keyId;
+  bool get canRemove =>
+      !isReal ||
+      phase == CloudMachinePhase.released ||
+      (phase == CloudMachinePhase.createFailed && !createSubmitted);
   final CloudProvider provider;
   final CloudTemplate template;
   final CloudMachinePhase phase;
@@ -145,7 +190,9 @@ class CloudMachine {
   bool get failed =>
       phase == CloudMachinePhase.createFailed ||
       phase == CloudMachinePhase.deployFailed ||
-      phase == CloudMachinePhase.interrupted;
+      phase == CloudMachinePhase.interrupted ||
+      phase == CloudMachinePhase.releaseFailed ||
+      phase == CloudMachinePhase.unknown;
   String get statusLabel => switch (phase) {
     CloudMachinePhase.creating => '创建云服务器',
     CloudMachinePhase.deploying => '部署 Sisters',
@@ -154,17 +201,38 @@ class CloudMachine {
     CloudMachinePhase.deployFailed => '部署失败',
     CloudMachinePhase.releasing => '释放云服务器',
     CloudMachinePhase.released => '已释放',
-    CloudMachinePhase.interrupted => '预览已中断',
+    CloudMachinePhase.interrupted => isReal ? '操作已中断' : '预览已中断',
+    CloudMachinePhase.created => '已创建 · 待部署',
+    CloudMachinePhase.releaseFailed => '释放待核实',
+    CloudMachinePhase.unknown => '创建结果待核实',
   };
-  CloudMachine copyWith({CloudMachinePhase? phase, String? error}) =>
-      CloudMachine(
-        id: id,
-        name: name,
-        provider: provider,
-        template: template,
-        phase: phase ?? this.phase,
-        error: error ?? this.error,
-      );
+  CloudMachine copyWith({
+    CloudMachinePhase? phase,
+    String? error,
+    bool? createSubmitted,
+    String? instanceId,
+    String? publicIp,
+    String? requestId,
+    String? securityGroupId,
+    String? keyId,
+  }) => CloudMachine(
+    id: id,
+    name: name,
+    provider: provider,
+    template: template,
+    phase: phase ?? this.phase,
+    error: error ?? this.error,
+    isReal: isReal,
+    createSubmitted: createSubmitted ?? this.createSubmitted,
+    instanceId: instanceId ?? this.instanceId,
+    publicIp: publicIp ?? this.publicIp,
+    region: region,
+    requestId: requestId ?? this.requestId,
+    credentialId: credentialId,
+    clientToken: clientToken,
+    securityGroupId: securityGroupId ?? this.securityGroupId,
+    keyId: keyId ?? this.keyId,
+  );
   Map<String, dynamic> toJson() => {
     'id': id,
     'name': name,
@@ -172,6 +240,16 @@ class CloudMachine {
     'template': template.toJson(),
     'phase': phase.name,
     'error': error,
+    'isReal': isReal,
+    'createSubmitted': createSubmitted,
+    'instanceId': instanceId,
+    'publicIp': publicIp,
+    'region': region,
+    'requestId': requestId,
+    'credentialId': credentialId,
+    'clientToken': clientToken,
+    'securityGroupId': securityGroupId,
+    'keyId': keyId,
   };
   factory CloudMachine.fromJson(Map<String, dynamic> value) => CloudMachine(
     id: value['id'] as String,
@@ -182,5 +260,15 @@ class CloudMachine {
     ),
     phase: CloudMachinePhase.values.byName(value['phase'] as String),
     error: value['error'] as String,
+    isReal: value['isReal'] as bool? ?? false,
+    createSubmitted: value['createSubmitted'] as bool? ?? false,
+    instanceId: value['instanceId'] as String? ?? '',
+    publicIp: value['publicIp'] as String? ?? '',
+    region: value['region'] as String? ?? '',
+    requestId: value['requestId'] as String? ?? '',
+    credentialId: value['credentialId'] as String? ?? '',
+    clientToken: value['clientToken'] as String? ?? '',
+    securityGroupId: value['securityGroupId'] as String? ?? '',
+    keyId: value['keyId'] as String? ?? '',
   );
 }

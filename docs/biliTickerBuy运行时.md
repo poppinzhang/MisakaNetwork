@@ -36,6 +36,14 @@ Docker 限制针对上游应用的运行与服务入口，不禁止本项目为�
 - `runtime/vendor_bili.py` 的导入白名单不包含上游 Web UI、Docker 启动文件和更新器；`runtime/build.py` 不打包 Gradio。独立运行时与 Android 内嵌客户端均不得新增这些服务入口。
 - 自制 TLS 和通知模块仍可能作为核心源码的一部分出现在内嵌目录中，当前结论是调用路径未启用，并非相关缺陷已修复或代码已全部移除。默认值、导入副作用或调用方式变化后必须重新核查。
 
+### 请求间隔与固定尝试上限复核（2026-11-13，未发布）
+
+本次接通任务请求间隔并将每轮尝试上限固定为 40；上游仍为 v2.15.18 / `227ebf73f5af3eec0019984a7cbcb722977453e8`，导入白名单、内嵌快照和依赖锁定未变。重新审查 `interface/auth.py`、`interface/search.py`、`interface/common.py`、`util/request/BiliRequest.py`、`task/buy.py`、配置与通知构造及 bridge 入口，未增加网络目标或敏感数据出口。登录/查询继续使用默认验证的 requests；标准下单路径使用 httpx，沿用 `Session.verify=True`，超时或协议错误重建同一客户端，不切换自制 TLS。环境代理与 CA 设置仍可能影响请求路径和信任边界。
+
+`runtime/tests/test_bridge.py` 补充间隔默认值、边界、非法值、固定 40 次以及禁止覆盖上限、并发策略、代理、通知和分享参数的离线回归；源码与锁定依赖检查没有引入上游 Web UI、Gradio 或 Docker 启动入口。`runtime/tests/test_runtime_security.py` 使用真实内嵌配置构造与依赖、虚构购票资料、禁止网络的替身验证：购票配置、`BTB_*` 环境变量及配置数据库中的覆盖值不能改变间隔、固定上限、`standard` 策略、单请求批次或空通知设置；通知管理器无注册渠道，调用发送也不产生 HTTP 请求。Cookie 继续经内存 CookieManager 供平台请求使用，购票资料进入原订单载荷，原始日志不回传。上游成功通知正文仍可能包含姓名，因此空通知约束继续保留。
+
+TLS 回归从实际 `BiliRequest` 创建的 httpx 传输取得 SSLContext，以内存 BIO 完成握手：拒绝未受信的自签名证书，拒绝受信但域名错误的证书，接受受信且域名正确的测试证书。完整运行时依赖环境中，`python -m unittest discover -s runtime/tests -v` 的 73 项测试全部通过，无跳过；未安装依赖时上述两项真实引擎测试会明确跳过。此结论限于固定源码、当前开发环境依赖和离线模拟路径，不是所有第三方依赖、各平台发行二进制或真实登录、下单、出票的安全验收；本次未构建发布安装包。
+
 ### 付款码回显接入复核（未发布）
 
 本次扩展的是支付结果过滤与本地二维码编码，固定上游版本、vendor 快照、导入白名单、依赖及 `standard` 下单参数均未改变。取码仍走上游已有 `getPayParam` 与下单的同一 `BiliRequest`；新增 `payment_qr` 仅把经过严格白名单校验的字符串编码成内存 PNG，不访问支付 URL，不请求新付款参数或订单状态。Python、Go、Dart 分别检查输入，订单详情只由合法订单号构造；支付 token、链接及二维码不进入日志、事件或普通持久化文件。
@@ -82,9 +90,9 @@ Cookie 支持 `[{"name":"...","value":"..."}]`、`{"cookie":[...]}`、`{"cookies
 
 `selection` 包含从零起的 `ticket_index`、非空 `buyer_indices`、`address_index`，以及 `buyer`（联系人）、`tel`（联系电话），可选 `phone`。当前沿用上游校验：必须选择收货地址，即使活动提供电子票。场次、实名购票人或地址不完整会真实失败，不构造虚假的可执行配置。
 
-`runtime_options` 仅支持 `interval`（整数毫秒，100–60000，默认 1000）、`time_start`（北京时间 `YYYY-MM-DDTHH:MM:SS`，只接受完整日期时间；只写时分的写法会按主机时区补全日期，因此拒绝）、`create_retry_limit`（1–100，默认 20）和 `wait_for_buy_button`。每个任务采用单请求创建订单批次，禁用声音、外部通知、自动打开浏览器与随机日志。上游按北京时间（UTC+8）倒计时，与 Sisters 主机时区无关；LastOrder 在界面标注北京时间。目前 Sisters 只转交 `time_start`，其余选项使用默认值。
+`runtime_options` 仅支持 `interval`（整数毫秒，100–60000，默认 1000）、`time_start`（北京时间 `YYYY-MM-DDTHH:MM:SS`，只接受完整日期时间；只写时分的写法会按主机时区补全日期，因此拒绝）和 `wait_for_buy_button`。源码未发布的任务创建支持填写间隔，Sisters 将 `request_interval_ms` 校验后转交为 `interval`，并可同时转交 `time_start`。每轮下单尝试上限由 bridge 固定为 `create_retry_limit=40`，该选项不在输入白名单内，即使传入 40 也会被拒绝；未调整上游快照中的默认值。每轮上限不代表任务累计尝试上限，请求之间的实际时间还受响应耗时、重新准备与冷却逻辑影响。每个任务采用单请求创建订单批次，禁用声音、外部通知、自动打开浏览器与随机日志。上游按北京时间（UTC+8）倒计时，与 Sisters 主机时区无关；LastOrder 在界面标注北京时间。
 
-执行期间会输出 `{"type":"progress","status":"running","stage":"preparing","message":"抢票任务执行中","attempt_current":1,"attempt_total":20}`。`stage` 是稳定的协议代码，由上游阶段名翻译而来：`starting`（启动）、`waiting`（等待开票，可带 `countdown_seconds`）、`preparing`（订单准备）、`ordering`（创建订单）、`ordered`（抢票成功）、`page_timeout`（购票页校验超时）；其他上游阶段统一为 `working`。`status` 取 `running`、`cooldown`、`succeeded`、`duplicate_order`、`failed`、`cancelled`、`completed` 之一。消息与 stage 都不转发上游原文、HTTP 响应、代理信息或原始错误字符串。上游新增阶段名时测试会失败，提醒同步更新 bridge 与 Sisters 的词表。终态 `succeeded` 表示上游结构化状态确认创建订单；`duplicate_order` 表示检测到已有订单：上游在限购已有订单（100003）、存在未完成订单（100048）或重复订单（100079）时以 `completed` 停止，bridge 启动任务时把这三条停止规则改报为 `duplicate_order`。`completed` 表示结束但尚未确认创建订单，不能向用户展示抢票成功；`failed` / `cancelled` 返回 `ok:false`。一旦出现 `succeeded` 或 `duplicate_order`，之后的上游异常或取消只会停止任务，不再改变终态。
+执行期间会输出 `{"type":"progress","status":"running","stage":"preparing","message":"抢票任务执行中","attempt_current":1,"attempt_total":40}`。`stage` 是稳定的协议代码，由上游阶段名翻译而来：`starting`（启动）、`waiting`（等待开票，可带 `countdown_seconds`）、`preparing`（订单准备）、`ordering`（创建订单）、`ordered`（抢票成功）、`page_timeout`（购票页校验超时）；其他上游阶段统一为 `working`。`status` 取 `running`、`cooldown`、`succeeded`、`duplicate_order`、`failed`、`cancelled`、`completed` 之一。消息与 stage 都不转发上游原文、HTTP 响应、代理信息或原始错误字符串。上游新增阶段名时测试会失败，提醒同步更新 bridge 与 Sisters 的词表。终态 `succeeded` 表示上游结构化状态确认创建订单；`duplicate_order` 表示检测到已有订单：上游在限购已有订单（100003）、存在未完成订单（100048）或重复订单（100079）时以 `completed` 停止，bridge 启动任务时把这三条停止规则改报为 `duplicate_order`。`completed` 表示结束但尚未确认创建订单，不能向用户展示抢票成功；`failed` / `cancelled` 返回 `ok:false`。一旦出现 `succeeded` 或 `duplicate_order`，之后的上游异常或取消只会停止任务，不再改变终态。
 
 源码未发布的付款字段规则：`order_id` 必须是 1–80 位 ASCII 正整数且没有前导零；`order_detail_url` 从订单号固定生成为 `https://show.bilibili.com/platform/orderDetail.html?order_id=<order_id>`。`payment_code_url` 只接受 `weixin://wxpay/bizpayurl?pr=<token>` 或 `https://qr.alipay.com/<token>` 的整串匹配，token 为 1–512 个 `[A-Za-z0-9_-]` 字符，输入总长最多 2048 个 ASCII 字符；不接受额外参数、片段、端口、用户信息或编码变体。上游 `payment_qr_url` 实际是订单详情页，不能当作付款码，不再随新的付款结果透传。非法支付码不影响合法订单详情兜底；缺少合法订单号不返回支付字段。运行时不自动付款，不查询支付状态，不根据二维码推断订单已付款或出票。完整链路见[付款码回显](付款码回显.md)。
 

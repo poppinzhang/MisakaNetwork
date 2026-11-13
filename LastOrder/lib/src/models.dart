@@ -231,31 +231,134 @@ class TaskSummary {
   }
 }
 
+const defaultRequestIntervalMs = 1000;
+const minRequestIntervalMs = 100;
+const maxRequestIntervalMs = 60000;
+const requestIntervalError = '抢票请求间隔应为 100–60000 毫秒的整数。';
+
+int validateRequestIntervalMs(int value) {
+  if (value < minRequestIntervalMs || value > maxRequestIntervalMs) {
+    throw const UserError(requestIntervalError);
+  }
+  return value;
+}
+
+int parseRequestIntervalMs(String value) {
+  final text = value.trim();
+  final parsed = RegExp(r'^[0-9]+$').hasMatch(text) ? int.tryParse(text) : null;
+  if (parsed == null) throw const UserError(requestIntervalError);
+  return validateRequestIntervalMs(parsed);
+}
+
+int _storedRequestIntervalMs(Object? value) {
+  if (value == null) return defaultRequestIntervalMs;
+  if (value is! int ||
+      value < minRequestIntervalMs ||
+      value > maxRequestIntervalMs) {
+    throw const FormatException(requestIntervalError);
+  }
+  return value;
+}
+
+/// A durable submission intent. Only an acknowledged terminal state releases
+/// it; a missing remote record is not evidence that execution finished.
+class TaskDispatch {
+  const TaskDispatch({
+    required this.machineId,
+    required this.executionId,
+    this.finished = false,
+  });
+  final String machineId, executionId;
+  final bool finished;
+
+  Map<String, dynamic> toJson() => {
+    'machineId': machineId,
+    'executionId': executionId,
+    'finished': finished,
+  };
+
+  factory TaskDispatch.fromJson(Map<String, dynamic> j) => TaskDispatch(
+    machineId: j['machineId'] as String,
+    executionId: j['executionId'] as String,
+    finished: j['finished'] as bool? ?? false,
+  );
+}
+
 class TicketTask {
   TicketTask({
     required this.id,
     required this.name,
     required this.accountId,
     this.startAt = '',
-    this.dispatchedTo = const [],
+    this.requestIntervalMs = defaultRequestIntervalMs,
+    List<String> dispatchedTo = const [],
+    List<TaskDispatch> dispatches = const [],
     this.summary,
-  });
+  }) : dispatches = List.unmodifiable([
+         for (final machineId in dispatchedTo)
+           if (!dispatches.any((d) => d.machineId == machineId))
+             TaskDispatch(machineId: machineId, executionId: id),
+         ...dispatches,
+       ]) {
+    validateRequestIntervalMs(requestIntervalMs);
+  }
   final String id, name, accountId;
 
   /// Purchase start as Beijing time `YYYY-MM-DDTHH:MM:SS`; empty starts as
   /// soon as a machine accepts the task.
   final String startAt;
+  final int requestIntervalMs;
 
-  /// Machines that accepted this task. Sisters keeps accepted task IDs only in
-  /// memory, so a task is submitted to each machine at most once.
-  final List<String> dispatchedTo;
+  final List<TaskDispatch> dispatches;
+  List<String> get dispatchedTo =>
+      dispatches.map((d) => d.machineId).toSet().toList()..sort();
+
+  TaskDispatch? latestDispatch(String machineId) =>
+      dispatches.where((d) => d.machineId == machineId).lastOrNull;
+
+  bool ownsExecution(String machineId, String executionId) =>
+      executionId == id ||
+      dispatches.any(
+        (d) => d.machineId == machineId && d.executionId == executionId,
+      );
+
   final TaskSummary? summary;
-  TicketTask withDispatched(Iterable<String> machineIds) => TicketTask(
+  TicketTask withDispatched(Iterable<String> machineIds) => withDispatches([
+    for (final machineId in machineIds)
+      if (latestDispatch(machineId) == null)
+        TaskDispatch(machineId: machineId, executionId: id),
+  ]);
+
+  TicketTask withDispatches(Iterable<TaskDispatch> updates) {
+    final next = [...dispatches];
+    for (final update in updates) {
+      final index = next.indexWhere(
+        (d) =>
+            d.machineId == update.machineId &&
+            d.executionId == update.executionId,
+      );
+      if (index < 0) {
+        next.add(update);
+      } else if (update.finished) {
+        next[index] = update;
+      }
+    }
+    return _withDispatches(next);
+  }
+
+  TicketTask withoutDispatch(String machineId, String executionId) =>
+      _withDispatches([
+        for (final d in dispatches)
+          if (d.machineId != machineId || d.executionId != executionId) d,
+      ]);
+
+  TicketTask _withDispatches(List<TaskDispatch> next) => TicketTask(
     id: id,
     name: name,
     accountId: accountId,
     startAt: startAt,
-    dispatchedTo: {...dispatchedTo, ...machineIds}.toList()..sort(),
+    requestIntervalMs: requestIntervalMs,
+    dispatches: next,
     summary: summary,
   );
   Map<String, dynamic> toJson() => {
@@ -263,7 +366,8 @@ class TicketTask {
     'name': name,
     'accountId': accountId,
     'startAt': startAt,
-    'dispatchedTo': dispatchedTo,
+    'requestIntervalMs': requestIntervalMs,
+    'dispatches': dispatches.map((d) => d.toJson()).toList(),
     if (summary != null) 'summary': summary!.toJson(),
   };
   factory TicketTask.fromJson(Map<String, dynamic> j) => TicketTask(
@@ -271,8 +375,13 @@ class TicketTask {
     name: j['name'] as String,
     accountId: j['accountId'] as String,
     startAt: j['startAt'] as String? ?? '',
+    requestIntervalMs: _storedRequestIntervalMs(j['requestIntervalMs']),
     dispatchedTo: [
       for (final id in j['dispatchedTo'] as List? ?? const []) id as String,
+    ],
+    dispatches: [
+      for (final value in j['dispatches'] as List? ?? const [])
+        TaskDispatch.fromJson(Map<String, dynamic>.from(value as Map)),
     ],
     summary: j['summary'] == null
         ? null
@@ -282,19 +391,52 @@ class TicketTask {
 
 enum AppThemeMode { system, light, dark }
 
+/// A local presentation preference, independent of dispatch bookkeeping.
+/// Include the acknowledged outcome so a later confirmed order can reappear.
+class ClearedExecution {
+  const ClearedExecution({
+    required this.machineId,
+    required this.executionId,
+    required this.state,
+  });
+
+  final String machineId, executionId, state;
+
+  Map<String, dynamic> toJson() => {
+    'machineId': machineId,
+    'executionId': executionId,
+    'state': state,
+  };
+
+  factory ClearedExecution.fromJson(Map<String, dynamic> j) => ClearedExecution(
+    machineId: j['machineId'] as String,
+    executionId: j['executionId'] as String,
+    state: j['state'] as String,
+  );
+}
+
 class SavedState {
   static const schemaVersion = 2;
   SavedState({
     List<Machine>? machines,
     List<Account>? accounts,
     List<TicketTask>? tasks,
+    List<ClearedExecution>? clearedExecutions,
     this.themeMode = AppThemeMode.system,
   }) : machines = machines ?? [],
        accounts = accounts ?? [],
-       tasks = tasks ?? [];
+       tasks = tasks ?? [],
+       clearedExecutions = List.unmodifiable(clearedExecutions ?? []);
   final List<Machine> machines;
   final List<Account> accounts;
   final List<TicketTask> tasks;
+  final List<ClearedExecution> clearedExecutions;
+  late final _clearedExecutionKeys = {
+    for (final record in clearedExecutions)
+      (record.machineId, record.executionId, record.state),
+  };
+  bool isExecutionCleared(String machineId, String executionId, String state) =>
+      _clearedExecutionKeys.contains((machineId, executionId, state));
   final AppThemeMode themeMode;
   String encode() => jsonEncode({
     'schema': schemaVersion,
@@ -302,6 +444,7 @@ class SavedState {
     'machines': machines.map((e) => e.toJson()).toList(),
     'accounts': accounts.map((e) => e.toJson()).toList(),
     'tasks': tasks.map((e) => e.toJson()).toList(),
+    'cleared_executions': clearedExecutions.map((e) => e.toJson()).toList(),
   });
   factory SavedState.decode(String data) {
     final j = jsonDecode(data) as Map<String, dynamic>;
@@ -321,6 +464,10 @@ class SavedState {
       tasks: (j['tasks'] as List)
           .map((e) => TicketTask.fromJson(Map<String, dynamic>.from(e as Map)))
           .toList(),
+      clearedExecutions: [
+        for (final value in j['cleared_executions'] as List? ?? const [])
+          ClearedExecution.fromJson(Map<String, dynamic>.from(value as Map)),
+      ],
     );
   }
 }

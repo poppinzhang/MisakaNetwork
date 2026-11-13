@@ -167,9 +167,12 @@ type TaskRequest struct {
 	ConfigJson string                 `protobuf:"bytes,4,opt,name=config_json,json=configJson,proto3" json:"config_json,omitempty"`
 	// Purchase start in Beijing time (UTC+8) as YYYY-MM-DDTHH:MM:SS, whatever
 	// the agent's own time zone. Empty starts immediately after submission.
-	TimeStart     string `protobuf:"bytes,5,opt,name=time_start,json=timeStart,proto3" json:"time_start,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	TimeStart string `protobuf:"bytes,5,opt,name=time_start,json=timeStart,proto3" json:"time_start,omitempty"`
+	// Ticket request interval in integer milliseconds, 100..60000.
+	// Zero uses the default of 1000 ms.
+	RequestIntervalMs int32 `protobuf:"varint,6,opt,name=request_interval_ms,json=requestIntervalMs,proto3" json:"request_interval_ms,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *TaskRequest) Reset() {
@@ -235,6 +238,13 @@ func (x *TaskRequest) GetTimeStart() string {
 		return x.TimeStart
 	}
 	return ""
+}
+
+func (x *TaskRequest) GetRequestIntervalMs() int32 {
+	if x != nil {
+		return x.RequestIntervalMs
+	}
+	return 0
 }
 
 type TaskEvent struct {
@@ -474,8 +484,11 @@ type AgentStatus struct {
 	// Agents without this flag ignore TaskRequest.time_start and would start a
 	// timed task immediately, so clients must not send timed tasks to them.
 	SupportsTimeStart bool `protobuf:"varint,8,opt,name=supports_time_start,json=supportsTimeStart,proto3" json:"supports_time_start,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// Clients must not send tasks to agents that would ignore the configured
+	// request interval. Redeploy those agents before submitting tasks.
+	SupportsRequestInterval bool `protobuf:"varint,9,opt,name=supports_request_interval,json=supportsRequestInterval,proto3" json:"supports_request_interval,omitempty"`
+	unknownFields           protoimpl.UnknownFields
+	sizeCache               protoimpl.SizeCache
 }
 
 func (x *AgentStatus) Reset() {
@@ -564,6 +577,13 @@ func (x *AgentStatus) GetSupportsTimeStart() bool {
 	return false
 }
 
+func (x *AgentStatus) GetSupportsRequestInterval() bool {
+	if x != nil {
+		return x.SupportsRequestInterval
+	}
+	return false
+}
+
 var File_misaka_v1_sisters_proto protoreflect.FileDescriptor
 
 const file_misaka_v1_sisters_proto_rawDesc = "" +
@@ -571,7 +591,7 @@ const file_misaka_v1_sisters_proto_rawDesc = "" +
 	"\x17misaka/v1/sisters.proto\x12\tmisaka.v1\"\a\n" +
 	"\x05Empty\"\x18\n" +
 	"\x06TaskId\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\"\x92\x01\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\"\xc2\x01\n" +
 	"\vTaskRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1f\n" +
@@ -580,7 +600,8 @@ const file_misaka_v1_sisters_proto_rawDesc = "" +
 	"\vconfig_json\x18\x04 \x01(\tR\n" +
 	"configJson\x12\x1d\n" +
 	"\n" +
-	"time_start\x18\x05 \x01(\tR\ttimeStart\"g\n" +
+	"time_start\x18\x05 \x01(\tR\ttimeStart\x12.\n" +
+	"\x13request_interval_ms\x18\x06 \x01(\x05R\x11requestIntervalMs\"g\n" +
 	"\tTaskEvent\x12*\n" +
 	"\x11timestamp_unix_ms\x18\x01 \x01(\x03R\x0ftimestampUnixMs\x12\x14\n" +
 	"\x05level\x18\x02 \x01(\tR\x05level\x12\x18\n" +
@@ -598,7 +619,7 @@ const file_misaka_v1_sisters_proto_rawDesc = "" +
 	"\amessage\x18\x04 \x01(\tR\amessage\x12&\n" +
 	"\x0fupdated_unix_ms\x18\x05 \x01(\x03R\rupdatedUnixMs\x12,\n" +
 	"\x06events\x18\x06 \x03(\v2\x14.misaka.v1.TaskEventR\x06events\x121\n" +
-	"\apayment\x18\a \x01(\v2\x17.misaka.v1.OrderPaymentR\apayment\"\xb9\x02\n" +
+	"\apayment\x18\a \x01(\v2\x17.misaka.v1.OrderPaymentR\apayment\"\xf5\x02\n" +
 	"\vAgentStatus\x12\x18\n" +
 	"\aversion\x18\x01 \x01(\tR\aversion\x12!\n" +
 	"\fbili_version\x18\x02 \x01(\tR\vbiliVersion\x12\x1a\n" +
@@ -607,7 +628,8 @@ const file_misaka_v1_sisters_proto_rawDesc = "" +
 	"\x05tasks\x18\x05 \x03(\v2\x15.misaka.v1.TaskStatusR\x05tasks\x12'\n" +
 	"\x0fmax_concurrency\x18\x06 \x01(\x05R\x0emaxConcurrency\x12#\n" +
 	"\rruntime_ready\x18\a \x01(\bR\fruntimeReady\x12.\n" +
-	"\x13supports_time_start\x18\b \x01(\bR\x11supportsTimeStart*\xa1\x01\n" +
+	"\x13supports_time_start\x18\b \x01(\bR\x11supportsTimeStart\x12:\n" +
+	"\x19supports_request_interval\x18\t \x01(\bR\x17supportsRequestInterval*\xa1\x01\n" +
 	"\tTaskState\x12\x1a\n" +
 	"\x16TASK_STATE_UNSPECIFIED\x10\x00\x12\x15\n" +
 	"\x11TASK_STATE_QUEUED\x10\x01\x12\x16\n" +

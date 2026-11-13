@@ -78,7 +78,6 @@ List<DisplayOrderPayment> collectOrderPayments(
   Map<String, AgentStatus> statuses, {
   Set<String> disconnected = const {},
 }) {
-  final tasks = {for (final task in state.tasks) task.id: task};
   final accounts = {for (final account in state.accounts) account.id: account};
   final grouped = <String, List<_OrderCandidate>>{};
   for (final machine in state.machines) {
@@ -88,7 +87,9 @@ List<DisplayOrderPayment> collectOrderPayments(
           !isValidOrderId(status.payment.orderId)) {
         continue;
       }
-      final task = tasks[status.id];
+      final task = state.tasks
+          .where((task) => task.ownsExecution(machine.id, status.id))
+          .firstOrNull;
       final account = accounts[task?.accountId];
       // Without the original local association we cannot safely label the
       // account or merge orders. The normal task status still remains visible.

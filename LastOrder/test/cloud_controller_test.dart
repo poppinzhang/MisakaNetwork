@@ -25,6 +25,7 @@ Future<CloudController> readyController({
   FakeHelper? helper,
 }) async {
   final controller = CloudController(
+    templateLoader: () async => [],
     store: store ?? MemoryStore(),
     helper: helper ?? keyHelper(),
   );
@@ -278,11 +279,12 @@ void main() {
       final store = MemoryStore();
       final helper = keyHelper();
       final c = await readyController(store: store, helper: helper);
-      await saveCredential(c, CloudProvider.tencent);
-      final template = CloudTemplate.forProvider(CloudProvider.tencent).first;
+      await saveCredential(c, CloudProvider.volcengine);
+      final template = CloudTemplate.forProvider(CloudProvider.volcengine)
+          .first;
       final created = await Future.wait([
-        c.startPreviewCreation(CloudProvider.tencent, template),
-        c.startPreviewCreation(CloudProvider.tencent, template),
+        c.startPreviewCreation(CloudProvider.volcengine, template),
+        c.startPreviewCreation(CloudProvider.volcengine, template),
       ]);
       expect(created.map((job) => job.id).toSet().length, 2);
       expect(created.map((job) => job.name).toSet().length, 2);
@@ -366,10 +368,10 @@ void main() {
   ) async {
     final store = MemoryStore();
     final first = await readyController(store: store);
-    await saveCredential(first, CloudProvider.tencent);
+    await saveCredential(first, CloudProvider.volcengine);
     await first.startPreviewCreation(
-      CloudProvider.tencent,
-      CloudTemplate.forProvider(CloudProvider.tencent).first,
+      CloudProvider.volcengine,
+      CloudTemplate.forProvider(CloudProvider.volcengine).first,
     );
     final nextStore = MemoryStore()..secrets.addAll(store.secrets);
     final restored = await readyController(store: nextStore);
@@ -383,15 +385,15 @@ void main() {
 
   test('creation requires local credentials, a ready key and matching provider template', () async {
     final c = await readyController();
-    final template = CloudTemplate.forProvider(CloudProvider.tencent).first;
+    final template = CloudTemplate.forProvider(CloudProvider.volcengine).first;
     await expectLater(
-      c.startPreviewCreation(CloudProvider.tencent, template),
+      c.startPreviewCreation(CloudProvider.volcengine, template),
       throwsA(isA<UserError>()),
     );
-    await saveCredential(c, CloudProvider.tencent);
+    await saveCredential(c, CloudProvider.volcengine);
     await expectLater(
       c.startPreviewCreation(
-        CloudProvider.tencent,
+        CloudProvider.volcengine,
         CloudTemplate.forProvider(CloudProvider.aliyun).first,
       ),
       throwsA(isA<UserError>()),
@@ -399,9 +401,9 @@ void main() {
     final failedKey = await readyController(
       helper: FakeHelper()..handler = (_, _) async => {},
     );
-    await saveCredential(failedKey, CloudProvider.tencent);
+    await saveCredential(failedKey, CloudProvider.volcengine);
     await expectLater(
-      failedKey.startPreviewCreation(CloudProvider.tencent, template),
+      failedKey.startPreviewCreation(CloudProvider.volcengine, template),
       throwsA(isA<UserError>()),
     );
   });
@@ -431,10 +433,10 @@ void main() {
       addTearDown(c.dispose);
       await c.initialize(poll: false);
       await c.cloud.initialize();
-      await saveCredential(c.cloud, CloudProvider.tencent);
+      await saveCredential(c.cloud, CloudProvider.volcengine);
       await c.cloud.startPreviewCreation(
-        CloudProvider.tencent,
-        CloudTemplate.forProvider(CloudProvider.tencent).first,
+        CloudProvider.volcengine,
+        CloudTemplate.forProvider(CloudProvider.volcengine).first,
       );
       await tester.pump(const Duration(seconds: 3));
       await tester.pump(const Duration(seconds: 3));
@@ -449,14 +451,18 @@ void main() {
     (tester) async {
       final originalStore = MemoryStore();
       final original = await readyController(store: originalStore);
-      await saveCredential(original, CloudProvider.tencent);
+      await saveCredential(original, CloudProvider.volcengine);
       await original.startPreviewCreation(
-        CloudProvider.tencent,
-        CloudTemplate.forProvider(CloudProvider.tencent).first,
+        CloudProvider.volcengine,
+        CloudTemplate.forProvider(CloudProvider.volcengine).first,
       );
       final store = _CloudWriteGateStore()
         ..secrets.addAll(originalStore.secrets);
-      final restored = CloudController(store: store, helper: keyHelper());
+      final restored = CloudController(
+        store: store,
+        helper: keyHelper(),
+        templateLoader: () async => [],
+      );
       addTearDown(restored.dispose);
       final initialization = restored.initialize();
       await store.writeStarted.future;

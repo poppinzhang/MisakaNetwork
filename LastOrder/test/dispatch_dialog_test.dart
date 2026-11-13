@@ -48,13 +48,17 @@ class _NavigationObserver extends NavigatorObserver {
   }
 }
 
-TicketTask _task(String id, {List<String> dispatchedTo = const []}) =>
-    TicketTask(
-      id: id,
-      name: '任务 $id',
-      accountId: 'account',
-      dispatchedTo: dispatchedTo,
-    );
+TicketTask _task(
+  String id, {
+  List<String> dispatchedTo = const [],
+  List<TaskDispatch> dispatches = const [],
+}) => TicketTask(
+  id: id,
+  name: '任务 $id',
+  accountId: 'account',
+  dispatchedTo: dispatchedTo,
+  dispatches: dispatches,
+);
 
 Future<_DialogResult> _openDialog(
   WidgetTester tester, {
@@ -235,7 +239,16 @@ void main() {
       gateway: gateway,
       machineIds: ['a', 'b'],
       existingTasks: [
-        _task('historical', dispatchedTo: ['a']),
+        _task(
+          'historical',
+          dispatches: [
+            const TaskDispatch(
+              machineId: 'a',
+              executionId: 'historical',
+              finished: true,
+            ),
+          ],
+        ),
       ],
     );
     await _selectMachine(tester, 'a');
@@ -341,9 +354,118 @@ void main() {
       tester.widget<CheckboxListTile>(_machineTile('c')).onChanged,
       isNotNull,
     );
-    expect(find.text('node.example:20001 · 已提交，不会重复执行'), findsNWidgets(2));
+    expect(find.text('node.example:20001 · 执行未结束或结果待确认'), findsNWidgets(2));
     expect(find.textContaining('多任务风险'), findsNothing);
   });
+
+  for (final terminal in [
+    TaskState.TASK_STATE_CANCELLED,
+    TaskState.TASK_STATE_SUCCEEDED,
+    TaskState.TASK_STATE_FAILED,
+  ]) {
+    testWidgets('$terminal releases the machine for another execution', (
+      tester,
+    ) async {
+      final gateway = _WorkloadGateway()
+        ..tasksByMachine['a'] = [
+          TaskStatus(id: 'new', state: TaskState.TASK_STATE_RUNNING),
+        ];
+      final result = await _openDialog(
+        tester,
+        gateway: gateway,
+        target: _task('new', dispatchedTo: ['a']),
+      );
+      expect(
+        tester.widget<CheckboxListTile>(_machineTile('a')).onChanged,
+        isNull,
+      );
+      expect(_tileText('a', '当前负载：1 个任务'), findsOneWidget);
+
+      gateway.tasksByMachine['a'] = [TaskStatus(id: 'new', state: terminal)];
+      await result.controller.refresh();
+      await tester.pumpAndSettle();
+
+      expect(
+        tester.widget<CheckboxListTile>(_machineTile('a')).onChanged,
+        isNotNull,
+      );
+      expect(_tileText('a', '当前负载：0 个任务'), findsOneWidget);
+      expect(_tileText('a', '上次执行已结束，可重新分发。'), findsOneWidget);
+      expect(find.textContaining('已下单时请先核对订单'), findsOneWidget);
+      await _selectMachine(tester, 'a');
+      await tester.tap(find.text('提交到 1 台机器'));
+      await tester.pumpAndSettle();
+      expect(result.returned, isTrue);
+      expect(result.machines, ['a']);
+      expect(find.text('多任务风险'), findsNothing);
+      expect(tester.takeException(), isNull);
+    });
+  }
+
+  testWidgets(
+    'a missing latest execution remains blocked despite older success',
+    (tester) async {
+      final gateway = _WorkloadGateway()
+        ..tasksByMachine['a'] = [
+          TaskStatus(id: 'new', state: TaskState.TASK_STATE_SUCCEEDED),
+        ];
+      await _openDialog(
+        tester,
+        gateway: gateway,
+        target: _task(
+          'new',
+          dispatches: [
+            const TaskDispatch(
+              machineId: 'a',
+              executionId: 'new',
+              finished: true,
+            ),
+            const TaskDispatch(machineId: 'a', executionId: 'new-execution'),
+          ],
+        ),
+      );
+
+      expect(
+        tester.widget<CheckboxListTile>(_machineTile('a')).onChanged,
+        isNull,
+      );
+      expect(_tileText('a', '当前负载：1 个任务'), findsOneWidget);
+      expect(_tileText('a', '任务 new · 状态待确认'), findsOneWidget);
+      expect(find.text('上次执行已结束，可重新分发。'), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'a finished latest execution stays selectable after history eviction',
+    (tester) async {
+      await _openDialog(
+        tester,
+        gateway: _WorkloadGateway(),
+        target: _task(
+          'new',
+          dispatches: [
+            const TaskDispatch(
+              machineId: 'a',
+              executionId: 'new',
+              finished: true,
+            ),
+            const TaskDispatch(
+              machineId: 'a',
+              executionId: 'new-execution',
+              finished: true,
+            ),
+          ],
+        ),
+      );
+
+      expect(
+        tester.widget<CheckboxListTile>(_machineTile('a')).onChanged,
+        isNotNull,
+      );
+      expect(_tileText('a', '当前负载：0 个任务'), findsOneWidget);
+      expect(_tileText('a', '上次执行已结束，可重新分发。'), findsOneWidget);
+    },
+  );
 
   for (final becomesBusy in [false, true]) {
     testWidgets(

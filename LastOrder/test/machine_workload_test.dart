@@ -7,11 +7,13 @@ TicketTask localTask(
   String id, {
   String? name,
   List<String> machines = const ['node'],
+  List<TaskDispatch> dispatches = const [],
 }) => TicketTask(
   id: id,
   name: name ?? '本地 $id',
   accountId: 'account',
   dispatchedTo: machines,
+  dispatches: dispatches,
 );
 
 void main() {
@@ -176,19 +178,122 @@ void main() {
     expect(workload.stale, isTrue);
   });
 
+  test('fresh empty status retains an unconfirmed submission', () {
+    final workload = MachineWorkload.fromState(
+      machineId: 'node',
+      localTasks: [localTask('historical')],
+      status: AgentStatus(),
+    );
+
+    expect(workload.tasks.single.id, 'historical');
+    expect(workload.tasks.single.state, isNull);
+    expect(workload.hasOtherTasks('new'), isTrue);
+    expect(workload.statusUnknown, isFalse);
+    expect(workload.stale, isFalse);
+  });
+
   test(
-    'fresh empty status clears historical workload after restart or eviction',
+    'latest execution IDs retain local names without reviving finished history',
     () {
       final workload = MachineWorkload.fromState(
         machineId: 'node',
-        localTasks: [localTask('historical')],
-        status: AgentStatus(),
+        localTasks: [
+          localTask(
+            'repeated',
+            dispatches: [
+              const TaskDispatch(
+                machineId: 'node',
+                executionId: 'repeated',
+                finished: true,
+              ),
+              const TaskDispatch(machineId: 'node', executionId: 'second'),
+            ],
+          ),
+          localTask(
+            'finished',
+            dispatches: [
+              const TaskDispatch(
+                machineId: 'node',
+                executionId: 'finished',
+                finished: true,
+              ),
+            ],
+          ),
+        ],
+        status: AgentStatus(
+          tasks: [
+            TaskStatus(id: 'repeated', state: TaskState.TASK_STATE_SUCCEEDED),
+            TaskStatus(id: 'second', state: TaskState.TASK_STATE_QUEUED),
+          ],
+        ),
+        connectionFailed: true,
+      );
+
+      expect(workload.tasks.length, 1);
+      expect(workload.tasks.single.id, 'second');
+      expect(workload.tasks.single.name, '本地 repeated');
+      expect(workload.tasks.single.state, TaskState.TASK_STATE_QUEUED);
+    },
+  );
+
+  test('an absent latest execution stays unconfirmed even if an older run finished', () {
+    final workload = MachineWorkload.fromState(
+      machineId: 'node',
+      localTasks: [
+        localTask(
+          'repeated',
+          dispatches: [
+            const TaskDispatch(
+              machineId: 'node',
+              executionId: 'repeated',
+              finished: true,
+            ),
+            const TaskDispatch(machineId: 'node', executionId: 'second'),
+          ],
+        ),
+      ],
+      status: AgentStatus(
+        tasks: [
+          TaskStatus(id: 'repeated', state: TaskState.TASK_STATE_CANCELLED),
+        ],
+      ),
+    );
+
+    expect(workload.tasks.single.id, 'second');
+    expect(workload.tasks.single.name, '本地 repeated');
+    expect(workload.tasks.single.state, isNull);
+  });
+
+  test('persisted completion survives missing history and stale nonterminal reports', () {
+    final tasks = [
+      localTask(
+        'finished',
+        dispatches: [
+          const TaskDispatch(
+            machineId: 'node',
+            executionId: 'finished',
+            finished: true,
+          ),
+        ],
+      ),
+    ];
+    for (final status in [
+      null,
+      AgentStatus(),
+      AgentStatus(
+        tasks: [
+          TaskStatus(id: 'finished', state: TaskState.TASK_STATE_RUNNING),
+        ],
+      ),
+    ]) {
+      final workload = MachineWorkload.fromState(
+        machineId: 'node',
+        localTasks: tasks,
+        status: status,
+        connectionFailed: true,
       );
 
       expect(workload.tasks, isEmpty);
-      expect(workload.hasOtherTasks('new'), isFalse);
-      expect(workload.statusUnknown, isFalse);
-      expect(workload.stale, isFalse);
-    },
-  );
+    }
+  });
 }

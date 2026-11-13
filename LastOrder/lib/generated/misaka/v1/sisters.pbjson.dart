@@ -64,6 +64,13 @@ const TaskRequest$json = {
     {'1': 'cookie_json', '3': 3, '4': 1, '5': 9, '10': 'cookieJson'},
     {'1': 'config_json', '3': 4, '4': 1, '5': 9, '10': 'configJson'},
     {'1': 'time_start', '3': 5, '4': 1, '5': 9, '10': 'timeStart'},
+    {
+      '1': 'request_interval_ms',
+      '3': 6,
+      '4': 1,
+      '5': 5,
+      '10': 'requestIntervalMs'
+    },
   ],
 };
 
@@ -71,7 +78,8 @@ const TaskRequest$json = {
 final $typed_data.Uint8List taskRequestDescriptor = $convert.base64Decode(
     'CgtUYXNrUmVxdWVzdBIOCgJpZBgBIAEoCVICaWQSEgoEbmFtZRgCIAEoCVIEbmFtZRIfCgtjb2'
     '9raWVfanNvbhgDIAEoCVIKY29va2llSnNvbhIfCgtjb25maWdfanNvbhgEIAEoCVIKY29uZmln'
-    'SnNvbhIdCgp0aW1lX3N0YXJ0GAUgASgJUgl0aW1lU3RhcnQ=');
+    'SnNvbhIdCgp0aW1lX3N0YXJ0GAUgASgJUgl0aW1lU3RhcnQSLgoTcmVxdWVzdF9pbnRlcnZhbF'
+    '9tcxgGIAEoBVIRcmVxdWVzdEludGVydmFsTXM=');
 
 @$core.Deprecated('Use taskEventDescriptor instead')
 const TaskEvent$json = {
@@ -174,6 +182,13 @@ const AgentStatus$json = {
       '5': 8,
       '10': 'supportsTimeStart'
     },
+    {
+      '1': 'supports_request_interval',
+      '3': 9,
+      '4': 1,
+      '5': 8,
+      '10': 'supportsRequestInterval'
+    },
   ],
 };
 
@@ -184,4 +199,5 @@ final $typed_data.Uint8List agentStatusDescriptor = $convert.base64Decode(
     'ZWRfdW5peF9tcxgEIAEoA1INc3RhcnRlZFVuaXhNcxIrCgV0YXNrcxgFIAMoCzIVLm1pc2FrYS'
     '52MS5UYXNrU3RhdHVzUgV0YXNrcxInCg9tYXhfY29uY3VycmVuY3kYBiABKAVSDm1heENvbmN1'
     'cnJlbmN5EiMKDXJ1bnRpbWVfcmVhZHkYByABKAhSDHJ1bnRpbWVSZWFkeRIuChNzdXBwb3J0c1'
-    '90aW1lX3N0YXJ0GAggASgIUhFzdXBwb3J0c1RpbWVTdGFydA==');
+    '90aW1lX3N0YXJ0GAggASgIUhFzdXBwb3J0c1RpbWVTdGFydBI6ChlzdXBwb3J0c19yZXF1ZXN0'
+    'X2ludGVydmFsGAkgASgIUhdzdXBwb3J0c1JlcXVlc3RJbnRlcnZhbA==');

@@ -125,6 +125,79 @@ void main() {
     ]);
   });
 
+  test(
+    'repeated executions retain the original task and account association',
+    () {
+      final state = paymentState();
+      state.tasks[0] = TicketTask(
+        id: 'task-a',
+        name: '任务甲',
+        accountId: 'account-a',
+        dispatches: [
+          TaskDispatch(machineId: 'a', executionId: 'task-a', finished: true),
+          TaskDispatch(machineId: 'a', executionId: 'execution-a-2'),
+        ],
+      );
+      final orders = collectOrderPayments(state, {
+        'a': AgentStatus(
+          tasks: [
+            paymentStatus(),
+            paymentStatus(taskId: 'execution-a-2', orderId: '12346'),
+          ],
+        ),
+      });
+      expect(orders.map((order) => order.key), ['10001:12345', '10001:12346']);
+      for (final order in orders) {
+        expect(order.account.id, 'account-a');
+        expect(order.sources.single.task.id, 'task-a');
+        expect(order.sources.single.machine.id, 'a');
+        expect(order.paymentCode, wechatCode);
+      }
+    },
+  );
+
+  test('execution IDs are associated only with their recorded machine', () {
+    final state = paymentState();
+    state.tasks[0] = TicketTask(
+      id: 'task-a',
+      name: '任务甲',
+      accountId: 'account-a',
+      dispatches: [TaskDispatch(machineId: 'a', executionId: 'execution-a-2')],
+    );
+    final snapshot = {
+      'b': AgentStatus(tasks: [paymentStatus(taskId: 'execution-a-2')]),
+    };
+    expect(collectOrderPayments(state, snapshot), isEmpty);
+    snapshot['a'] = AgentStatus(
+      tasks: [paymentStatus(taskId: 'execution-a-2')],
+    );
+    final orders = collectOrderPayments(state, snapshot);
+    expect(orders, hasLength(1));
+    expect(orders.single.sources, hasLength(1));
+    expect(orders.single.sources.single.machine.id, 'a');
+  });
+
+  test('deleting a task hides payment details for all its executions', () {
+    final state = paymentState();
+    state.tasks[0] = TicketTask(
+      id: 'task-a',
+      name: '任务甲',
+      accountId: 'account-a',
+      dispatches: [TaskDispatch(machineId: 'a', executionId: 'execution-a-2')],
+    );
+    final snapshot = {
+      'a': AgentStatus(
+        tasks: [
+          paymentStatus(),
+          paymentStatus(taskId: 'execution-a-2', orderId: '12346'),
+        ],
+      ),
+    };
+    expect(collectOrderPayments(state, snapshot), hasLength(2));
+    state.tasks.removeWhere((task) => task.id == 'task-a');
+    expect(collectOrderPayments(state, snapshot), isEmpty);
+  });
+
   test('keeps valid code over detail-only, selects latest valid code deterministically', () {
     final a = AgentStatus(
       tasks: [

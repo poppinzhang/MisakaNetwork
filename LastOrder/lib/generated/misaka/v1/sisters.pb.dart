@@ -122,6 +122,7 @@ class TaskRequest extends $pb.GeneratedMessage {
     $core.String? cookieJson,
     $core.String? configJson,
     $core.String? timeStart,
+    $core.int? requestIntervalMs,
   }) {
     final result = TaskRequest._();
     if (id != null) result.id = id;
@@ -129,6 +130,7 @@ class TaskRequest extends $pb.GeneratedMessage {
     if (cookieJson != null) result.cookieJson = cookieJson;
     if (configJson != null) result.configJson = configJson;
     if (timeStart != null) result.timeStart = timeStart;
+    if (requestIntervalMs != null) result.requestIntervalMs = requestIntervalMs;
     return result;
   }
 
@@ -150,6 +152,7 @@ class TaskRequest extends $pb.GeneratedMessage {
     ..aOS(3, _omitFieldNames ? '' : 'cookieJson')
     ..aOS(4, _omitFieldNames ? '' : 'configJson')
     ..aOS(5, _omitFieldNames ? '' : 'timeStart')
+    ..aI(6, _omitFieldNames ? '' : 'requestIntervalMs')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -220,6 +223,17 @@ class TaskRequest extends $pb.GeneratedMessage {
   $core.bool hasTimeStart() => $_has(4);
   @$pb.TagNumber(5)
   void clearTimeStart() => $_clearField(5);
+
+  /// Ticket request interval in integer milliseconds, 100..60000.
+  /// Zero uses the default of 1000 ms.
+  @$pb.TagNumber(6)
+  $core.int get requestIntervalMs => $_getIZ(5);
+  @$pb.TagNumber(6)
+  set requestIntervalMs($core.int value) => $_setSignedInt32(5, value);
+  @$pb.TagNumber(6)
+  $core.bool hasRequestIntervalMs() => $_has(5);
+  @$pb.TagNumber(6)
+  void clearRequestIntervalMs() => $_clearField(6);
 }
 
 class TaskEvent extends $pb.GeneratedMessage {
@@ -535,6 +549,7 @@ class AgentStatus extends $pb.GeneratedMessage {
     $core.int? maxConcurrency,
     $core.bool? runtimeReady,
     $core.bool? supportsTimeStart,
+    $core.bool? supportsRequestInterval,
   }) {
     final result = AgentStatus._();
     if (version != null) result.version = version;
@@ -545,6 +560,8 @@ class AgentStatus extends $pb.GeneratedMessage {
     if (maxConcurrency != null) result.maxConcurrency = maxConcurrency;
     if (runtimeReady != null) result.runtimeReady = runtimeReady;
     if (supportsTimeStart != null) result.supportsTimeStart = supportsTimeStart;
+    if (supportsRequestInterval != null)
+      result.supportsRequestInterval = supportsRequestInterval;
     return result;
   }
 
@@ -570,6 +587,7 @@ class AgentStatus extends $pb.GeneratedMessage {
     ..aI(6, _omitFieldNames ? '' : 'maxConcurrency')
     ..aOB(7, _omitFieldNames ? '' : 'runtimeReady')
     ..aOB(8, _omitFieldNames ? '' : 'supportsTimeStart')
+    ..aOB(9, _omitFieldNames ? '' : 'supportsRequestInterval')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -661,6 +679,17 @@ class AgentStatus extends $pb.GeneratedMessage {
   $core.bool hasSupportsTimeStart() => $_has(7);
   @$pb.TagNumber(8)
   void clearSupportsTimeStart() => $_clearField(8);
+
+  /// Clients must not send tasks to agents that would ignore the configured
+  /// request interval. Redeploy those agents before submitting tasks.
+  @$pb.TagNumber(9)
+  $core.bool get supportsRequestInterval => $_getBF(8);
+  @$pb.TagNumber(9)
+  set supportsRequestInterval($core.bool value) => $_setBool(8, value);
+  @$pb.TagNumber(9)
+  $core.bool hasSupportsRequestInterval() => $_has(8);
+  @$pb.TagNumber(9)
+  void clearSupportsRequestInterval() => $_clearField(9);
 }
 
 const $core.bool _omitFieldNames =

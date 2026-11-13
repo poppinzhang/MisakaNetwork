@@ -67,6 +67,7 @@ class FakeGateway implements AgentGateway {
   final remoteTasks = <TaskStatus>[];
   TaskState submitState = TaskState.TASK_STATE_QUEUED;
   bool timeStartSupported = true;
+  bool requestIntervalSupported = true;
   final statusRequests = <Machine>[];
   Future<AgentStatus> Function(Machine)? statusHandler;
   @override
@@ -81,6 +82,7 @@ class FakeGateway implements AgentGateway {
       maxConcurrency: 2,
       tasks: remoteTasks,
       supportsTimeStart: timeStartSupported,
+      supportsRequestInterval: requestIntervalSupported,
     );
   }
 
@@ -192,4 +194,5 @@ AppController controller({
   gateway: gateway ?? FakeGateway(),
   runtime: runtime ?? FakeRuntime(),
   helper: helper ?? FakeHelper(),
+  cloudTemplateLoader: () async => [],
 );
