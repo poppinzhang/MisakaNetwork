@@ -29,11 +29,22 @@ func nativePowerShell(script string, input io.Reader) (string, error) {
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded)
 	cmd.Stdin = input
-	output, err := cmd.CombinedOutput()
+	// Match the SSH runner's separate streams. Windows PowerShell may emit
+	// CLIXML progress on stderr while a command succeeds; it is not data.
+	var output, diagnostics bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &output, &diagnostics
+	err := cmd.Run()
 	if err != nil {
-		return "", fmt.Errorf("PowerShell fixture: %w: %s", err, strings.TrimSpace(string(output)))
+		return "", fmt.Errorf("PowerShell fixture: %w: stdout=%q stderr=%q", err, output.String(), diagnostics.String())
 	}
-	return strings.TrimSpace(string(output)), nil
+	return strings.TrimSpace(output.String()), nil
+}
+
+func TestWindowsNativePowerShellKeepsDiagnosticsSeparate(t *testing.T) {
+	output, err := nativePowerShell(`[Console]::Error.Write('synthetic diagnostic');'ready'`, nil)
+	if err != nil || output != "ready" {
+		t.Fatalf("PowerShell diagnostics contaminated output: output=%q error=%v", output, err)
+	}
 }
 
 func TestWindowsDeploymentScriptsParseNatively(t *testing.T) {
@@ -60,7 +71,7 @@ func TestWindowsNativeDeploymentServiceLifecycle(t *testing.T) {
 	}
 	output, err := nativePowerShell(windowsServiceHelpers+`if ($null -ne (Find-Service)) {throw 'existing MisakaSisters service; refusing test'};'ready'`, nil)
 	if err != nil || output != "ready" {
-		t.Fatalf("unsafe SCM fixture environment: %v", err)
+		t.Fatalf("unsafe SCM fixture environment: output=%q error=%v", output, err)
 	}
 	nonce := make([]byte, 8)
 	if _, err := rand.Read(nonce); err != nil {
