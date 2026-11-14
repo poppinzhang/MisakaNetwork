@@ -1,6 +1,6 @@
-# LastOrder Windows 与 Android（0.3.0）
+# LastOrder Windows 与 Android（0.3.1）
 
-源码版本统一为 `0.3.0+10`，Sisters、部署 helper 与运行时版本同为 `0.3.0`；Python 桥接协议仍为 `1`。实际构建、签名与测试状态见 [0.3.0 发布记录](../releases/0.3.0.md)，源码支持不等同于已交付所有安装包。
+源码版本统一为 `0.3.1+11`，Sisters、部署 helper 与运行时版本同为 `0.3.1`；Python 桥接协议仍为 `1`。实际构建、签名与测试状态见 [0.3.1 发布记录](../releases/0.3.1.md)，源码支持不等同于已交付所有安装包。
 
 ## 平台与功能
 
@@ -22,7 +22,7 @@ Cookie 与含购票人信息的任务配置由 `flutter_secure_storage` 的 Wind
 
 Android 不运行桌面 EXE 或 PyInstaller 子进程。原生 `misaka/embedded` MethodChannel 在后台线程调用嵌入式服务：
 
-- `runtime`：传入单个 JSON 请求，返回一个 JSON result。Chaquopy 嵌入 Python 3.11，调用同一份 biliTickerBuy 的登录、查询、配置接口；共享 `runtime/bridge.py` 的请求校验及账号身份验证。移动端只装管理端所需依赖，并拒绝 `run`，实际抢票始终由远程 Sisters 完成。二维码依赖只有 qrcode 与 PyPNG，不含 Pillow；登录与付款二维码由 bridge 显式选择 PyPNG 在内存编码。已交付的 0.3.0 Android 版登录二维码仍走需要 Pillow 的默认工厂，无法生成，修复尚未发布，详见 [biliTickerBuy 运行时](../biliTickerBuy运行时.md#登录二维码编码修复复核未发布)。
+- `runtime`：传入单个 JSON 请求，返回一个 JSON result。Chaquopy 嵌入 Python 3.11，调用同一份 biliTickerBuy 的登录、查询、配置接口；共享 `runtime/bridge.py` 的请求校验及账号身份验证。移动端只装管理端所需依赖，并拒绝 `run`，实际抢票始终由远程 Sisters 完成。二维码依赖只有 qrcode 与 PyPNG，不含 Pillow；登录与付款二维码由 bridge 显式选择 PyPNG 在内存编码。已交付的 0.3.0 Android 版登录二维码仍走需要 Pillow 的默认工厂，无法生成，0.3.1 正在准备发布包含该修复的完整包，详见 [biliTickerBuy 运行时](../biliTickerBuy运行时.md#登录二维码编码修复复核未发布)。
 - `helper`：JSON 请求经 JNI 进入 Go `internal/mobile`，复用 `internal/control` 的 SSH 主机指纹验证、证书签发、完整包验证和远程部署。移动桥接限制文件路径位于本应用私有目录。
 - `resources`：按应用版本将 APK 内置的四种 Sisters 包准备到应用私有目录，返回包含 `bundles` 的资源根目录。APK 内使用 `.bundle` 保存原始 gzip 字节，避免 Android 资源打包器自动解压并去掉 `.gz`；解包到私有目录时还原 `.tar.gz`。准备失败不继续部署。
 
@@ -35,7 +35,7 @@ Cookie 与任务秘密由 Android Keystore 支持的安全存储保护；显式�
 
 ## 升级与测试
 
-沿用 schema 2、`state-v2.json` 与 `v2.` 安全存储命名空间；0.1.1 数据在同一平台和同一应用身份下继续读取。0.1.0 仍不迁移，需重新配置。macOS 在 0.3.0 改为独立 `macos-vault-v1` 存储而不影响 Windows 与 Android。跨平台不自动复制账号、密钥和机器配置；首次安装需添加机器并登录。必须将所有目标 Sisters 重新部署为 0.3.0，避免 helper/runtime 版本校验拒绝旧包。重部署会停止当前任务。
+沿用 schema 2、`state-v2.json` 与 `v2.` 安全存储命名空间；0.1.1 数据在同一平台和同一应用身份下继续读取。0.1.0 仍不迁移，需重新配置。macOS 在 0.3.0 改为独立 `macos-vault-v1` 存储而不影响 Windows 与 Android。跨平台不自动复制账号、密钥和机器配置；首次安装需添加机器并登录。必须将所有目标 Sisters 重新部署为 0.3.1，避免 helper/runtime 版本校验拒绝旧包。重部署会停止当前任务。
 
 Android 测试签名与正式签名不能互相覆盖安装；改变签名需要卸载重装并重新登录、配置和部署，正式交付应保管稳定签名密钥。密钥、口令与构建主机信息不能进入源码或发布记录。
 

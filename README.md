@@ -26,7 +26,7 @@
 
 ## 快速开始
 
-**当前版本为 0.3.0，已提供[正式下载](https://github.com/poppinzhang/MisakaNetwork/releases/tag/0.3.0)。**
+**当前已公开发布版本仍为 0.3.0，可前往[正式下载页](https://github.com/poppinzhang/MisakaNetwork/releases/tag/0.3.0)；0.3.1 正在准备全平台构建与正式发布（状态见 [0.3.1 发布记录](docs/releases/0.3.1.md)）。**
 
 **1 · 安装 LastOrder。** 根据[支持的平台](#支持的平台)选择安装包：
 
@@ -114,7 +114,7 @@ Windows 和 Android 目前可用于管理任务，尚不支持在这些系统上
 
 ## 更多说明
 
-- [0.3.0 安装与升级说明](docs/releases/0.3.0.md)：正式安装包、安装方式与升级注意事项。
+- [0.3.1 发布与升级记录](docs/releases/0.3.1.md)：0.3.1 构建准备状态、安装包说明与升级注意事项（当前公开发布入口仍见 [0.3.0 下载与交付记录](docs/releases/0.3.0.md)）。
 - [更新记录](CHANGELOG.md)：各版本变化与尚未发布的改动。
 - [开发与维护指南](AGENTS.md)：供开发者和 AI Agent 查阅的环境、测试、打包与实现文档。
 

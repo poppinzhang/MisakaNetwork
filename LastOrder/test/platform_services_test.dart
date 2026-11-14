@@ -130,7 +130,7 @@ void main() {
     () async {
       messenger.setMockMethodCallHandler(
         channel,
-        (_) async => '/data/user/0/app/files/resources/0.3.0',
+        (_) async => '/data/user/0/app/files/resources/0.3.1',
       );
       expect(await services.resources(), startsWith('/data/'));
       messenger.setMockMethodCallHandler(

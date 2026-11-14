@@ -16,7 +16,7 @@ import (
 	"time"
 )
 
-const Version = "0.3.0"
+const Version = "0.3.1"
 const BiliVersion = "2.15.18"
 
 type Identity struct {
