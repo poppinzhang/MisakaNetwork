@@ -54,6 +54,7 @@ jobs:
         working-directory: LastOrder
   android:
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -68,8 +69,8 @@ jobs:
           python -m venv "$venv"
           "$venv/bin/python" -m pip install --only-binary=:all: -r runtime/requirements-android.lock
           "$venv/bin/python" -m pip check
-          # Like the APK: qrcode and PyPNG without Pillow, so real QR checks run.
-          "$venv/bin/python" -c 'import importlib.util as u, png, qrcode; assert u.find_spec("PIL") is None'
+          # Match the APK's pure-Python HTTP/2 and QR dependency set.
+          "$venv/bin/python" -c 'import importlib.util as u, h2, httpcore, httpx, png, qrcode; assert all(u.find_spec(name) is None for name in ("PIL", "brotli", "zstandard"))'
           "$venv/bin/python" -m unittest discover -s runtime/tests -v
       - uses: actions/setup-java@v4
         with:
@@ -93,3 +94,19 @@ jobs:
         working-directory: LastOrder
         env:
           MISAKA_ANDROID_ALLOW_DEBUG_SIGNING: '1'
+      - name: Enable emulator acceleration
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Verify Python, JNI and Keystore on Android 16
+        uses: reactivecircus/android-emulator-runner@v2
+        timeout-minutes: 25
+        with:
+          api-level: 36
+          target: google_apis
+          arch: x86_64
+          disable-animations: true
+          working-directory: LastOrder
+          # Source verification has no four-platform deployment bundles.
+          script: flutter test integration_test/android_embedded_test.dart -d emulator-5554 --name 'Android (embedded|JNI|Keystore)'

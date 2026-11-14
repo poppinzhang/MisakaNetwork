@@ -11,6 +11,7 @@ import tarfile
 import zipfile
 
 from android_manifest import attributes as android_attributes
+from android_runtime_manifest import verify_android_runtime
 from release_config import APP_TARGETS, TARGETS, android_bundle_asset, artifact_name
 APP_CONTENTS = "LastOrder.app/Contents/"
 WINDOWS_CRT_DLLS = ("msvcp140.dll", "vcruntime140.dll", "vcruntime140_1.dll")
@@ -68,6 +69,7 @@ def verify_app(data: bytes, release: dict, target: str = "macos-amd64") -> None:
                 require(name in names, "Android native component missing: " + name)
             require(not any(name.startswith("lib/") and name.split("/")[1] != abi for name in names),
                     "Unexpected Android ABI in split APK")
+            verify_android_runtime(archive, abi, release["bili_version"])
             prefix = "assets/bundles/"
         verify_bundles(archive, prefix, release, android=platform == "android")
 

@@ -2,6 +2,12 @@
 
 ## unstaged
 
+- 修复 Android 读取演出、购票人和地址时缺失 HTTPX/HTTP2 依赖的问题；补齐与桌面相同版本的纯 Python 依赖，自检实际构造标准 HTTP/2 客户端，避免仅导入模块就误报可用。
+- Android 查询只协商可解码的 gzip/deflate，避免上游固定声明 Brotli/Zstandard 却未携带解码器；每次内嵌调用独立初始化并关闭上游 HTTP 连接、数据库和临时状态，恢复环境，覆盖连续调用与异常清理。
+- 补充真实引擎客户端链路、TLS、原生二维码与配置回归，增加 API 36 模拟器 CI 和 APK Python 模块、依赖、CA、16 KB ELF/ZIP 对齐校验。复核固定上游、标准 TLS、内存 Cookie、空通知和无 Web UI 限制，详见 [Android 兼容性排查](docs/LastOrder/Android兼容性排查.md)。未更新项目版本或发布安装包，未进行真实账号或购票验收。
+
+- 本地验证：Android 依赖 runtime 112 项通过/3 项跳过，桌面依赖 106 项通过/9 项跳过；脚本 122 项通过，Flutter analyze 与 910 项测试通过（2 项可选跳过），Go race/vet 通过。API 36 arm64 模拟器原生 5 项通过；arm64/x64 测试 APK 构建与 Python/依赖/CA/16 KB 静态检查通过。模拟器为 4 KB 页，未验收 16 KB 真机、x64 实际运行或真实登录下单，未运行远程 CI。
+
 ## 0.3.1 — 2026-11-14
 
 交付状态：统一版本 **0.3.1+11** 已通过 GitHub Actions（[43576574662](https://github.com/poppinzhang/MisakaNetwork/actions/runs/43576574662)）完成所有已支持平台构建、清单与校验检查，并公开为 [正式 Release](https://github.com/poppinzhang/MisakaNetwork/releases/tag/0.3.1)（标签 `0.3.1`，提交 `d2fba649bd72cea53f758b8d36937f6a5c090c41`，共 12 个资产、`Latest`）。详情与各平台安装包校验信息见 [0.3.1 记录](docs/releases/0.3.1.md)。内嵌 biliTickerBuy 保持 **2.15.18**。

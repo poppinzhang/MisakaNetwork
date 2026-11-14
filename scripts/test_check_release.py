@@ -12,6 +12,7 @@ import zipfile
 from check_release import APP_CONTENTS, TARGETS, WINDOWS_CRT_DLLS, verify_release
 from package_windows import validate_app_crt
 from release_config import APP_TARGETS, BILI_VERSION, BUILD, VERSION, android_bundle_asset, artifact_name
+from test_android_runtime_manifest import elf_binary, runtime_assets
 
 
 def crt_binary(*, machine=0x8664, dll=True):
@@ -56,7 +57,9 @@ def app_archive(*, target="macos-amd64", app_version=VERSION, build=str(BUILD), 
             abi = {"arm64": "arm64-v8a", "amd64": "x86_64"}[arch]
             for name in ("libmisaka_mobile.so", "libflutter.so"):
                 if not missing_native:
-                    archive.writestr(f"lib/{abi}/{name}", b"synthetic native library")
+                    archive.writestr(f"lib/{abi}/{name}", elf_binary(abi))
+            for name, data in runtime_assets(abi, BILI_VERSION).items():
+                archive.writestr(name, data)
             prefix = "assets/bundles/"
         for target in TARGETS:
             platform, arch = target.split("-")

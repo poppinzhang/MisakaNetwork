@@ -99,6 +99,7 @@ LastOrder 模块 在本地部署，可以完成 抢票 Agent 部署、抢票平�
 | [火山引擎接入](docs/LastOrder/火山引擎接入.md) | 按量 ECS、独立 EIP 联动释放、模板、资源准备与恢复 |
 | [腾讯云接入](docs/LastOrder/腾讯云接入.md) | 按量实例、异步资源准备、内置密钥部署、模板打包、创建查询释放与异常恢复 |
 | [Windows 与 Android](docs/LastOrder/Windows与Android.md) | 平台接入、安全存储、打包和使用边界 |
+| [Android 兼容性排查](docs/LastOrder/Android兼容性排查.md) | HTTPX/HTTP2 依赖、压缩协商、共享解释器清理、真实引擎与模拟器回归 |
 | [Cookie 生命周期](docs/LastOrder/Cookie生命周期.md) | 登录校验、凭据清理、重新登录和存储格式 |
 | [macOS 加密存储](docs/LastOrder/macOS加密存储.md) | 单一钥匙串主密钥、本地加密文件、会话缓存、失败保护与升级重建 |
 | [本地测试环境清理](docs/LastOrder/本地测试环境清理.md) | macOS 新旧资料与钥匙串清理脚本、默认预览、归属核对与失败边界 |
@@ -136,7 +137,7 @@ flutter analyze
 flutter test
 ```
 
-Android 内嵌客户端只携带 `runtime/requirements-android.lock`（qrcode 与 PyPNG，不含 Pillow）。修改 `runtime/bridge.py`、二维码编码或客户端操作时，还要在该依赖集合的独立环境中运行 runtime 测试（命令见 [biliTickerBuy 运行时](docs/biliTickerBuy运行时.md#构建与验证)，CI 的 Android 作业同样执行）；桌面依赖包含 Pillow，无法发现此类问题。二维码一律经 `encode_qr_png` 显式选择图像工厂，不直接调用 qrcode 默认工厂。
+Android 内嵌客户端携带 `runtime/requirements-android.lock`（含 HTTPX/HTTP2、qrcode 与 PyPNG，不含 Pillow/Brotli/Zstandard）。修改 `runtime/bridge.py`、二维码编码或客户端操作时，还要在该依赖集合的独立环境中运行 runtime 测试（命令见 [biliTickerBuy 运行时](docs/biliTickerBuy运行时.md#构建与验证)，CI 的 Android 作业同样执行）；桌面依赖包含 Pillow，无法发现此类问题。二维码一律经 `encode_qr_png` 显式选择图像工厂，不直接调用 qrcode 默认工厂。
 
 依赖就绪后，也可以在根目录执行 `scripts/test.sh`，统一运行 Go race 测试、Python 运行时与发行校验测试、Flutter 静态检查与测试；`go vet ./...` 仍需单独执行。真实钥匙串与沙盒内辅助进程的集成验证方式见 [LastOrder 实现文档](docs/LastOrder/0.1.0实现.md#测试与构建)。自动化测试使用模拟账号和响应，不代表真实登录、下单或出票已验收；记录验证结果时必须区分源码测试、本地包验证、远程 CI 与真实业务验收。
 

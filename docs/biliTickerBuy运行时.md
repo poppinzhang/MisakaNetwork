@@ -38,7 +38,7 @@ Docker 限制针对上游应用的运行与服务入口，不禁止本项目为�
 
 ### 请求间隔与固定尝试上限复核（2026-11-13，未发布）
 
-本次接通任务请求间隔并将每轮尝试上限固定为 40；上游仍为 v2.15.18 / `227ebf73f5af3eec0019984a7cbcb722977453e8`，导入白名单、内嵌快照和依赖锁定未变。重新审查 `interface/auth.py`、`interface/search.py`、`interface/common.py`、`util/request/BiliRequest.py`、`task/buy.py`、配置与通知构造及 bridge 入口，未增加网络目标或敏感数据出口。登录/查询继续使用默认验证的 requests；标准下单路径使用 httpx，沿用 `Session.verify=True`，超时或协议错误重建同一客户端，不切换自制 TLS。环境代理与 CA 设置仍可能影响请求路径和信任边界。
+本次接通任务请求间隔并将每轮尝试上限固定为 40；上游仍为 v2.15.18 / `227ebf73f5af3eec0019984a7cbcb722977453e8`，导入白名单、内嵌快照和依赖锁定未变。重新审查 `interface/auth.py`、`interface/search.py`、`interface/common.py`、`util/request/BiliRequest.py`、`task/buy.py`、配置与通知构造及 bridge 入口，未增加网络目标或敏感数据出口。扫码、身份校验与搜索使用默认验证的 requests；场次、购票人与地址查询以及标准下单路径使用 httpx，沿用 `Session.verify=True`，超时或协议错误重建同一客户端，不切换自制 TLS。环境代理与 CA 设置仍可能影响请求路径和信任边界。
 
 `runtime/tests/test_bridge.py` 补充间隔默认值、边界、非法值、固定 40 次以及禁止覆盖上限、并发策略、代理、通知和分享参数的离线回归；源码与锁定依赖检查没有引入上游 Web UI、Gradio 或 Docker 启动入口。`runtime/tests/test_runtime_security.py` 使用真实内嵌配置构造与依赖、虚构购票资料、禁止网络的替身验证：购票配置、`BTB_*` 环境变量及配置数据库中的覆盖值不能改变间隔、固定上限、`standard` 策略、单请求批次或空通知设置；通知管理器无注册渠道，调用发送也不产生 HTTP 请求。Cookie 继续经内存 CookieManager 供平台请求使用，购票资料进入原订单载荷，原始日志不回传。上游成功通知正文仍可能包含姓名，因此空通知约束继续保留。
 
@@ -74,6 +74,12 @@ TLS 回归从实际 `BiliRequest` 创建的 httpx 传输取得 SSLContext，以�
 离线回归覆盖单次调用与平台状态分类、未知状态与错误响应不误判过期、明确拒绝输入参数覆盖策略、requests 实际传递 TLS 验证参数及禁止重定向、确认后身份验证失败不返回 Cookie，以及真实 `Set-Cookie → RequestsCookieJar` 解析的域、路径、到期和重名约束。Android 适配同时覆盖结构化结果、无敏感日志与无文件落地；原有 `standard`、通知、环境白名单与 Web UI 隔离测试继续执行。2026-11-14 的三组本地 runtime 回归各收集 108 项：Android 锁定依赖环境通过 105 项、跳过 3 项；完整桌面依赖环境通过 106 项、跳过 2 项；未安装运行时依赖的系统 Python 通过 95 项、跳过 13 项。
 
 本次结论限于源码核查、模拟平台响应、宿主环境离线验证与 CI 打包校验；未在真机设备上或真实平台执行扫码登录，不代表所有依赖或真实业务已安全验收。窗口调度、账号巡检协调与前后台语义见 [Cookie 生命周期](LastOrder/Cookie生命周期.md#扫码自动检测与例行检查协调)。
+
+### Android 客户端兼容性复核（2026-11-14，未发布）
+
+本次确认原 Android lock 缺少 `purchase_context` 实际使用的 HTTPX/HTTP2 依赖，且上游请求头声明了未安装的 Brotli/Zstandard 编码；原 `ping` 和替换引擎的测试不能发现这一组合。源码补齐桌面同版本的纯 Python HTTP 栈，Android 仅协商 gzip/deflate，自检离线构造实际传输。共享解释器每次调用独立初始化并关闭上游连接与数据库，清理模块及环境，避免复用已删除的临时目录。
+
+固定上游源码、导入白名单、Sisters 下单参数与通知约束不变；标准 TLS 证书链与域名验证保持开启，新增真实客户端 TLS、完整查询/配置链、资源清理和 APK 结构回归。检查依据、问题复现、模拟器验证与限制见 [Android 兼容性排查](LastOrder/Android兼容性排查.md)。这些改动尚未进入公开安装包，不是全部依赖或真实业务的安全验收。
 
 ### 升级安全核查
 
@@ -145,7 +151,7 @@ python3.11 -m venv .build/runtime-venv
 .build/runtime-venv/bin/python runtime/build.py --output .build/runtime/macos-arm64
 ```
 
-Android 内嵌客户端只携带 `runtime/requirements-android.lock` 中的依赖（qrcode 与 PyPNG，不含 Pillow）。修改 bridge、二维码编码或客户端操作后，还需在这一依赖集合中运行测试；完整桌面依赖包含 Pillow，无法发现 Android 缺少 Pillow 导致的问题。CI 的 Android 作业执行同样检查。
+Android 内嵌客户端携带 `runtime/requirements-android.lock` 中的纯 Python 依赖（含 HTTPX/HTTP2、qrcode 与 PyPNG，不含 Pillow/Brotli/Zstandard）。修改 bridge、二维码编码或客户端操作后，还需在这一依赖集合中运行测试；完整桌面依赖包含 Pillow，无法发现 Android 缺少 Pillow 导致的问题。CI 的 Android 作业执行同样检查。
 
 ```sh
 python3.11 -m venv .build/android-client-venv

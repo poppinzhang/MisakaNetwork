@@ -1,5 +1,6 @@
 # LastOrder account/catalog/config client only; purchases execute in Sisters.
 requests[socks]>=2.31,<3
+httpx[http2,socks]==0.28.1
 loguru==0.7.3
 ntplib==0.4.0
 tinydb==4.8.2

@@ -5,7 +5,7 @@
     "go.mod": "522788bcd6cd7411bd00e4a18cb51563a8903c547495be4146cfdcb76a1c57d1",
     "go.sum": "a6a1dc6e312685714a349bcd33d32f8f58aeb4cbaff02536d21f6aa7a141b461",
     "runtime/requirements.lock": "1b193340e236b4383dcb72e0c22b4dd054a83515770ccd3c7d949f16650b1d4a",
-    "runtime/requirements-android.lock": "e8ab99175e9f26bdb8812c4fd4cd6373bbfe927aa624cffeb88c66f8d58680d3",
+    "runtime/requirements-android.lock": "c609e7f4d01b75c39b0b3227945c34a6627c983955b6b84fad2bede52d313477",
     "runtime/requirements-build.lock": "d5e172626b796fba0858b9effe3c21a8938434e9f782304f50e54924eccdd557",
     "runtime/NOTICE.txt": "382fc6ee09b14cd2ae298d2e2067d771f4887a3d234b9fd7a872854821ee1f5b",
     "runtime/vendor/biliTickerBuy/LICENSE": "a033a88e2c3b88c2aa261c237fe3009380f0cf7dccf907c3f210c430e99eb970",

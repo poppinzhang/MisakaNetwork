@@ -247,8 +247,8 @@ jobs:
           python -m venv "$venv"
           "$venv/bin/python" -m pip install --only-binary=:all: -r runtime/requirements-android.lock
           "$venv/bin/python" -m pip check
-          # Like the APK: qrcode and PyPNG without Pillow, so real QR checks run.
-          "$venv/bin/python" -c 'import importlib.util as u, png, qrcode; assert u.find_spec("PIL") is None'
+          # Match the APK's pure-Python HTTP/2 and QR dependency set.
+          "$venv/bin/python" -c 'import importlib.util as u, h2, httpcore, httpx, png, qrcode; assert all(u.find_spec(name) is None for name in ("PIL", "brotli", "zstandard"))'
           "$venv/bin/python" -m unittest discover -s runtime/tests -v
       - uses: actions/setup-java@v4
         with:
