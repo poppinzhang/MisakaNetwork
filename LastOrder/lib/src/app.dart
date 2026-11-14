@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 import 'dart:ui' show AppExitResponse;
 
@@ -18,10 +17,13 @@ import 'cloud_models.dart';
 import 'cloud_ui.dart';
 import 'dispatch_dialog.dart';
 import 'models.dart';
+import 'login_dialog.dart';
 import 'payment_ui.dart';
 import 'services.dart';
 import 'task_messages.dart';
 import 'theme.dart';
+
+export 'login_dialog.dart' show LoginDialog;
 
 class LastOrderApp extends StatefulWidget {
   const LastOrderApp({super.key, required this.controller});
@@ -2385,174 +2387,6 @@ class WorkDialog extends StatelessWidget {
         ),
       ],
     ),
-  );
-}
-
-class LoginDialog extends StatefulWidget {
-  const LoginDialog({super.key, required this.controller, this.account});
-  final AppController controller;
-  final Account? account;
-  @override
-  State<LoginDialog> createState() => _LoginDialogState();
-}
-
-class _LoginDialogState extends State<LoginDialog> {
-  final cookie = TextEditingController();
-  bool busy = false, manual = false;
-  String? error, qr, qrKey;
-  String status = '通过哔哩哔哩手机客户端扫码，并在手机上确认登录。';
-  @override
-  void dispose() {
-    cookie.dispose();
-    super.dispose();
-  }
-
-  Future<void> saveLogin(Map<String, dynamic> result) async {
-    final uid = result['uid'];
-    if (uid is! String || !Account.isValidUid(uid)) {
-      throw const UserError('尚未确认登录账号身份，请重新检测登录。');
-    }
-    final cookies = result['cookies'];
-    if (cookies is! List || cookies.isEmpty) {
-      throw const UserError('登录结果未包含有效 Cookie，请重新登录。');
-    }
-    final name = (result['username'] ?? '').toString();
-    if (widget.account case final Account account) {
-      await widget.controller.refreshAccount(
-        account,
-        name: name,
-        cookies: cookies,
-        uid: uid,
-      );
-    } else {
-      await widget.controller.addAccount(name, cookies, uid: uid);
-    }
-    if (mounted) Navigator.pop(context);
-  }
-
-  Future<void> submit() async {
-    setState(() {
-      busy = true;
-      error = null;
-    });
-    try {
-      if (manual) {
-        dynamic value;
-        try {
-          value = jsonDecode(cookie.text);
-        } catch (_) {
-          throw const UserError(
-            '请输入 JSON Cookie 数组，例如 [{"name":"…","value":"…"}]。',
-          );
-        }
-        if (value is! List) throw const UserError('Cookie 必须为 JSON 数组。');
-        final result = await widget.controller.runtime.call('login_cookie', {
-          'cookies': value,
-        });
-        if (result['status'] != 'valid' || result['logged_in'] != true) {
-          throw UserError(
-            result['status'] == 'expired'
-                ? 'Cookie 已失效，请使用手机客户端重新扫码登录。'
-                : '暂时无法验证登录状态，请检查网络后重试。尚未保存此 Cookie。',
-          );
-        }
-        await saveLogin(result);
-        return;
-      }
-      if (qrKey == null) {
-        final result = await widget.controller.runtime.call('qr_start', {});
-        if (mounted) {
-          setState(() {
-            qr = result['qr_png_base64'] as String?;
-            qrKey = result['qrcode_key'] as String?;
-            status = '使用手机客户端扫描二维码，然后点击「检测登录」。';
-          });
-        }
-      } else {
-        final result = await widget.controller.runtime.call('qr_poll', {
-          'qrcode_key': qrKey,
-          'timeout_seconds': 5,
-        });
-        if (result['status'] == 'confirmed') {
-          await saveLogin(result);
-        } else if (mounted) {
-          setState(
-            () => status = result['status'] == 'timeout'
-                ? '暂未确认。请在手机端确认后再次检测；二维码失效时重新生成。'
-                : '登录未完成，请重新生成二维码。',
-          );
-        }
-      }
-    } catch (e) {
-      if (mounted) setState(() => error = readableError(e));
-    } finally {
-      if (mounted) setState(() => busy = false);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) => WorkDialog(
-    title: widget.account == null ? '登录哔哩哔哩' : '重新登录账号',
-    busy: busy,
-    error: error,
-    onSubmit: submit,
-    submitLabel: manual
-        ? '验证并保存'
-        : qrKey == null
-        ? '生成二维码'
-        : '检测登录',
-    children: [
-      if (widget.account case final Account account) ...[
-        Text('请使用「${account.name}」原账号扫码。登录成功后更新 Cookie，保留已有任务与场次选择。'),
-        const SizedBox(height: 8),
-        const Text('更新后不会自动启动任务；已分发到 Sisters 的执行不会被替换。'),
-        const SizedBox(height: 12),
-      ],
-      SwitchListTile(
-        contentPadding: EdgeInsets.zero,
-        title: const Text('使用已有 Cookie'),
-        value: manual,
-        onChanged: busy ? null : (v) => setState(() => manual = v),
-      ),
-      if (manual) ...[
-        const Text('仅接受 biliTickerBuy 兼容的 Cookie JSON 数组。验证成功后保存至系统安全存储。'),
-        const SizedBox(height: 16),
-        field(cookie, 'Cookie JSON', lines: 6),
-      ] else ...[
-        Text(status),
-        const SizedBox(height: 20),
-        if (qr != null)
-          Center(
-            child: Image.memory(
-              base64Decode(qr!),
-              width: 220,
-              height: 220,
-              errorBuilder: (_, error, stack) => const Text('二维码无法显示，请重新生成。'),
-            ),
-          ),
-        if (qrKey != null)
-          Center(
-            child: TextButton(
-              onPressed: busy
-                  ? null
-                  : () => setState(() {
-                      qr = null;
-                      qrKey = null;
-                      status = '请生成新的二维码。';
-                    }),
-              child: const Text('重新生成二维码'),
-            ),
-          ),
-      ],
-      const SizedBox(height: 12),
-      Text(
-        '登录凭据不会写入普通配置文件。',
-        style: TextStyle(
-          color: Theme.of(context).colorScheme.onSurfaceVariant,
-          fontSize: 12,
-        ),
-      ),
-    ],
   );
 }
 

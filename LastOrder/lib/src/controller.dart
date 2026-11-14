@@ -72,7 +72,8 @@ class AppController extends ChangeNotifier {
     Future<List<CloudTemplate>> Function()? cloudTemplateLoader,
     Future<List<CloudTemplate>> Function()? volcengineTemplateLoader,
     Future<List<CloudTemplate>> Function()? aliyunTemplateLoader,
-  }) {
+    DateTime Function()? accountCheckClock,
+  }) : _accountCheckClock = accountCheckClock ?? DateTime.now {
     cloud = CloudController(
       store: store,
       helper: helper,
@@ -104,6 +105,14 @@ class AppController extends ChangeNotifier {
   int _credentialImportHolds = 0;
   String? startupError;
   Timer? _timer, _accountTimer;
+  final DateTime Function() _accountCheckClock;
+  static const _accountCheckInterval = Duration(minutes: 5);
+  int _routineAccountCheckHolds = 0;
+  final Set<String> _pendingRoutineAccountChecks = {};
+  Future<void>? _routineAccountChecks;
+  // Only successful validation in this process can postpone a routine check.
+  // Persisted timestamps do not replace the startup check after restarting.
+  final Map<String, (int, DateTime)> _validatedAccountCredentials = {};
   final Set<String> checkingAccounts = {};
   final Map<String, String> accountMessages = {};
   final Map<String, int> _credentialRevisions = {},
@@ -301,7 +310,7 @@ class AppController extends ChangeNotifier {
         _timer = Timer.periodic(const Duration(seconds: 5), (_) => refresh());
         unawaited(refresh());
         _accountTimer = Timer.periodic(
-          const Duration(minutes: 5),
+          _accountCheckInterval,
           (_) => checkAccounts(),
         );
         unawaited(checkAccounts());
@@ -630,7 +639,7 @@ class AppController extends ChangeNotifier {
       name: name.trim().isEmpty ? '哔哩哔哩账号' : name.trim(),
       uid: uid,
       authStatus: AccountAuthStatus.valid,
-      lastChecked: DateTime.now(),
+      lastChecked: _accountCheckClock(),
     );
     await store.writeSecret('account.${account.id}', jsonEncode(cookies));
     try {
@@ -643,6 +652,10 @@ class AppController extends ChangeNotifier {
       }
       rethrow;
     }
+    _validatedAccountCredentials[account.id] = (
+      _credentialRevisions[account.id] ?? 0,
+      account.lastChecked!,
+    );
     return account;
   }
 
@@ -668,8 +681,9 @@ class AppController extends ChangeNotifier {
       final replacement = current.copyWith(
         name: name.trim().isEmpty ? current.name : name.trim(),
         authStatus: AccountAuthStatus.valid,
-        lastChecked: DateTime.now(),
+        lastChecked: _accountCheckClock(),
       );
+      final revision = _credentialRevisions[current.id] ?? 0;
       await store.writeSecret('account.${current.id}', jsonEncode(cookies));
       try {
         await _replaceAccount(replacement);
@@ -693,6 +707,10 @@ class AppController extends ChangeNotifier {
         }
         rethrow;
       }
+      _validatedAccountCredentials[current.id] = (
+        revision,
+        replacement.lastChecked!,
+      );
       accountMessages.remove(current.id);
       _notify();
       return replacement;
@@ -731,24 +749,89 @@ class AppController extends ChangeNotifier {
     }
   }
 
-  Future<void> checkAccounts() async {
-    if (disposed || !initialized) return;
-    await Future.wait(
-      state.accounts.toList().map((account) async {
-        if (checkingAccounts.contains(account.id)) return;
-        try {
-          await checkAccount(account);
-        } catch (e) {
-          if (_account(account.id) != null) {
-            accountMessages[account.id] = readableError(e);
-          }
-        }
-      }),
-    );
-    _notify();
+  /// Defer low-priority account polling while an interactive login is active.
+  /// Manual checks and validation before dispatch remain mandatory and run
+  /// normally. Calls already sent to the runtime are allowed to finish.
+  void holdRoutineAccountChecks() {
+    if (!disposed) _routineAccountCheckHolds++;
   }
 
-  Future<AccountAuthStatus> checkAccount(Account account) async {
+  void releaseRoutineAccountChecks() {
+    if (_routineAccountCheckHolds == 0) return;
+    _routineAccountCheckHolds--;
+    if (!disposed && _routineAccountCheckHolds == 0) {
+      unawaited(_drainRoutineAccountChecks());
+    }
+  }
+
+  bool _routineAccountCheckDue(Account account) {
+    final validation = _validatedAccountCredentials[account.id];
+    if (account.authStatus != AccountAuthStatus.valid ||
+        validation == null ||
+        validation.$1 != (_credentialRevisions[account.id] ?? 0)) {
+      return true;
+    }
+    final elapsed = _accountCheckClock().difference(validation.$2);
+    return elapsed.isNegative || elapsed >= _accountCheckInterval;
+  }
+
+  Future<void> checkAccounts() {
+    if (disposed || !initialized) return Future<void>.value();
+    // Coalesce repeated sweeps instead of adding another batch to Android's
+    // single runtime queue. A paused batch keeps only its remaining accounts.
+    if (_routineAccountChecks case final Future<void> active) return active;
+    _pendingRoutineAccountChecks.addAll(
+      state.accounts.where(_routineAccountCheckDue).map((a) => a.id),
+    );
+    return _drainRoutineAccountChecks();
+  }
+
+  Future<void> _drainRoutineAccountChecks() {
+    if (disposed || !initialized || _routineAccountCheckHolds > 0) {
+      return Future<void>.value();
+    }
+    if (_routineAccountChecks case final Future<void> active) return active;
+    if (_pendingRoutineAccountChecks.isEmpty) return Future<void>.value();
+    final done = Completer<void>();
+    _routineAccountChecks = done.future;
+    unawaited(() async {
+      try {
+        while (!disposed &&
+            _routineAccountCheckHolds == 0 &&
+            _pendingRoutineAccountChecks.isNotEmpty) {
+          final id = _pendingRoutineAccountChecks.first;
+          _pendingRoutineAccountChecks.remove(id);
+          final account = _account(id);
+          if (account == null ||
+              checkingAccounts.contains(id) ||
+              !_routineAccountCheckDue(account)) {
+            continue;
+          }
+          try {
+            await _checkAccount(account, routine: true);
+          } catch (e) {
+            if (!disposed && _account(id) != null) {
+              accountMessages[id] = readableError(e);
+            }
+          }
+        }
+      } finally {
+        _routineAccountChecks = null;
+        done.complete();
+        _notify();
+      }
+    }());
+    return done.future;
+  }
+
+  Future<AccountAuthStatus> checkAccount(Account account) =>
+      _checkAccount(account);
+
+  Future<AccountAuthStatus> _checkAccount(
+    Account account, {
+    bool routine = false,
+  }) async {
+    if (disposed) return AccountAuthStatus.unknown;
     final id = account.id;
     final sequence = (_checkSequences[id] ?? 0) + 1;
     _checkSequences[id] = sequence;
@@ -757,6 +840,7 @@ class AppController extends ChangeNotifier {
     _notify();
     try {
       final snapshot = await _forAccount<(List<dynamic>, int)?>(id, () async {
+        if (disposed) return null;
         final current = _account(id);
         if (current == null) return null;
         if (current.authStatus == AccountAuthStatus.expired) {
@@ -766,8 +850,10 @@ class AppController extends ChangeNotifier {
         List<dynamic>? value;
         try {
           final raw = await store.readSecret('account.$id');
+          if (disposed) return null;
           if (raw != null) value = jsonDecode(raw) as List<dynamic>;
         } catch (_) {
+          if (disposed) return null;
           await _markUnknown(current, '无法读取安全存储中的账号凭据，请检查权限后重试；现有凭据未删除。');
           return null;
         }
@@ -777,10 +863,17 @@ class AppController extends ChangeNotifier {
         }
         return (value, _credentialRevisions[id] ?? 0);
       });
+      if (disposed) return AccountAuthStatus.unknown;
       if (snapshot == null) {
         return _account(id)?.authStatus ?? AccountAuthStatus.unknown;
       }
       final (cookie, revision) = snapshot;
+      if (routine && _routineAccountCheckHolds > 0) {
+        // A login may begin while secure storage is being read. Do not enqueue
+        // this network call after the pause; retain it for the eventual resume.
+        _pendingRoutineAccountChecks.add(id);
+        return AccountAuthStatus.unknown;
+      }
       Map<String, dynamic> response;
       try {
         response = await runtime.call('login_state', {'cookies': cookie});
@@ -791,6 +884,7 @@ class AppController extends ChangeNotifier {
         };
       }
       return await _forAccount(id, () async {
+        if (disposed) return AccountAuthStatus.unknown;
         final current = _account(id);
         if (current == null) return AccountAuthStatus.unknown;
         if (revision != (_credentialRevisions[id] ?? 0) ||
@@ -815,7 +909,7 @@ class AppController extends ChangeNotifier {
                 ? current.name
                 : response['username'] as String,
             authStatus: AccountAuthStatus.valid,
-            lastChecked: DateTime.now(),
+            lastChecked: _accountCheckClock(),
           );
           try {
             await _replaceAccount(next);
@@ -823,6 +917,7 @@ class AppController extends ChangeNotifier {
             await _markUnknown(current, '登录验证成功，但账号状态未能保存，请检查本地存储后重试。');
             return AccountAuthStatus.unknown;
           }
+          _validatedAccountCredentials[id] = (revision, next.lastChecked!);
           accountMessages.remove(id);
           _notify();
           return AccountAuthStatus.valid;
@@ -847,7 +942,7 @@ class AppController extends ChangeNotifier {
       authStatus: account.authStatus == AccountAuthStatus.expired
           ? AccountAuthStatus.expired
           : AccountAuthStatus.unknown,
-      lastChecked: DateTime.now(),
+      lastChecked: _accountCheckClock(),
     );
     accountMessages[account.id] = message;
     try {
@@ -862,7 +957,7 @@ class AppController extends ChangeNotifier {
     final id = current.id;
     final expired = current.copyWith(
       authStatus: AccountAuthStatus.expired,
-      lastChecked: DateTime.now(),
+      lastChecked: _accountCheckClock(),
     );
     var statusSaved = true;
     try {
@@ -923,6 +1018,8 @@ class AppController extends ChangeNotifier {
             accounts: state.accounts.where((a) => a.id != current.id).toList(),
           ),
         );
+        _validatedAccountCredentials.remove(current.id);
+        _pendingRoutineAccountChecks.remove(current.id);
         accountMessages.remove(current.id);
         _notify();
       });
@@ -1664,6 +1761,8 @@ class AppController extends ChangeNotifier {
     cloud.dispose();
     _timer?.cancel();
     _accountTimer?.cancel();
+    _pendingRoutineAccountChecks.clear();
+    _validatedAccountCredentials.clear();
     for (final job in _deploymentJobs.values.toList()) {
       job.request.clear();
       if (job.cloudId != null) cloud.endCloudDeployment(job.cloudId!);

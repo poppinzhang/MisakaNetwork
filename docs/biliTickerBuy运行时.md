@@ -60,6 +60,21 @@ TLS 回归从实际 `BiliRequest` 创建的 httpx 传输取得 SSLContext，以�
 
 2026-11-14 本地结果：runtime 测试在 Android 依赖集合（Python 3.11.13、qrcode 8.2、pypng 0.20220715.0，无 Pillow）、完整桌面运行时依赖（Python 3.11.13）与未安装依赖的 Python 3.13.5 下均为 92 项通过，分别跳过 3、2、7 项依赖不满足的真实环境测试。Android 依赖集合生成的登录与付款二维码经本机系统识别器离线解码，与虚构内容一致；实际 `LoginDialog` 在 Flutter 测试环境中能解码并显示这种 1 位灰度 PNG。另核对已交付 0.3.0 Android 安装包：内置依赖不含 Pillow，`qr_start` 字节码与修复前源码一致。结论限于源码、离线模拟与宿主环境，未构建新安装包，未在 Android 真机或模拟器上验证，未执行真实哔哩哔哩扫码登录；新增 CI 步骤尚未在 GitHub Actions 上运行，也不是全部依赖或发行二进制的安全验收。
 
+### 自动扫码轮询适配复核（未发布）
+
+本次 `unstaged` 改动将 `qr_poll` 从上游阻塞轮询改为本项目 bridge 内的一次平台状态查询，由 LastOrder 在前一次完成后等待 2 秒调度。参数只接受 `qrcode_key`；不再接受 `timeout_seconds`、自定义地址、TLS 开关或其它扩展参数。只有 HTTP 成功、外层业务成功且平台状态为 `86038` 时才返回 `expired`，不按本地 180 秒或响应中的通用 `ttl` 判定过期。`86101` / `86090` 分别返回 `pending` / `scanned`；网络异常、HTTP 429 和 5xx 返回 `transient_error`，其余不明确响应返回 `failed`。确认后身份验证失败必须重新扫码，不能继续轮询来假定可再次领取一次性凭据。
+
+核查范围与隔离方式：
+
+- 网络目标仍是固定官方 HTTPS `passport.bilibili.com/x/passport-login/web/qrcode/poll` 与既有 `api.bilibili.com/x/web-interface/nav`。轮询禁止重定向，连接/读取超时固定为 `(3.05, 8)` 秒，保留 requests 默认的证书链与域名验证；不跟随响应的登录链接，不引入新域名、HTTP 客户端或自制 TLS。
+- `Set-Cookie` 由 requests 在内存中解析。扁平化为运行时凭据前，仅保留显式指定 `bilibili.com` / `.bilibili.com`、根路径 `/`、当前未过期的 Cookie；host-only、passport 子域或非根路径等较窄作用域不扩大使用范围。合格候选中同名 Cookie 一律拒绝，不按顺序任选。候选还须通过既有 Cookie 格式检查和平台 UID 验证才返回 LastOrder。
+- 非成功结果只返回白名单状态与固定提示；不转发原始消息、异常、登录链接或 `refresh_token`。二维码标识、Cookie 与图片仅经内存、本机管道或 Android 原生桥接流转，不进入普通日志或临时文件。LastOrder 的后台待处理成功结果和保存重试结果仅在当前窗口内存保留，明确取消、切换方式或重新生成时丢弃。
+- 上游 v2.15.18 / `227ebf73f5af3eec0019984a7cbcb722977453e8`、vendor 快照、导入白名单、依赖锁定与 `standard` 下单参数均未改变；通知仍为空，环境与配置白名单未放宽，无上游 Docker、Web UI、Gradio 或分享入口。
+
+离线回归覆盖单次调用与平台状态分类、未知状态与错误响应不误判过期、明确拒绝输入参数覆盖策略、requests 实际传递 TLS 验证参数及禁止重定向、确认后身份验证失败不返回 Cookie，以及真实 `Set-Cookie → RequestsCookieJar` 解析的域、路径、到期和重名约束。Android 适配同时覆盖结构化结果、无敏感日志与无文件落地；原有 `standard`、通知、环境白名单与 Web UI 隔离测试继续执行。2026-11-14 的三组本地 runtime 回归各收集 108 项：Android 锁定依赖环境通过 105 项、跳过 3 项；完整桌面依赖环境通过 106 项、跳过 2 项；未安装运行时依赖的系统 Python 通过 95 项、跳过 13 项。
+
+本次结论限于源码核查、模拟平台响应和宿主环境离线验证；未构建新安装包，未在设备上或真实平台执行扫码登录，不代表所有依赖、发行二进制或真实业务已安全验收。窗口调度、账号巡检协调与前后台语义见 [Cookie 生命周期](LastOrder/Cookie生命周期.md#扫码自动检测与例行检查协调未发布)。
+
 ### 升级安全核查
 
 每次升级上游版本、固定提交或相关依赖，以及调整导入白名单、嵌入补丁、启动方式或运行参数时，必须完成以下核查。即使上游宣称已修复问题，也不能自动解除上述禁用约束。
@@ -72,7 +87,7 @@ TLS 回归从实际 `BiliRequest` 创建的 httpx 传输取得 SSLContext，以�
 
 ## 进程协议 v1
 
-0.1.1 认证协议：`login_state` 与 `login_cookie` 另返回 `status: valid/expired/unknown`、`uid` 和固定安全提示 `message`；`qr_poll` 的 `confirmed` 结果须在线确认登录身份并返回 `uid`。`logged_in:false` 本身不能作为删除凭据的依据，必须检查 `status:expired`。网络异常和不明确响应返回 `unknown`；扫码后无法验证身份则返回可重试错误，不返回未经验证的 Cookie。详见 [Cookie 生命周期](LastOrder/Cookie生命周期.md)。下表记录当前协议。
+0.1.1 起的认证协议：`login_state` 与 `login_cookie` 另返回 `status: valid/expired/unknown`、`uid` 和固定安全提示 `message`；`qr_poll` 的 `confirmed` 结果须在线确认登录身份并返回 `uid`。`logged_in:false` 本身不能作为删除凭据的依据，必须检查 `status:expired`。已有 Cookie 验证的网络异常和不明确响应返回 `unknown`；源码未发布的单次扫码查询使用下表状态，扫码确认后无法验证身份返回 `failed` 并要求重新扫码，不返回未经验证的 Cookie。二维码的 `expired` 不代表已保存 Cookie 失效。详见 [Cookie 生命周期](LastOrder/Cookie生命周期.md)。下表记录当前源码协议；0.3.0 安装包仍使用此前 `qr_poll` 的 `timeout_seconds` 和 `confirmed/timeout/failed` 结果，变更需随完整应用及其运行时一起打包。
 
 启动打包后的 `misaka-runtime/misaka-runtime`，向标准输入写一行 UTF-8 JSON，随后关闭输入。开发环境可使用 `python runtime/bridge.py`。每个进程只处理一个请求；QR 轮询由调用方重复启动进程并携带二维码标识，进程之间没有共享账户状态。
 
@@ -87,7 +102,7 @@ TLS 回归从实际 `BiliRequest` 创建的 httpx 传输取得 SSLContext，以�
 | `ping` | 无 | `version`、`bili_version`、`protocol:1`、`ready:true`；导入真实引擎验证依赖，不访问网络 |
 | `qr_start` | 无 | `login_url`、`qrcode_key`、`qr_png_base64`；PNG 在内存编码（有 Pillow 用 Pillow，否则用 PyPNG），不落盘 |
 | `payment_qr`（未发布） | `payment_code_url`，完整字符串须符合支付白名单 | `qr_png_base64`；仅本地内存生成，不请求平台或支付网站 |
-| `qr_poll` | `qrcode_key`、可选 `timeout_seconds`（1–60，默认 5） | `status:confirmed/timeout/failed`；只有已验证的 confirmed 返回 `cookies`、`username`、`uid` |
+| `qr_poll` | 仅 `qrcode_key`，单次平台查询 | `status:pending/scanned/expired/transient_error/failed/confirmed`；非成功仅含固定 `message`；只有已验证的 confirmed 返回 `cookies`、`username`、`uid` |
 | `login_cookie` | `cookies` | `status:valid/expired/unknown`、`logged_in`、`username`、`uid`、`message`；valid 才返回 `cookies` |
 | `login_state` | `cookies` | `status:valid/expired/unknown`、`logged_in`、`username`、`uid`、`message` |
 | `search` | `keyword`、`cookies`、可选 `page` | `keyword`、`page`、`pagesize`、`total`、`results` |

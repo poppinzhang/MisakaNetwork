@@ -10,7 +10,7 @@ import sys
 import tempfile
 import types
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import android_bridge
@@ -46,6 +46,49 @@ class AndroidBridgeTests(unittest.TestCase):
         cookies = [{"name": "SESSDATA", "value": "secret"}]
         with patch.object(bridge, "verify_authentication", return_value={"status": "unknown", "logged_in": False}):
             self.assertEqual(self.invoke({"op": "login_state", "params": {"cookies": cookies}})["data"]["status"], "unknown")
+
+    def test_single_qr_poll_uses_shared_states_without_logs_or_files(self):
+        output = io.StringIO()
+        for state, expected in ((86101, "pending"), (86090, "scanned"), (86038, "expired"), (99999, "failed")):
+            with self.subTest(state=state):
+                response = types.SimpleNamespace(
+                    status_code=200,
+                    json=lambda: {"code": 0, "data": {"code": state, "message": "private-platform-message"}},
+                    close=Mock(),
+                )
+                get = Mock(return_value=response)
+                with patch.dict(sys.modules, {"requests": types.SimpleNamespace(get=get)}), \
+                        contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
+                    reply = self.invoke({"op": "qr_poll", "params": {"qrcode_key": "synthetic-secret-key"}})
+                self.assertTrue(reply["ok"])
+                self.assertEqual(reply["data"]["status"], expected)
+                self.assertNotIn("private", json.dumps(reply))
+                self.assertNotIn("synthetic-secret-key", json.dumps(reply))
+                get.assert_called_once()
+                response.close.assert_called_once()
+                self.assertEqual(list(Path(self.cache.name).iterdir()), [])
+        self.assertEqual(output.getvalue(), "")
+
+    def test_confirmed_qr_cookie_only_returns_after_shared_identity_verification(self):
+        response = types.SimpleNamespace(
+            status_code=200,
+            json=lambda: {"code": 0, "data": {"code": 0, "url": "https://private.invalid/cookie"}},
+            cookies=[types.SimpleNamespace(name="SESSDATA", value="synthetic-secret-cookie", domain=".bilibili.com", domain_specified=True, path="/", is_expired=lambda: False)],
+            close=Mock(),
+        )
+        output = io.StringIO()
+        with patch.dict(sys.modules, {"requests": types.SimpleNamespace(get=Mock(return_value=response))}), \
+                patch.object(bridge, "verify_authentication", return_value={"status": "valid", "username": "verified", "uid": "123"}) as verify, \
+                contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
+            reply = self.invoke({"op": "qr_poll", "params": {"qrcode_key": "synthetic-key"}})
+        self.assertTrue(reply["ok"])
+        self.assertEqual(reply["data"]["status"], "confirmed")
+        self.assertEqual(reply["data"]["uid"], "123")
+        self.assertEqual(reply["data"]["cookies"], [{"name": "SESSDATA", "value": "synthetic-secret-cookie"}])
+        verify.assert_called_once_with(reply["data"]["cookies"])
+        self.assertNotIn("private.invalid", json.dumps(reply))
+        self.assertEqual(output.getvalue(), "")
+        self.assertEqual(list(Path(self.cache.name).iterdir()), [])
 
     def test_ephemeral_state_and_no_sensitive_output(self):
         observed = []

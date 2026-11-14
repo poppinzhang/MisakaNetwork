@@ -49,6 +49,7 @@ TIME_START_FORMAT = "%Y-%m-%dT%H:%M:%S"
 ORDER_ID_PATTERN = re.compile(r"[1-9][0-9]{0,79}")
 PAYMENT_CODE_PATTERN = re.compile(r"(?:weixin://wxpay/bizpayurl\?pr=|https://qr\.alipay\.com/)[A-Za-z0-9_-]{1,512}")
 NAV_URL = "https://api.bilibili.com/x/web-interface/nav"
+QR_POLL_URL = "https://passport.bilibili.com/x/passport-login/web/qrcode/poll"
 
 
 class BridgeError(Exception):
@@ -166,6 +167,97 @@ def verify_authentication(cookies: list[dict[str, str]]) -> dict[str, Any]:
             response.close()
     except Exception:
         return authentication_result("unknown")
+
+
+def qr_poll_result(status: str) -> dict[str, str]:
+    """Only fixed messages cross the client boundary, never platform payloads."""
+    return {"status": status, "message": {
+        "pending": "等待扫码并在手机上确认登录",
+        "scanned": "已扫码，请在手机上确认登录",
+        "expired": "二维码已失效，请重新生成",
+        "transient_error": "暂时无法检查扫码状态，请检查网络后重试",
+        "failed": "无法确认本次扫码登录，请重新生成二维码后扫码",
+    }[status]}
+
+
+def export_qr_cookies(jar: Any) -> list[dict[str, str]]:
+    """Export only cookies explicitly scoped for the cross-subdomain client.
+
+    The persisted name/value format cannot retain CookieJar domain/path/expiry
+    restrictions. Host-only passport cookies and restricted paths must therefore
+    never be widened to the nav/show hosts. Conflicting eligible names are not
+    resolved by iteration order, even when their values happen to match.
+    """
+    result = []
+    names = set()
+    for cookie in jar:
+        if (
+            cookie.domain_specified is not True
+            or cookie.domain.lower() not in {"bilibili.com", ".bilibili.com"}
+            or cookie.path != "/"
+            or cookie.is_expired()
+        ):
+            continue
+        if cookie.name in names:
+            raise BridgeError("invalid_cookies", "扫码返回的登录凭据不明确，请重新扫码")
+        names.add(cookie.name)
+        result.append({"name": cookie.name, "value": cookie.value})
+    return normalize_cookies(result)
+
+
+def poll_qr_once(key: str) -> dict[str, Any]:
+    """One platform check; LastOrder owns scheduling and the QR session lifetime.
+
+    Do not use upstream's blocking poll loop: it merges pending/error states and
+    can occupy Android's shared runtime queue. Only an explicit platform expiry
+    ends the QR's validity; elapsed time is not evidence. No response link is
+    followed and no Cookie reaches LastOrder before verified identity succeeds.
+    """
+    import requests
+
+    try:
+        response = requests.get(
+            QR_POLL_URL,
+            params={"qrcode_key": key},
+            headers={"accept": "application/json", "user-agent": "Mozilla/5.0"},
+            timeout=(3.05, 8),
+            allow_redirects=False,
+        )
+    except requests.exceptions.RequestException:
+        return qr_poll_result("transient_error")
+    except Exception:
+        return qr_poll_result("failed")
+    try:
+        if response.status_code == 429 or 500 <= response.status_code <= 599:
+            return qr_poll_result("transient_error")
+        if response.status_code != 200:
+            return qr_poll_result("failed")
+        payload = response.json()
+        if not isinstance(payload, dict) or type(payload.get("code")) is not int or payload["code"] != 0:
+            return qr_poll_result("failed")
+        data = payload.get("data")
+        if not isinstance(data, dict) or type(data.get("code")) is not int:
+            return qr_poll_result("failed")
+        status = {86101: "pending", 86090: "scanned", 86038: "expired"}.get(data["code"])
+        if status is not None:
+            return qr_poll_result(status)
+        if data["code"] != 0:
+            return qr_poll_result("failed")
+        # requests parses Set-Cookie into an in-memory jar, including separate
+        # headers and Expires commas. Do not parse or follow data.url (which can
+        # contain the same secrets) or consult upstream's Cookie file helpers.
+        cookies = export_qr_cookies(response.cookies)
+    except Exception:
+        return qr_poll_result("failed")
+    finally:
+        response.close()
+
+    identity = verify_authentication(cookies)
+    if identity["status"] != "valid":
+        # The QR confirmation response may be consumable only once. Retrying
+        # qr_poll cannot safely recover an unverified Cookie after this point.
+        return {"status": "failed", "message": "扫码已确认，但账号身份未能验证；账号尚未保存，请重新生成二维码后扫码"}
+    return {"status": "confirmed", "username": identity["username"], "uid": identity["uid"], "cookies": cookies}
 
 
 def valid_time_start(value: str) -> bool:
@@ -420,20 +512,9 @@ def handle_request(request: Any, engine: Any, emit: Callable[[dict], None]) -> d
         return {"login_url": data["login_url"], "qrcode_key": data["qrcode_key"], "qr_png_base64": encode_qr_png(data["login_url"])}
     if operation == "qr_poll":
         key = params.get("qrcode_key")
-        if not isinstance(key, str) or not key or len(key) > 2048:
+        if set(params) != {"qrcode_key"} or not isinstance(key, str) or not key or len(key) > 2048:
             raise BridgeError("invalid_request", "需要有效的二维码标识")
-        timeout = bounded_number(params, "timeout_seconds", 5, 1, 60)
-        data = engine.poll_qr_login(key, timeout_seconds=timeout, poll_interval=1)
-        status = data.get("status")
-        if status == "confirmed" and data.get("ok"):
-            cookies = normalize_cookies(data.get("cookies"))
-            identity = verify_authentication(cookies)
-            if identity["status"] == "expired":
-                raise BridgeError("login_required", identity["message"])
-            if identity["status"] != "valid":
-                raise BridgeError("auth_unavailable", "扫码已确认，但暂时无法验证账号身份；账号尚未保存，请检查网络后重新扫码")
-            return {"status": "confirmed", "username": identity["username"], "uid": identity["uid"], "cookies": cookies}
-        return {"status": "timeout" if status == "timeout" else "failed", "message": "等待扫码确认" if status == "timeout" else "二维码已失效，请重新获取"}
+        return poll_qr_once(key)
     if operation in {"login_cookie", "login_state", "search", "purchase_context"}:
         cookies = normalize_cookies(params.get("cookies"))
         if operation in {"login_cookie", "login_state"}:

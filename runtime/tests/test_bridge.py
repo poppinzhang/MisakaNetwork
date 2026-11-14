@@ -220,13 +220,6 @@ class BridgeTests(unittest.TestCase):
         self.assertNotIn("private", json.dumps(events))
         self.nav_get.return_value.close.assert_called_once()
 
-    def test_qr_poll_timeout_is_not_login(self):
-        engine = SimpleNamespace(poll_qr_login=lambda *a, **kw: {"ok": False, "status": "timeout", "message": "SESSDATA=secret"})
-        code, events = self.invoke({"op": "qr_poll", "params": {"qrcode_key": "synthetic"}}, engine)
-        self.assertEqual(code, 0)
-        self.assertEqual(events[-1]["data"]["status"], "timeout")
-        self.assertNotIn("SESSDATA", json.dumps(events))
-
     def login_qr_engine(self, url="https://passport.bilibili.com/test"):
         observed = {}
         def start(**kwargs):
@@ -288,43 +281,6 @@ class BridgeTests(unittest.TestCase):
         self.nav_response({"code": 0, "data": {"isLogin": True, "uname": "test", "mid": 123, "cookies_path": "private"}})
         _, events = self.invoke({"op": "login_state", "params": {"cookies": {"session": "synthetic"}}})
         self.assertEqual(events[-1]["data"], {"status": "valid", "logged_in": True, "username": "test", "uid": "123", "message": "登录有效"})
-
-    def test_qr_poll_success_cookies_only_in_result(self):
-        self.nav_response({"code": 0, "data": {"isLogin": True, "mid": 123, "uname": "verified-name"}})
-        engine = SimpleNamespace(poll_qr_login=lambda *a, **kw: {"ok": True, "status": "confirmed", "cookies": [{"name": "session", "value": "synthetic"}], "username": "test", "cookies_path": "sensitive-path"})
-        _, events = self.invoke({"op": "qr_poll", "params": {"qrcode_key": "synthetic", "timeout_seconds": 1}}, engine)
-        self.assertEqual(len(events), 1)
-        self.assertEqual(events[0]["data"]["status"], "confirmed")
-        self.assertEqual(events[0]["data"]["uid"], "123")
-        self.assertEqual(events[0]["data"]["username"], "verified-name")
-        self.assertNotIn("sensitive-path", json.dumps(events))
-
-    def test_qr_confirmation_without_verified_identity_does_not_return_cookies(self):
-        engine = SimpleNamespace(poll_qr_login=lambda *a, **kw: {"ok": True, "status": "confirmed", "cookies": [{"name": "session", "value": "private-cookie"}], "username": "unverified-name"})
-        for payload, expected in (({"code": -101}, "login_required"), ({"code": -500}, "auth_unavailable"), ({"code": 0, "data": {"isLogin": True, "uname": "unverified-name"}}, "auth_unavailable")):
-            self.nav_response(payload)
-            code, events = self.invoke({"op": "qr_poll", "params": {"qrcode_key": "synthetic"}}, engine)
-            self.assertEqual(code, 1)
-            self.assertEqual(events[-1]["error"]["code"], expected)
-            self.assertNotIn("private-cookie", json.dumps(events))
-            self.assertNotIn("unverified-name", json.dumps(events))
-            if expected == "auth_unavailable":
-                self.assertNotIn("失效", events[-1]["error"]["message"])
-                self.assertNotIn("过期", events[-1]["error"]["message"])
-
-    def test_qr_confirmation_network_failure_is_recoverable(self):
-        self.nav_get.side_effect = TimeoutError("private transport failure")
-        engine = SimpleNamespace(poll_qr_login=lambda *a, **kw: {"ok": True, "status": "confirmed", "cookies": [{"name": "session", "value": "private-cookie"}]})
-        code, events = self.invoke({"op": "qr_poll", "params": {"qrcode_key": "synthetic"}}, engine)
-        self.assertEqual(code, 1)
-        self.assertEqual(events[-1]["error"]["code"], "auth_unavailable")
-        self.assertIn("重新扫码", events[-1]["error"]["message"])
-        self.assertNotIn("private", json.dumps(events))
-
-    def test_qr_request_bounds(self):
-        for params in ({}, {"qrcode_key": 1}, {"qrcode_key": "k", "timeout_seconds": 100}, {"qrcode_key": "k", "timeout_seconds": True}):
-            code, _ = self.invoke({"op": "qr_poll", "params": params})
-            self.assertEqual(code, 1)
 
     def test_upstream_error_is_not_exposed(self):
         def fail(*args, **kwargs):

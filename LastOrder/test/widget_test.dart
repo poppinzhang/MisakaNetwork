@@ -391,7 +391,7 @@ void main() {
   });
   testWidgets('QR confirmation saves only confirmed cookies', (tester) async {
     final runtime = FakeRuntime();
-    runtime.responses['qr_start'] = {'qrcode_key': 'test-qr'};
+    runtime.responses['qr_start'] = testQrStart;
     runtime.responses['qr_poll'] = {
       'status': 'confirmed',
       'uid': '123',
@@ -409,10 +409,10 @@ void main() {
         home: Scaffold(body: LoginDialog(controller: c)),
       ),
     );
-    await tester.tap(find.text('生成二维码'));
     await tester.pumpAndSettle();
     expect(c.state.accounts, isEmpty);
-    await tester.tap(find.text('检测登录'));
+    expect(find.text('检测登录'), findsNothing);
+    await tester.pump(const Duration(seconds: 2));
     await tester.pumpAndSettle();
     expect(c.state.accounts.single.name, '测试账号');
     expect(store.secrets.values.single, contains('test-secret'));
@@ -455,7 +455,7 @@ void main() {
     tester,
   ) async {
     final runtime = FakeRuntime();
-    runtime.responses['qr_start'] = {'qrcode_key': 'test-qr'};
+    runtime.responses['qr_start'] = testQrStart;
     runtime.responses['qr_poll'] = {
       'status': 'confirmed',
       'uid': '123',
@@ -482,9 +482,9 @@ void main() {
       ),
     );
     expect(find.text('重新登录账号'), findsOneWidget);
-    await tester.tap(find.text('生成二维码'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('检测登录'));
+    expect(find.text('检测登录'), findsNothing);
+    await tester.pump(const Duration(seconds: 2));
     await tester.pumpAndSettle();
     expect(c.state.accounts.single.id, account.id);
     expect(c.state.accounts.single.name, '更新后的昵称');
@@ -500,7 +500,7 @@ void main() {
     tester,
   ) async {
     final runtime = FakeRuntime();
-    runtime.responses['qr_start'] = {'qrcode_key': 'test-qr'};
+    runtime.responses['qr_start'] = testQrStart;
     runtime.responses['qr_poll'] = {
       'status': 'confirmed',
       'uid': '456',
@@ -523,9 +523,9 @@ void main() {
         ),
       ),
     );
-    await tester.tap(find.text('生成二维码'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('检测登录'));
+    expect(find.text('检测登录'), findsNothing);
+    await tester.pump(const Duration(seconds: 2));
     await tester.pumpAndSettle();
     expect(find.text('重新登录账号'), findsOneWidget);
     expect(c.state.accounts.single.uid, '123');

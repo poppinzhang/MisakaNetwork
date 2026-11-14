@@ -6,6 +6,12 @@ import 'package:last_order/src/models.dart';
 import 'package:last_order/src/services.dart';
 import 'package:last_order/generated/misaka/v1/sisters.pbgrpc.dart';
 
+// Synthetic one-pixel PNG for widget transport, not QR scan validity.
+const testQrStart = {
+  'qrcode_key': 'test-qr',
+  'qr_png_base64': 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgYGAAAAAEAAH2FzhVAAAAAElFTkSuQmCC',
+};
+
 class MemoryStore implements StateStore {
   SavedState state = SavedState();
   final secrets = <String, String>{};
