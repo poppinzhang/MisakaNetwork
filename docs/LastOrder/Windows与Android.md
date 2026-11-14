@@ -1,12 +1,12 @@
 # LastOrder Windows 与 Android（0.4.0）
 
-源码版本统一为 `0.4.0+13`，Sisters、部署 helper 与运行时版本同为 `0.4.0`；Python 桥接协议仍为 `1`。本版处于发布准备阶段，待全平台原生构建；构建签名、自动化测试与验证边界见 [0.4.0 发布记录](../releases/0.4.0.md)。当前公开安装包仍为 [0.3.2 Release](https://github.com/poppinzhang/MisakaNetwork/releases/tag/0.3.2)，打包成功不等同于真机 GUI 与真实业务已验收。
+源码版本统一为 `0.4.0+13`，Sisters、部署 helper 与运行时版本同为 `0.4.0`；Python 桥接协议仍为 `1`。本版已通过全平台原生构建并公开为 [0.4.0 Release](https://github.com/poppinzhang/MisakaNetwork/releases/tag/0.4.0)；构建签名、自动化测试与验证边界见 [0.4.0 发布记录](../releases/0.4.0.md)。打包成功不等同于真机 GUI 与真实业务已验收。
 
 ## 平台与功能
 
 Windows 管理台最低 Windows 10，目标 x64；Android 最低 Android 16（API 36），目标 arm64-v8a 与 x86_64。macOS 继续支持 15.0+ 的 arm64 与 x64。三端复用 Flutter Material 3 界面、账号生命周期、任务配置、分发及 mTLS gRPC 客户端。手机宽度低于 600 时使用底部导航，概览卡片和任务操作适配窄屏；恢复前台时刷新机器与账号状态。
 
-0.3.2 已发布包的三端均部署 Linux/macOS、x64/arm64 四种 Sisters 包。0.4.0 源码新增 Windows 10+ x64 Sisters 及 Windows SCM 服务部署，三端改为携带五种包；机器准备、权限与验收边界见 [Windows Sisters](../Sisters/Windows支持.md)。Android 后台状态同步由系统调度限制，不承诺后台常驻；部署在后台线程执行，切换应用不会中断，但系统回收进程时无法拦截，部署可能中断且无法回滚；切换应用或关闭 LastOrder 不会停止远程 Sisters 已接受的任务。
+0.4.0 新增 Windows 10+ x64 Sisters 及 Windows SCM 服务部署，三端完整安装包均携带 Linux/macOS x64/arm64 与 Windows x64 五种同版本 Sisters 包；机器准备、权限与验收边界见 [Windows Sisters](../Sisters/Windows支持.md)。Android 后台状态同步由系统调度限制，不承诺后台常驻；部署在后台线程执行，切换应用不会中断，但系统回收进程时无法拦截，部署可能中断且无法回滚；切换应用或关闭 LastOrder 不会停止远程 Sisters 已接受的任务。
 
 ## Windows
 
@@ -18,7 +18,7 @@ Cookie 与含购票人信息的任务配置由 `flutter_secure_storage` 的 Wind
 
 ## Android
 
-首页统计区在可用宽度小于 500 逻辑像素时采用两列两行，卡片间距为 12 像素、内边距为水平 14／垂直 12 像素，数字字号为 30。标题为图标旁的弹性文本，说明保留完整内容并自然换行，避免小屏横向溢出。该紧凑样式仅用于 Android；Windows、macOS 的原有列数与卡片尺寸不变。此项为未发布源码调整，通过 Flutter 模拟平台检查布局并生成预览图，不代表原生设备或安装包已验收。
+首页统计区在可用宽度小于 500 逻辑像素时采用两列两行，卡片间距为 12 像素、内边距为水平 14／垂直 12 像素，数字字号为 30。标题为图标旁的弹性文本，说明保留完整内容并自然换行，避免小屏横向溢出。该紧凑样式仅用于 Android；Windows、macOS 的原有列数与卡片尺寸不变。布局通过 Flutter 模拟平台检查并生成预览图；完整安装包已随本版交付，模拟测试不代表所有原生设备的界面均已验收。
 
 Android 不运行桌面 EXE 或 PyInstaller 子进程。原生 `misaka/embedded` MethodChannel 在后台线程调用嵌入式服务：
 
