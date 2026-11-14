@@ -4,7 +4,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"testing"
 
 	"golang.org/x/sys/windows"
@@ -19,18 +18,9 @@ func TestWindowsJobClosesWhenSistersHostIsKilled(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = host.Process.Kill(); _ = host.Wait() })
-	waitRuntimeMarker(t, parentMarker)
-	waitRuntimeMarker(t, childMarker)
-	for _, marker := range []string{parentMarker, childMarker} {
-		data, err := os.ReadFile(marker)
-		if err != nil {
-			t.Fatal(err)
-		}
-		pid, err := strconv.ParseUint(string(data), 10, 32)
-		if err != nil {
-			t.Fatal(err)
-		}
-		handle, err := windows.OpenProcess(windows.SYNCHRONIZE, false, uint32(pid))
+	pids := []uint32{waitRuntimeMarker(t, parentMarker), waitRuntimeMarker(t, childMarker)}
+	for _, pid := range pids {
+		handle, err := windows.OpenProcess(windows.SYNCHRONIZE, false, pid)
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -81,9 +81,9 @@ TLS 回归从实际 `BiliRequest` 创建的 httpx 传输取得 SSLContext，以�
 
 固定上游源码、导入白名单、Sisters 下单参数与通知约束不变；标准 TLS 证书链与域名验证保持开启，新增真实客户端 TLS、完整查询/配置链、资源清理和 APK 结构回归。检查依据、问题复现、模拟器验证与限制见 [Android 兼容性排查](LastOrder/Android兼容性排查.md)。GitHub Actions（[43588004693](https://github.com/poppinzhang/MisakaNetwork/actions/runs/43588004693)）已完成 `0.3.2+12` 全平台打包、Android 依赖集回归与 APK 静态校验并公开发布；结论仍不构成全部依赖或真实业务的安全验收。
 
-### Windows Sisters 服务接入复核（2026-11-14，未发布）
+### Windows Sisters 服务接入复核（2026-11-14，0.4.0 发布准备）
 
-Windows Sisters 复用 Windows 管理端已有的原生内嵌运行时，固定上游 v2.15.18 / `227ebf73f5af3eec0019984a7cbcb722977453e8`、依赖锁定、vendor 快照、导入白名单和 `bridge.py` 均未改动。新增 SCM 入口、专用虚拟服务账户与私有临时目录，任务仍经 mTLS 到达 Sisters，再通过标准输入传给独立 runtime；服务配置和命令行不包含 Cookie。Job Object 管理实际运行时及子进程的取消与退出。该变化不引入新平台请求、下载器、第三方通知或 Web UI/分享入口。
+Windows Sisters 复用 Windows 管理端已有的原生内嵌运行时，固定上游 v2.15.18 / `227ebf73f5af3eec0019984a7cbcb722977453e8`、依赖锁定、vendor 快照、导入白名单和 `bridge.py` 业务逻辑均未改动；本项目运行时版本号随统一发布递增为 `0.4.0`。新增 SCM 入口、专用虚拟服务账户与私有临时目录，任务仍经 mTLS 到达 Sisters，再通过标准输入传给独立 runtime；服务配置和命令行不包含 Cookie。Job Object 管理实际运行时及子进程的取消与退出。该变化不引入新平台请求、下载器、第三方通知或 Web UI/分享入口。
 
 核对启动与构建路径继续仅进入本项目 bridge：`standard` 策略、证书链与域名验证、空通知和运行参数白名单保持有效；没有引入上游 Docker、启动器、Gradio 或通知参数。服务的 TEMP/TMP 指向专用目录；进程仍会继承其他环境，不能声称代理或 CA 环境影响已完全消除。实际 Python/HTTP 依赖必须在 Windows 原生构建并执行离线自检，Go 交叉编译不能证明运行时可用。
 

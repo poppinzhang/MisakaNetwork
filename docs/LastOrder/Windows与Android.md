@@ -1,12 +1,12 @@
-# LastOrder Windows 与 Android（0.3.2）
+# LastOrder Windows 与 Android（0.4.0）
 
-源码版本统一为 `0.3.2+12`，Sisters、部署 helper 与运行时版本同为 `0.3.2`；Python 桥接协议仍为 `1`。已通过 GitHub Actions 完成 [0.3.2 Release](https://github.com/poppinzhang/MisakaNetwork/releases/tag/0.3.2) 全平台打包；构建签名、自动化测试与验证边界见 [0.3.2 发布记录](../releases/0.3.2.md)，打包成功不等同于真机 GUI 与真实业务已验收。
+源码版本统一为 `0.4.0+13`，Sisters、部署 helper 与运行时版本同为 `0.4.0`；Python 桥接协议仍为 `1`。本版处于发布准备阶段，待全平台原生构建；构建签名、自动化测试与验证边界见 [0.4.0 发布记录](../releases/0.4.0.md)。当前公开安装包仍为 [0.3.2 Release](https://github.com/poppinzhang/MisakaNetwork/releases/tag/0.3.2)，打包成功不等同于真机 GUI 与真实业务已验收。
 
 ## 平台与功能
 
 Windows 管理台最低 Windows 10，目标 x64；Android 最低 Android 16（API 36），目标 arm64-v8a 与 x86_64。macOS 继续支持 15.0+ 的 arm64 与 x64。三端复用 Flutter Material 3 界面、账号生命周期、任务配置、分发及 mTLS gRPC 客户端。手机宽度低于 600 时使用底部导航，概览卡片和任务操作适配窄屏；恢复前台时刷新机器与账号状态。
 
-0.3.2 已发布包的三端均部署 Linux/macOS、x64/arm64 四种 Sisters 包。未发布源码新增 Windows 10+ x64 Sisters 及 Windows SCM 服务部署，三端改为携带五种包；机器准备、权限与验收边界见 [Windows Sisters](../Sisters/Windows支持.md)。Android 后台状态同步由系统调度限制，不承诺后台常驻；部署在后台线程执行，切换应用不会中断，但系统回收进程时无法拦截，部署可能中断且无法回滚；切换应用或关闭 LastOrder 不会停止远程 Sisters 已接受的任务。
+0.3.2 已发布包的三端均部署 Linux/macOS、x64/arm64 四种 Sisters 包。0.4.0 源码新增 Windows 10+ x64 Sisters 及 Windows SCM 服务部署，三端改为携带五种包；机器准备、权限与验收边界见 [Windows Sisters](../Sisters/Windows支持.md)。Android 后台状态同步由系统调度限制，不承诺后台常驻；部署在后台线程执行，切换应用不会中断，但系统回收进程时无法拦截，部署可能中断且无法回滚；切换应用或关闭 LastOrder 不会停止远程 Sisters 已接受的任务。
 
 ## Windows
 
@@ -39,7 +39,7 @@ Cookie 与任务秘密由 Android Keystore 支持的安全存储保护；显式�
 
 ## 升级与测试
 
-沿用 schema 2、`state-v2.json` 与 `v2.` 安全存储命名空间；0.1.1 数据在同一平台和同一应用身份下继续读取。0.1.0 仍不迁移，需重新配置。macOS 在 0.3.0 改为独立 `macos-vault-v1` 存储而不影响 Windows 与 Android。跨平台不自动复制账号、密钥和机器配置；首次安装需添加机器并登录。必须将所有目标 Sisters 重新部署为 0.3.2，避免 helper/runtime 版本校验拒绝旧包。重部署会停止当前任务。
+沿用 schema 2、`state-v2.json` 与 `v2.` 安全存储命名空间；0.1.1 数据在同一平台和同一应用身份下继续读取。0.1.0 仍不迁移，需重新配置。macOS 在 0.3.0 改为独立 `macos-vault-v1` 存储而不影响 Windows 与 Android。跨平台不自动复制账号、密钥和机器配置；首次安装需添加机器并登录。升级 0.4.0 后必须将所有目标 Sisters 重新部署为 0.4.0，避免 helper/runtime 版本校验拒绝旧包。重部署会停止当前任务。
 
 Android 测试签名与正式签名不能互相覆盖安装；改变签名需要卸载重装并重新登录、配置和部署，正式交付应保管稳定签名密钥。密钥、口令与构建主机信息不能进入源码或发布记录。
 

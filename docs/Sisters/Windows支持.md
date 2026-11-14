@@ -1,6 +1,6 @@
-# Windows Sisters（unstaged，未发布）
+# Windows Sisters（0.4.0，发布准备）
 
-Sisters 新增 Windows 10 及以上的 **x64 / amd64** 实现，不支持 Windows 7/8/8.1、32 位 Windows 或 Windows arm64。当前公开的 0.3.2 包仍只包含 Linux/macOS 四种 Sisters 包；本文描述下一版源码，版本号尚未递增，不能把现有安装包视为已支持 Windows。
+Sisters 新增 Windows 10 及以上的 **x64 / amd64** 实现，不支持 Windows 7/8/8.1、32 位 Windows 或 Windows arm64。当前公开的 0.3.2 包仍只包含 Linux/macOS 四种 Sisters 包；本文描述 `0.4.0+13` 源码，待全平台原生构建和正式发布，不能把现有安装包视为已支持 Windows；当前进度见 [0.4.0 发布记录](../releases/0.4.0.md)。
 
 ## 机器准备
 
@@ -36,7 +36,7 @@ Sisters 新增 Windows 10 及以上的 **x64 / amd64** 实现，不支持 Window
 
 本地验证和实际原生验收分别记录；Windows 测试包含 SCM 控制与 Job Object 进程树用例，CI Windows 作业运行全量 Go 测试和真实离线运行时冒烟。CI 使用 Windows Server runner，通过也不能替代 Windows 10 实机安装、自启动、SSH 部署/重部署、故障回滚及断连后继续服务的验收。未执行真实账号登录、下单或出票测试，不把源码和模拟验证表述为发行二进制或业务安全验收。
 
-2026-11-14 本地验证记录：
+2026-11-14 合入前基线验证记录（当时版本声明为 `0.3.2`，不等同于 `0.4.0` 发布验证；本版结果以 [发布记录](../releases/0.4.0.md) 为准）：
 
 | 范围 | 结果 |
 | --- | --- |

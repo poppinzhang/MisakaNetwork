@@ -37,8 +37,8 @@ func nativePowerShell(script string, input io.Reader) (string, error) {
 }
 
 func TestWindowsDeploymentScriptsParseNatively(t *testing.T) {
-	paths := windowsPaths{Root: `C:\ProgramData\用户 O'Brien\Sisters`, Release: `C:\ProgramData\用户 O'Brien\Sisters\releases\0.3.2-test`, Temp: `C:\ProgramData\用户 O'Brien\Sisters\tmp`}
-	scripts := []string{windowsPrepareScript("Sisters", "0.3.2-test"), windowsUploadScript(paths.Release), windowsSecretScript(paths.Release), windowsPlatformScript}
+	paths := windowsPaths{Root: `C:\ProgramData\用户 O'Brien\Sisters`, Release: `C:\ProgramData\用户 O'Brien\Sisters\releases\0.4.0-test`, Temp: `C:\ProgramData\用户 O'Brien\Sisters\tmp`}
+	scripts := []string{windowsPrepareScript("Sisters", "0.4.0-test"), windowsUploadScript(paths.Release), windowsSecretScript(paths.Release), windowsPlatformScript}
 	_ = activateWindows(func(script string, _ io.Reader) (string, error) {
 		scripts = append(scripts, script)
 		return "null", nil

@@ -40,7 +40,7 @@ void main() {
     (tester) async {
       final result = await LocalRuntime().call('ping', {});
       expect(result['ready'], true);
-      expect(result['version'], '0.3.2');
+      expect(result['version'], '0.4.0');
       expect(result['bili_version'], '2.15.18');
       expect(result['protocol'], 1);
       expect(activeChildProcessCount, 0);

@@ -125,7 +125,7 @@ void main() {
       final c = controller(store: store, gateway: gateway);
       await c.initialize(poll: false);
       await c.refresh();
-      expect(c.statuses['a']?.version, '0.3.2');
+      expect(c.statuses['a']?.version, '0.4.0');
       expect(c.lastSeen['a'], isNotNull);
       gateway.fail.add('a');
       await c.refresh();

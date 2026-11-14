@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -128,12 +129,16 @@ func TestRuntimeCancellationKillsProcessGroup(t *testing.T) {
 	}
 }
 
-func waitRuntimeMarker(t *testing.T, marker string) {
+func waitRuntimeMarker(t *testing.T, marker string) uint32 {
 	t.Helper()
 	deadline := time.Now().Add(10 * time.Second)
 	for {
-		if _, err := os.Stat(marker); err == nil {
-			return
+		// WriteFile creates the marker before writing its PID. Wait for its
+		// contents, and return that validated value instead of rereading it.
+		if data, err := os.ReadFile(marker); err == nil {
+			if pid, err := strconv.ParseUint(string(data), 10, 32); err == nil && pid > 0 {
+				return uint32(pid)
+			}
 		}
 		if time.Now().After(deadline) {
 			t.Fatal("runtime helper did not start")

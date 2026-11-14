@@ -112,9 +112,9 @@ func TestWindowsPlatformMinimumAndArchitecture(t *testing.T) {
 }
 
 func TestWindowsPathsAndServiceSnapshotAreBounded(t *testing.T) {
-	paths := windowsPaths{Root: `C:\ProgramData\用户 O'Brien\Sisters`, Release: `C:\ProgramData\用户 O'Brien\Sisters\releases\0.3.2-test`, Temp: `C:\ProgramData\用户 O'Brien\Sisters\tmp`}
+	paths := windowsPaths{Root: `C:\ProgramData\用户 O'Brien\Sisters`, Release: `C:\ProgramData\用户 O'Brien\Sisters\releases\0.4.0-test`, Temp: `C:\ProgramData\用户 O'Brien\Sisters\tmp`}
 	data, _ := json.Marshal(paths)
-	if _, err := parseWindowsPaths(string(data), "0.3.2-test"); err != nil {
+	if _, err := parseWindowsPaths(string(data), "0.4.0-test"); err != nil {
 		t.Fatal(err)
 	}
 	if powershellQuote("用户 O'Brien") != "'用户 O''Brien'" {
@@ -128,9 +128,9 @@ func TestWindowsPathsAndServiceSnapshotAreBounded(t *testing.T) {
 	for _, change := range []func(*windowsServiceSnapshot){
 		func(s *windowsServiceSnapshot) { s.Account = "LocalSystem" },
 		func(s *windowsServiceSnapshot) { s.Mode = "Manual" },
-		func(s *windowsServiceSnapshot) { s.Path = strings.Replace(s.Path, "0.3.2-test", "..", 1) },
-		func(s *windowsServiceSnapshot) { s.Path = strings.ReplaceAll(s.Path, "0.3.2-test", "..") },
-		func(s *windowsServiceSnapshot) { s.Path = strings.ReplaceAll(s.Path, "0.3.2-test", ".") },
+		func(s *windowsServiceSnapshot) { s.Path = strings.Replace(s.Path, "0.4.0-test", "..", 1) },
+		func(s *windowsServiceSnapshot) { s.Path = strings.ReplaceAll(s.Path, "0.4.0-test", "..") },
+		func(s *windowsServiceSnapshot) { s.Path = strings.ReplaceAll(s.Path, "0.4.0-test", ".") },
 		func(s *windowsServiceSnapshot) { s.Path = strings.Replace(s.Path, `\config.json`, `\other.json`, 1) },
 		func(s *windowsServiceSnapshot) { s.Path += " --unsafe" },
 	} {
@@ -144,7 +144,7 @@ func TestWindowsPathsAndServiceSnapshotAreBounded(t *testing.T) {
 }
 
 func TestWindowsActivationRollbackAndHealth(t *testing.T) {
-	paths := windowsPaths{Root: `C:\ProgramData\MisakaNetwork\Sisters`, Release: `C:\ProgramData\MisakaNetwork\Sisters\releases\0.3.2-new`, Temp: `C:\ProgramData\MisakaNetwork\Sisters\tmp`}
+	paths := windowsPaths{Root: `C:\ProgramData\MisakaNetwork\Sisters`, Release: `C:\ProgramData\MisakaNetwork\Sisters\releases\0.4.0-new`, Temp: `C:\ProgramData\MisakaNetwork\Sisters\tmp`}
 	for _, existing := range []bool{false, true} {
 		for _, failedRollback := range []bool{false, true} {
 			calls := []string{}

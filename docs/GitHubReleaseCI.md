@@ -36,13 +36,15 @@
 1. 按[打包与发布](打包与发布.md)更新统一版本、递增构建号、发布日期和所有版本引用；内嵌 biliTickerBuy 版本与依赖仍遵守既有安全复核要求。
 2. 将本次改动从 `CHANGELOG.md` 的 `## unstaged` 移入 `## <版本号> — <YYYY-MM-DD>`，前方保留空的 `unstaged`。新增 `docs/releases/<版本号>.md`，明确升级操作与已知限制。CI 尚未执行时记录为待构建，不能预写 CI 通过或真实业务验收。
 3. 完成本地源码测试及发布准备，提交所需源码。后续正式发布时再创建并推送版本 Tag；或者为已存在且包含工作流的版本 Tag 手动运行 Release。预检拒绝分支、版本/构建号不一致、非空 `unstaged`、日期不一致或缺少发布说明。
-4. CI 在四种原生平台构建 Python 运行时及 Sisters 包，执行 Go/Python 测试、依赖闭合检查、运行时离线检查和隐私检查。每份运行时使用独立 venv，避免混入 runner 预装的 Python 包。
-5. macOS 两种架构、Windows x64 和 Android 两种架构全部重新构建，每份完整应用均包含四种 Sisters 包。macOS/Windows 执行 Flutter 静态检查与测试；Android 固定 SDK、JDK 与 NDK，初始化时只请求 `platform-tools`，后续显式安装所需 API/build-tools/NDK，使用正式密钥签名。
+4. CI 在 Linux/macOS arm64/x64 与 Windows x64 五个原生目标构建 Python 运行时及 Sisters 包，执行 Go/Python 测试、依赖闭合检查、运行时离线检查和隐私检查。每份运行时使用独立 venv，避免混入 runner 预装的 Python 包。
+5. macOS 两种架构、Windows x64 和 Android 两种架构全部重新构建，每份完整应用均包含五种同版本 Sisters 包。macOS/Windows 执行 Flutter 静态检查与测试；Android 固定 SDK、JDK 与 NDK，初始化时只请求 `platform-tools`，后续显式安装所需 API/build-tools/NDK，使用正式密钥签名。
 6. 所有平台成功后合并清单，检查版本、平台、内嵌部署包、字节数和校验和。缺少任何目标都不会进入发布作业。
 7. 发布作业将必要文件复制到全新的 staging 目录，再次校验文件集合、完整状态、当前版本和 Android 签名模式。只允许非空、普通文件，单个文件须小于 2 GiB；不接受符号链接。
 8. 发布脚本核对本地 HEAD、本地 Tag 和远程 Tag 的提交一致，拒绝已存在的同版本 Release，通过 REST 创建草稿，从创建响应取得 Release ID，并按 ID 直接读取验证。不依赖创建后的列表可见性，也不使用 REST Tag 接口查草稿（该接口仅用于已发布版本）。随后使用支持草稿查找的 GitHub CLI 上传；远端文件名集合、上传状态、大小和 SHA-256 全部一致后，再次核对 Tag，最后按同一 ID 更新为正式 Release 并标记为 Latest。创建与公开均显式关闭 prerelease，公开前后核对 Release 类型；不会因版本号为 `0.x` 自动改成预发布。1.0.0 前仍属于早期研发版本。
 
 托管 runner 的隐私检查显式扫描本次仓库目录，仍遍历二进制、ZIP 及 PyInstaller 压缩代码。公共 Python 发行包和官方 wheel 自带的通用 runner 主目录构建路径不等同于本次环境信息，因此 CI 不把整个通用 runner 主目录或公共临时根目录作为禁止标记；Android 额外检查实际签名文件路径；本地默认扫描个人主目录与仓库目录的规则不变。此检查不是任意秘密检测或完整安全审计。
+
+Windows 原生作业执行全量 Go race/vet、PowerShell 脚本解析及隔离 SCM 集成测试（`MISAKA_TEST_WINDOWS_SERVICE=1`），并检查真实 Windows runtime 与 Sisters 的离线 mTLS 冒烟。Windows 2022 runner 的通过结果不等于 Windows 10 真机 SSH 部署、自启动或断连后持续服务验收。
 
 Release 正文包含构建提交、签名状态、验证边界、当前版本 CHANGELOG 内容与固定到该提交的发布文档链接。CI 构建记录不代表真实账号登录、下单、付款或出票已验收；真实平台集成和业务验证仍分别记录。
 
@@ -59,7 +61,7 @@ Release 正文包含构建提交、签名状态、验证边界、当前版本 CH
 | `SHA256SUMS` | 1 | 五个程序包的联合校验和 |
 | `release.json` | 1 | 版本、构建号、平台、签名状态、大小及 SHA-256 |
 
-许可证随完整程序包提供，不单独上传构建时收集的许可工作目录。四份 Sisters `.tar.gz`、原生 Python 运行时、`bundles.json`、展开的 `.app`、调试符号、日志、签名材料、缓存及完整 Actions artifact 的外层 ZIP 均不单独进入 Release Assets。没有独立 Linux LastOrder 或 Windows Sisters 安装包；Linux Sisters 已内嵌在每份 LastOrder 中。
+许可证随完整程序包提供，不单独上传构建时收集的许可工作目录。五份 Sisters `.tar.gz`、原生 Python 运行时、`bundles.json`、展开的 `.app`、调试符号、日志、签名材料、缓存及完整 Actions artifact 的外层 ZIP 均不单独进入 Release Assets。不提供 Linux LastOrder；全部五种 Sisters 包均内嵌在每份 LastOrder 中，不单独发布 Sisters 安装包。
 
 GitHub 自行显示的 `Source code (zip)` / `Source code (tar.gz)` 是平台根据 Tag 提供的源码入口，不是本工作流上传的中间文件。
 
