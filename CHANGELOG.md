@@ -11,6 +11,7 @@
 - 升级后须在无活跃任务时重新部署全部 Sisters 为 `0.4.0`，重部署会停止当前任务；Android 延续正式签名密钥，macOS 延续 ad-hoc 签名及 `macos-vault-v1` 存储。
 - 本地验证：全量 Go race/vet、Windows x64 测试程序交叉编译/vet、133 项脚本测试、Flutter analyze 与 915 项测试（2 项可选跳过）通过；runtime 桌面依赖集 106 项通过/9 项跳过、Android 依赖集 112 项通过/3 项跳过；许可资产、发布元数据和三个工作流的 actionlint 检查通过。
 - Windows 原生测试将 PowerShell 标准输出与诊断流分开，避免诊断混入结构化结果，并等待有效 PID 标记后验证进程树清理；隔离服务测试补充 SCM 状态、双向 TLS 与合成运行时权限诊断。
+- 原生 CI 发现并修复 Windows 服务创建参数类型不匹配：`ServiceType` 与 `ErrorControl` 按 `Win32_Service.Create` 定义使用 8 位无符号整数，避免 PowerShell 拒绝创建服务。
 - **交付状态：0.4.0 本地源码全量验证通过，待远程全平台构建与正式发布。** 已公开下载仍为 0.3.2；本次合入前的源码、交叉编译及 macOS 离线冒烟结果不代替 0.4.0 完整包验证。Windows Server 原生 CI 不等于 Windows 10 真机 SSH 部署、自启动或真实业务验收，具体范围见 [0.4.0 发布记录](docs/releases/0.4.0.md) 与 [Windows Sisters](docs/Sisters/Windows支持.md)。
 
 ## 0.3.2 — 2026-11-14

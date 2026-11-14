@@ -401,7 +401,8 @@ func activateWindows(run powershellRunner, paths windowsPaths, health func() err
 	change := windowsServiceHelpers + guard + `Stop-Sisters
 $command=` + powershellQuote(command) + `
 if ($null -eq $s) {
-  Check-Result (Invoke-CimMethod -ClassName Win32_Service -MethodName Create -Arguments @{Name='MisakaSisters';DisplayName='MisakaNetwork Sisters';PathName=$command;ServiceType=[uint32]16;ErrorControl=[uint32]1;StartMode='Automatic';DesktopInteract=$false;StartName='NT SERVICE\MisakaSisters'})
+  # Win32_Service.Create declares these two fields as uint8, unlike the Win32 API's DWORDs.
+  Check-Result (Invoke-CimMethod -ClassName Win32_Service -MethodName Create -Arguments @{Name='MisakaSisters';DisplayName='MisakaNetwork Sisters';PathName=$command;ServiceType=[byte]16;ErrorControl=[byte]1;StartMode='Automatic';DesktopInteract=$false;StartName='NT SERVICE\MisakaSisters'})
 } else {Check-Result (Invoke-CimMethod -InputObject $s -MethodName Change -Arguments @{PathName=$command})}
 & "$env:SystemRoot\System32\sc.exe" failure MisakaSisters reset= 86400 actions= restart/3000/restart/10000/restart/30000 | Out-Null
 if ($LASTEXITCODE -ne 0) {throw 'cannot configure service recovery'}

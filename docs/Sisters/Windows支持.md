@@ -16,6 +16,8 @@ Sisters 新增 Windows 10 及以上的 **x64 / amd64** 实现，不支持 Window
 
 部署创建固定名称 `MisakaSisters` 的 Windows 服务，使用独立虚拟账户 `NT SERVICE\MisakaSisters`，不保存运行账户密码，不以 LocalSystem 或 SSH 管理员身份执行抢票。虚拟服务账户的机制见 [Microsoft CreateService 文档](https://learn.microsoft.com/en-us/windows/win32/api/winsvc/nf-winsvc-createservicew)。每台 Windows 主机通过自动部署管理一份该服务。
 
+服务创建通过 `Invoke-CimMethod` 调用 `Win32_Service.Create`，`ServiceType` 与 `ErrorControl` 按该方法的 MOF 定义传入 `uint8`（PowerShell `[byte]`）；不能沿用原生 Win32 API 的 `DWORD` 类型，否则 CIM 会在创建服务前拒绝参数。参数定义见 [Microsoft Win32_Service.Create 文档](https://learn.microsoft.com/en-us/windows/win32/cimwin32prov/create-method-in-class-win32-service)。
+
 服务由 Windows SCM 管理，开机自动启动，收到停止或系统关机通知后取消任务并关闭 gRPC。重启只恢复空服务，不恢复执行中的任务、内存 Cookie、订单付款入口或幂等历史。关闭 LastOrder 不会停止这项后台服务。用户应优先在「任务监控」停止任务；管理员也可在 Windows「服务」中停止 `MisakaSisters`。重新部署前需停止或等待任务结束并核对已创建的订单。
 
 服务命令为 `sisters.exe service --config <绝对路径> --temp-dir <绝对路径>`，仅由 SCM 调用；前台调试保留 `sisters.exe serve --config <配置文件>`。服务配置相对路径按配置文件目录解析，不依赖 SCM 的工作目录。服务模式使用受限的临时目录，配置/证书/程序目录向服务账户仅开放读取与执行权限，临时目录允许写入；管理员和 SYSTEM 可维护部署文件，其他普通用户没有访问权限。
