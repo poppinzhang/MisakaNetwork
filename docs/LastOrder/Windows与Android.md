@@ -22,7 +22,7 @@ Cookie 与含购票人信息的任务配置由 `flutter_secure_storage` 的 Wind
 
 Android 不运行桌面 EXE 或 PyInstaller 子进程。原生 `misaka/embedded` MethodChannel 在后台线程调用嵌入式服务：
 
-- `runtime`：传入单个 JSON 请求，返回一个 JSON result。Chaquopy 嵌入 Python 3.11，调用同一份 biliTickerBuy 的登录、查询、配置接口；共享 `runtime/bridge.py` 的请求校验及账号身份验证。移动端只装管理端所需依赖，并拒绝 `run`，实际抢票始终由远程 Sisters 完成。
+- `runtime`：传入单个 JSON 请求，返回一个 JSON result。Chaquopy 嵌入 Python 3.11，调用同一份 biliTickerBuy 的登录、查询、配置接口；共享 `runtime/bridge.py` 的请求校验及账号身份验证。移动端只装管理端所需依赖，并拒绝 `run`，实际抢票始终由远程 Sisters 完成。二维码依赖只有 qrcode 与 PyPNG，不含 Pillow；登录与付款二维码由 bridge 显式选择 PyPNG 在内存编码。已交付的 0.3.0 Android 版登录二维码仍走需要 Pillow 的默认工厂，无法生成，修复尚未发布，详见 [biliTickerBuy 运行时](../biliTickerBuy运行时.md#登录二维码编码修复复核未发布)。
 - `helper`：JSON 请求经 JNI 进入 Go `internal/mobile`，复用 `internal/control` 的 SSH 主机指纹验证、证书签发、完整包验证和远程部署。移动桥接限制文件路径位于本应用私有目录。
 - `resources`：按应用版本将 APK 内置的四种 Sisters 包准备到应用私有目录，返回包含 `bundles` 的资源根目录。APK 内使用 `.bundle` 保存原始 gzip 字节，避免 Android 资源打包器自动解压并去掉 `.gz`；解包到私有目录时还原 `.tar.gz`。准备失败不继续部署。
 
@@ -39,4 +39,4 @@ Cookie 与任务秘密由 Android Keystore 支持的安全存储保护；显式�
 
 Android 测试签名与正式签名不能互相覆盖安装；改变签名需要卸载重装并重新登录、配置和部署，正式交付应保管稳定签名密钥。密钥、口令与构建主机信息不能进入源码或发布记录。
 
-Flutter 测试覆盖桥接 JSON、错误与超时、敏感原生错误屏蔽、Windows 路径、手机导航与任务卡片；Python 测试覆盖移动端允许的操作与本地执行拒绝；Go 测试覆盖私有目录约束与 Windows ACL。原生集成测试验证真实安全存储、PKI 和运行时启动。模拟测试不等同于真实账号登录、下单、生产 SSH 部署或所有支持设备验收。
+Flutter 测试覆盖桥接 JSON、错误与超时、敏感原生错误屏蔽、Windows 路径、手机导航与任务卡片；Python 测试覆盖移动端允许的操作与本地执行拒绝，并在 Android 依赖集合中隐藏 Pillow 真实生成登录与付款二维码；Go 测试覆盖私有目录约束与 Windows ACL。原生集成测试验证真实安全存储、PKI 和运行时启动。模拟测试不等同于真实账号登录、下单、生产 SSH 部署或所有支持设备验收。

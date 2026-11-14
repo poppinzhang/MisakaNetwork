@@ -2,6 +2,16 @@
 
 ## unstaged
 
+### 修复
+
+- **Android 扫码登录无法生成二维码**：Android 内嵌客户端按 `runtime/requirements-android.lock` 只携带 qrcode 8.2 与 PyPNG，不含 Pillow；`qr_start` 却调用 qrcode 默认图像工厂，而 qrcode 8.2 的默认工厂会先无条件导入 Pillow，源码中的 PyPNG 回退实际不可达。因此「登录哔哩哔哩」与「重新登录账号」每次点击「生成二维码」都会失败，并被通用异常处理误报为「biliTickerBuy 操作失败，请检查登录状态、活动信息与网络连接」。现在登录与付款二维码共用同一内存编码函数，按可用依赖显式选择 Pillow 或 PyPNG；编码组件缺失时返回固定提示「内置二维码组件不完整，请重新安装此版本」，不再误导为网络或登录问题。桌面平台（携带 Pillow）与付款二维码的生成结果不变。已交付的 0.3.0 Android 安装包仍有此问题（源码历史显示更早的 Android 版本使用同一实现），在此之前可在登录窗口打开「使用已有 Cookie」导入登录信息；修复需随新版本安装。
+
+### 改进、文档与验证边界
+
+- 新增离线回归：无 Pillow 时 `qr_start` 显式选择 PyPNG，编码组件缺失时两种二维码操作返回固定错误且不回显内容；在 qrcode 与 PyPNG 可用时隐藏 Pillow，经 Android 适配层真实生成登录与付款二维码，并逐模块核对 PNG 与二维码矩阵。这些用例在修复前的 bridge 上失败。`verify.yml` 与 `package.yml` 的 Android 作业先按 `runtime/requirements-android.lock` 建立独立环境，断言包含 qrcode 与 PyPNG 且不含 Pillow，再运行全部 runtime 测试，避免含 Pillow 的桌面依赖掩盖同类问题。
+- 按接入安全约束复核本次嵌入适配：上游 v2.15.18 / `227ebf73f5af3eec0019984a7cbcb722977453e8`、vendor 快照、导入白名单、依赖锁定、`standard` 下单参数与运行参数均未改变；编码只在内存处理上游返回的登录链接，不访问该链接、不落盘，不新增网络目标、通知或服务入口。详见 [biliTickerBuy 运行时](docs/biliTickerBuy运行时.md#登录二维码编码修复复核未发布)。
+- 本地验证：runtime 测试在 Android 依赖集合（Python 3.11.13、qrcode 8.2、pypng 0.20220715.0，无 Pillow）、完整桌面运行时依赖（Python 3.11.13）与未安装依赖的 Python 3.13.5 下均为 92 项通过，分别跳过 3、2、7 项依赖不满足的真实环境测试；脚本测试 110 项通过；`go test -race ./...`（未改动的包沿用缓存结果）与 `go vet ./...` 通过；`flutter analyze` 无问题，`flutter test` 870 项通过、2 项可选测试跳过。Android 依赖集合生成的登录与付款二维码经本机系统识别器离线解码，与虚构内容一致；实际 `LoginDialog` 在 Flutter 测试环境中能解码并显示这种 1 位灰度 PNG。未构建新安装包，未在 Android 真机或模拟器上验证，未执行真实哔哩哔哩扫码登录；新增 CI 步骤尚未在 GitHub Actions 上运行。
+
 ## 0.3.0 — 2026-11-14
 
 交付状态：统一版本 **0.3.0+10** 已通过 GitHub Actions 构建所有已支持平台，并公开为 [正式 Release](https://github.com/poppinzhang/MisakaNetwork/releases/tag/0.3.0)（Latest，非 Pre-Release）；五种安装包及七份校验/清单文件均已核验，详情见 [0.3.0 记录](docs/releases/0.3.0.md)。内嵌 biliTickerBuy 保持 **2.15.18**。

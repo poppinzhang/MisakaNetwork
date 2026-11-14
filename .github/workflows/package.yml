@@ -241,6 +241,15 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+      - name: Test the embedded Android client with its packaged Python dependencies
+        run: |
+          venv="$RUNNER_TEMP/android-client-venv"
+          python -m venv "$venv"
+          "$venv/bin/python" -m pip install --only-binary=:all: -r runtime/requirements-android.lock
+          "$venv/bin/python" -m pip check
+          # Like the APK: qrcode and PyPNG without Pillow, so real QR checks run.
+          "$venv/bin/python" -c 'import importlib.util as u, png, qrcode; assert u.find_spec("PIL") is None'
+          "$venv/bin/python" -m unittest discover -s runtime/tests -v
       - uses: actions/setup-java@v4
         with:
           distribution: temurin

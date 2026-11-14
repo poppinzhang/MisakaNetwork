@@ -50,6 +50,16 @@ TLS 回归从实际 `BiliRequest` 创建的 httpx 传输取得 SSLContext，以�
 
 平台 HTTPS 验证、内存 Cookie、空通知配置和无 Web UI/Gradio 分享限制继续保留；本地编码复用既有二维码依赖，不新增推送器或服务入口。源码核查范围、白名单依据与需要覆盖的离线回归见[付款码回显](付款码回显.md#接入安全核查范围)。这些结论限于源码与离线模拟，不是全部依赖、发行二进制或真实支付业务的安全验收。
 
+### 登录二维码编码修复复核（未发布）
+
+本次只调整 bridge 的本地二维码编码：`qr_start` 与 `payment_qr` 改用同一 `encode_qr_png`，显式选择 Pillow 的 `PilImage`，无法导入时选择 PyPNG 的 `PyPNGImage`，在内存生成 PNG。qrcode 8.2 未指定工厂时会先无条件导入 Pillow，源码中的 PyPNG 回退实际不可达；Android 内嵌客户端按 `runtime/requirements-android.lock` 只携带 qrcode 与 PyPNG，因此已交付的 0.3.0 Android 登录二维码始终生成失败，异常又被通用处理报成「biliTickerBuy 操作失败，请检查登录状态、活动信息与网络连接」。源码历史显示更早的 Android 版本使用同一实现。现在编码组件缺失返回固定的 `qr_encoder_unavailable`（「内置二维码组件不完整，请重新安装此版本」），不回显二维码内容或原始异常；其他编码异常仍按通用脱敏错误处理。
+
+上游 v2.15.18 / `227ebf73f5af3eec0019984a7cbcb722977453e8`、vendor 快照、导入白名单、依赖锁定、`standard` 下单参数与运行参数均未改变。`start_qr_login(qr_image_path=False)` 仍只请求平台二维码生成接口，使用默认验证的 requests，不写二维码文件；新增编码只在内存处理上游返回的登录链接，不访问该链接，不新增网络目标、通知、遥测或服务入口，Cookie 与购票资料不经过此路径。空通知配置与无 Web UI/Gradio 分享限制保持不变。
+
+`runtime/tests/test_bridge.py` 补充有 Pillow 时使用 `PilImage`、无 Pillow 时显式使用 `PyPNGImage`、编码组件缺失时两种二维码操作均返回固定错误且不回显内容的离线回归。`runtime/tests/test_android_bridge.py` 在可导入 qrcode 与 PyPNG 时隐藏 Pillow，经 Android 适配层真实生成登录与付款二维码，禁止网络，确认私有缓存未落盘，并逐模块核对 PNG 与二维码矩阵；这些用例在修复前的 bridge 上失败。CI 的 Android 作业先按 Android 依赖锁建立独立环境，断言包含 qrcode 与 PyPNG 且不含 Pillow，再运行全部 runtime 测试。
+
+2026-11-14 本地结果：runtime 测试在 Android 依赖集合（Python 3.11.13、qrcode 8.2、pypng 0.20220715.0，无 Pillow）、完整桌面运行时依赖（Python 3.11.13）与未安装依赖的 Python 3.13.5 下均为 92 项通过，分别跳过 3、2、7 项依赖不满足的真实环境测试。Android 依赖集合生成的登录与付款二维码经本机系统识别器离线解码，与虚构内容一致；实际 `LoginDialog` 在 Flutter 测试环境中能解码并显示这种 1 位灰度 PNG。另核对已交付 0.3.0 Android 安装包：内置依赖不含 Pillow，`qr_start` 字节码与修复前源码一致。结论限于源码、离线模拟与宿主环境，未构建新安装包，未在 Android 真机或模拟器上验证，未执行真实哔哩哔哩扫码登录；新增 CI 步骤尚未在 GitHub Actions 上运行，也不是全部依赖或发行二进制的安全验收。
+
 ### 升级安全核查
 
 每次升级上游版本、固定提交或相关依赖，以及调整导入白名单、嵌入补丁、启动方式或运行参数时，必须完成以下核查。即使上游宣称已修复问题，也不能自动解除上述禁用约束。
@@ -75,7 +85,7 @@ TLS 回归从实际 `BiliRequest` 创建的 httpx 传输取得 SSLContext，以�
 | op | params | data |
 | --- | --- | --- |
 | `ping` | 无 | `version`、`bili_version`、`protocol:1`、`ready:true`；导入真实引擎验证依赖，不访问网络 |
-| `qr_start` | 无 | `login_url`、`qrcode_key`、`qr_png_base64`；PNG 不落盘 |
+| `qr_start` | 无 | `login_url`、`qrcode_key`、`qr_png_base64`；PNG 在内存编码（有 Pillow 用 Pillow，否则用 PyPNG），不落盘 |
 | `payment_qr`（未发布） | `payment_code_url`，完整字符串须符合支付白名单 | `qr_png_base64`；仅本地内存生成，不请求平台或支付网站 |
 | `qr_poll` | `qrcode_key`、可选 `timeout_seconds`（1–60，默认 5） | `status:confirmed/timeout/failed`；只有已验证的 confirmed 返回 `cookies`、`username`、`uid` |
 | `login_cookie` | `cookies` | `status:valid/expired/unknown`、`logged_in`、`username`、`uid`、`message`；valid 才返回 `cookies` |
@@ -120,6 +130,14 @@ python3.11 -m venv .build/runtime-venv
 .build/runtime-venv/bin/python runtime/build.py --output .build/runtime/macos-arm64
 ```
 
+Android 内嵌客户端只携带 `runtime/requirements-android.lock` 中的依赖（qrcode 与 PyPNG，不含 Pillow）。修改 bridge、二维码编码或客户端操作后，还需在这一依赖集合中运行测试；完整桌面依赖包含 Pillow，无法发现 Android 缺少 Pillow 导致的问题。CI 的 Android 作业执行同样检查。
+
+```sh
+python3.11 -m venv .build/android-client-venv
+.build/android-client-venv/bin/python -m pip install --only-binary=:all: -r runtime/requirements-android.lock
+.build/android-client-venv/bin/python -m unittest discover -s runtime/tests -v
+```
+
 必须在各目标系统和架构原生构建，Linux 使用 Ubuntu 24.04 同代构建环境，macOS 使用 15.0+。`build.py` 将源码复制至不含个人信息的通用临时目录，构建后执行真实引擎依赖 `ping`，不会创建订单。禁止把 macOS runtime 放入 Linux 包；Go 二进制可交叉编译，但 Python 运行时必须匹配操作系统和架构。
 
-测试覆盖协议、二维码状态、Cookie 格式、配置拒绝、取消、日志敏感数据隔离、订单链接验证、真实状态判定、已有订单停止规则映射（并与内嵌上游规则表比对）、确认终态不被后续异常覆盖、模拟 Windows 代码页的 ASCII 输出、源文件清单及无效请求。自动化验证只进行离线导入、配置与模拟上游事件，不执行真实抢票、下单或支付。在线登录与真实购票验收需要用户账户与明确的目标场次。
+测试覆盖协议、二维码状态、有无 Pillow 时的二维码编码与组件缺失错误、Cookie 格式、配置拒绝、取消、日志敏感数据隔离、订单链接验证、真实状态判定、已有订单停止规则映射（并与内嵌上游规则表比对）、确认终态不被后续异常覆盖、模拟 Windows 代码页的 ASCII 输出、源文件清单及无效请求。自动化验证只进行离线导入、配置与模拟上游事件，不执行真实抢票、下单或支付。在线登录与真实购票验收需要用户账户与明确的目标场次。

@@ -42,6 +42,23 @@ def recorded_stream(statuses, consumed):
         yield stream_event(status, order_id=12)
 
 
+class SyntheticPilImage:
+    pass
+
+
+class SyntheticPyPNGImage:
+    pass
+
+
+def qr_encoder_modules(make, *, pillow=True):
+    """Stand-in qrcode modules; without Pillow, qrcode.image.pil cannot import."""
+    return {
+        "qrcode": SimpleNamespace(make=make),
+        "qrcode.image.pil": SimpleNamespace(PilImage=SyntheticPilImage) if pillow else None,
+        "qrcode.image.pure": SimpleNamespace(PyPNGImage=SyntheticPyPNGImage),
+    }
+
+
 class BridgeTests(unittest.TestCase):
     def setUp(self):
         # Every test is hermetic, including fallback authentication probes.
@@ -210,17 +227,57 @@ class BridgeTests(unittest.TestCase):
         self.assertEqual(events[-1]["data"]["status"], "timeout")
         self.assertNotIn("SESSDATA", json.dumps(events))
 
-    def test_qr_start_returns_png_without_a_file(self):
+    def login_qr_engine(self, url="https://passport.bilibili.com/test"):
         observed = {}
         def start(**kwargs):
             observed.update(kwargs)
-            return {"ok": True, "login_url": "https://passport.bilibili.com/test", "qrcode_key": "synthetic"}
-        qr = SimpleNamespace(make=lambda _: SimpleNamespace(save=lambda output, **kw: output.write(b"synthetic-png")))
-        with patch.dict(sys.modules, {"qrcode": qr}):
-            code, events = self.invoke({"op": "qr_start"}, SimpleNamespace(start_qr_login=start))
+            return {"ok": True, "login_url": url, "qrcode_key": "synthetic"}
+        return SimpleNamespace(start_qr_login=start), observed
+
+    def png_encoder(self):
+        def save(output):
+            self.assertIsInstance(output, io.BytesIO)
+            output.write(b"synthetic-png")
+        return Mock(return_value=SimpleNamespace(save=save))
+
+    def test_qr_start_returns_png_without_a_file(self):
+        engine, observed = self.login_qr_engine()
+        make = self.png_encoder()
+        with patch.dict(sys.modules, qr_encoder_modules(make)):
+            code, events = self.invoke({"op": "qr_start"}, engine)
         self.assertEqual(code, 0)
         self.assertIs(observed["qr_image_path"], False)
+        make.assert_called_once_with("https://passport.bilibili.com/test", image_factory=SyntheticPilImage)
         self.assertEqual(events[0]["data"]["qr_png_base64"], "c3ludGhldGljLXBuZw==")
+
+    def test_qr_start_explicitly_selects_pypng_when_pillow_is_absent(self):
+        # Android ships PyPNG without Pillow. qrcode 8.2's default factory
+        # still imports Pillow first, so the login QR must not rely on it.
+        engine, _ = self.login_qr_engine()
+        make = self.png_encoder()
+        with patch.dict(sys.modules, qr_encoder_modules(make, pillow=False)):
+            code, events = self.invoke({"op": "qr_start"}, engine)
+        self.assertEqual(code, 0)
+        make.assert_called_once_with("https://passport.bilibili.com/test", image_factory=SyntheticPyPNGImage)
+        self.assertEqual(events[-1]["data"]["qr_png_base64"], "c3ludGhldGljLXBuZw==")
+
+    def test_missing_qr_encoder_is_a_fixed_installation_error(self):
+        url = "https://passport.bilibili.com/test?qrcode_key=synthetic-secret"
+        broken_installs = (
+            {"qrcode": None},
+            qr_encoder_modules(Mock(side_effect=ImportError("PyPNG library not installed: synthetic-secret")), pillow=False),
+        )
+        cases = (
+            ({"op": "qr_start"}, self.login_qr_engine(url)[0]),
+            ({"op": "payment_qr", "params": {"payment_code_url": "weixin://wxpay/bizpayurl?pr=synthetic-secret"}}, None),
+        )
+        for modules in broken_installs:
+            for request, engine in cases:
+                with self.subTest(op=request["op"], modules=sorted(modules)), patch.dict(sys.modules, modules):
+                    code, events = self.invoke(request, engine)
+                    self.assertEqual(code, 1)
+                    self.assertEqual(events[-1]["error"], {"code": "qr_encoder_unavailable", "message": "内置二维码组件不完整，请重新安装此版本"})
+                    self.assertNotIn("synthetic-secret", json.dumps(events))
 
     def test_qr_unavailable_is_structured_failure(self):
         code, events = self.invoke({"op": "qr_start"}, SimpleNamespace(start_qr_login=lambda **kw: {"ok": False, "error": "private"}))

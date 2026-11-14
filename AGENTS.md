@@ -135,6 +135,8 @@ flutter analyze
 flutter test
 ```
 
+Android 内嵌客户端只携带 `runtime/requirements-android.lock`（qrcode 与 PyPNG，不含 Pillow）。修改 `runtime/bridge.py`、二维码编码或客户端操作时，还要在该依赖集合的独立环境中运行 runtime 测试（命令见 [biliTickerBuy 运行时](docs/biliTickerBuy运行时.md#构建与验证)，CI 的 Android 作业同样执行）；桌面依赖包含 Pillow，无法发现此类问题。二维码一律经 `encode_qr_png` 显式选择图像工厂，不直接调用 qrcode 默认工厂。
+
 依赖就绪后，也可以在根目录执行 `scripts/test.sh`，统一运行 Go race 测试、Python 运行时与发行校验测试、Flutter 静态检查与测试；`go vet ./...` 仍需单独执行。真实钥匙串与沙盒内辅助进程的集成验证方式见 [LastOrder 实现文档](docs/LastOrder/0.1.0实现.md#测试与构建)。自动化测试使用模拟账号和响应，不代表真实登录、下单或出票已验收；记录验证结果时必须区分源码测试、本地包验证、远程 CI 与真实业务验收。
 
 ### 协议与完整应用构建

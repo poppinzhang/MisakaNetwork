@@ -182,6 +182,28 @@ def bounded_number(params: dict, key: str, default: float, low: float, high: flo
     return value
 
 
+def encode_qr_png(content: str, **options: Any) -> str:
+    """Encode QR content as a base64 PNG in memory, never through a file.
+
+    qrcode 8.2's default image factory imports Pillow unconditionally, so its
+    advertised PyPNG fallback is unreachable; Android ships PyPNG without
+    Pillow. Every QR operation must therefore select the factory explicitly.
+    """
+    try:
+        import qrcode
+        try:
+            from qrcode.image.pil import PilImage as factory
+        except ImportError:
+            from qrcode.image.pure import PyPNGImage as factory
+        buffer = io.BytesIO()
+        qrcode.make(content, image_factory=factory, **options).save(buffer)
+    except ImportError:
+        # A missing encoder is an installation defect, not a network or login
+        # problem. The fixed message never echoes QR content or import errors.
+        raise BridgeError("qr_encoder_unavailable", "内置二维码组件不完整，请重新安装此版本") from None
+    return base64.b64encode(buffer.getvalue()).decode("ascii")
+
+
 def safe_payment_code(value: Any) -> str | None:
     """Accept only bounded native payment payloads, never arbitrary URLs.
 
@@ -390,24 +412,12 @@ def handle_request(request: Any, engine: Any, emit: Callable[[dict], None]) -> d
             raise BridgeError("invalid_request", "付款码格式不受支持，请前往订单详情核对")
         # Encode locally in memory; this operation needs no account, upstream
         # engine, network request, temporary image file or external renderer.
-        import qrcode
-        try:
-            from qrcode.image.pil import PilImage as PaymentImage
-        except ImportError:
-            # Android ships PyPNG instead of Pillow; qrcode 8.2's default
-            # factory imports Pillow before reaching its advertised fallback.
-            from qrcode.image.pure import PyPNGImage as PaymentImage
-        buffer = io.BytesIO()
-        qrcode.make(code, box_size=6, border=4, image_factory=PaymentImage).save(buffer)
-        return {"qr_png_base64": base64.b64encode(buffer.getvalue()).decode("ascii")}
+        return {"qr_png_base64": encode_qr_png(code, box_size=6, border=4)}
     if operation == "qr_start":
         data = engine.start_qr_login(qr_image_path=False, max_retry=2)
         if not data.get("ok"):
             raise BridgeError("qr_unavailable", "暂时无法生成登录二维码，请稍后重试")
-        import qrcode
-        buffer = io.BytesIO()
-        qrcode.make(data["login_url"]).save(buffer)
-        return {"login_url": data["login_url"], "qrcode_key": data["qrcode_key"], "qr_png_base64": base64.b64encode(buffer.getvalue()).decode("ascii")}
+        return {"login_url": data["login_url"], "qrcode_key": data["qrcode_key"], "qr_png_base64": encode_qr_png(data["login_url"])}
     if operation == "qr_poll":
         key = params.get("qrcode_key")
         if not isinstance(key, str) or not key or len(key) > 2048:
