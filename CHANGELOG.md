@@ -4,7 +4,7 @@
 
 ## 0.4.1 — 2026-11-15
 
-- **交付状态：发布准备完成，待构建。** 统一版本 `0.4.1+14` 的源码与发布说明已准备，尚未执行 GitHub Actions 全平台构建，也未创建公开 Release；实际构建与交付结果以 [0.4.1 发布记录](docs/releases/0.4.1.md) 为准。
+- **发布验证：0.4.1 本地源码全量验证与标签前全平台预构建通过，待正式 Tag 构建与发布。** GitHub Actions [43633472727](https://github.com/poppinzhang/MisakaNetwork/actions/runs/43633472727)（提交 `907f246fe8b70b0d2c9bebb26cdb050c12c9427f`）完成五种 Sisters、五种 LastOrder 与聚合校验（本次手动预构建 Android 使用 `debug-test-only` 测试签名）；Windows Server 2022 作业实测通过 `internal/control`（非缓存，含重叠 I/O 命名管道标准输入与隔离 SCM 集成用例）、runtime 离线检查及真实 Sisters mTLS 冒烟，Windows 脚本 113 项通过/22 项跳过、Flutter analyze 通过且 910 项测试通过/2 项跳过。正式发布由 `0.4.1` Tag 重新执行全平台构建（Android 使用 `release-keystore` 正式签名），交付文件与摘要以实际 Release Assets、`release.json` 和 `SHA256SUMS` 为准，见 [0.4.1 发布记录](docs/releases/0.4.1.md)。
 - 各组件、平台版本声明与构建号统一更新为 **0.4.1+14**（Sisters、control/helper、Python runtime、LastOrder、Windows PE 资源与测试基线同步更新），Android `arm64` / `amd64` 的 `versionCode` 递增为 `2014` / `4014`；五种 LastOrder 与五种 Sisters 目标须按本版本全部重新构建。内嵌 biliTickerBuy 继续固定为 `2.15.18`（`227ebf73f5af3eec0019984a7cbcb722977453e8`），本版不改变上游版本、固定提交、依赖锁定、导入白名单、嵌入适配或运行参数。
 - **修复 Windows Sisters 部署停在「上传并解压安装包」**：0.4.0 远程 Windows PowerShell 用 `[Console]::OpenStandardInput()` 读取上传数据。Win32-OpenSSH 提供的标准输入是以 `FILE_FLAG_OVERLAPPED` 打开的命名管道，.NET Framework 控制台流每次读取前调用的 `WaitForAvailableConsoleInput` 在这类管道暂时读空后不再返回，读取追上网络数据即停滞，约 2 分钟后被停滞检测中断，显示「上传或解压 Windows 部署包失败；当前版本未变更」。问题位于远程 Windows 一侧，从 Android、macOS 或 Windows 管理端部署均受影响；写入私有配置的步骤使用同一读取方式，同样修复。现通过在内存中定义的 `GetStdHandle` 取得继承句柄，以同步 `FileStream` 读取，不调用 `Add-Type` 编译代码，也不从可写临时目录加载 DLL。详见 [Windows Sisters](docs/Sisters/Windows支持.md#040-上传停滞问题)。
 - Windows 上传改为 Deflate 最快级别压缩的 ZIP，传输量接近离线包本身（以 Linux 包估算由 104 MB 降至 42 MB），降低手机网络下超过 15 分钟准备预算的风险。
@@ -12,7 +12,7 @@
 - 上传失败提示区分本地部署包读取失败、远程写入或解压失败（提示检查系统盘空间和安全软件拦截）与 SSH 连接中断，不转发远程原始错误。
 - 测试：新增 Windows 原生回归，按 Win32-OpenSSH 的方式以重叠 I/O 命名管道（4 KiB 缓冲、仅继承标准句柄）和间歇写入作为 PowerShell 标准输入，覆盖读取辅助函数、上传解压与写入配置脚本，并记录 .NET 控制台流在该条件下的停滞；补充 ZIP 压缩往返、keepalive 应答等待与停止、失败分类及实际发送命令长度的跨平台测试。新增可选真机用例 `internal/control/live_windows_ssh_test.go`，主机与密钥只经环境变量传入，未设置时跳过。
 - 真机验证（Windows 11 build 26200、内置 OpenSSH_9.5p2、Windows PowerShell 5.1 / .NET Framework 4.8.1、Defender 开启，从 macOS 连接）：旧读取方式复现停滞；新读取 1 MiB 分段输入完整；以 0.4.0 正式 Windows 包运行生产上传与写入配置脚本，5.5 秒完成，182 个文件与 4 个配置文件哈希一致；通过 `Deploy` 完整部署 37 秒完成，服务以虚拟账户运行并通过 mTLS 检查，测试服务与目录随后删除。首次真机运行还发现动态定义的 `GetStdHandle` 缺少 `PreserveSig` 时返回无效句柄，已修正并加入回归断言。
-- 验证范围：本地 macOS 全量 Go race/vet 与 Windows x64 测试程序交叉编译、vet 通过；Windows 原生回归只在 CI 的 Windows 作业执行。真机结果只覆盖上述一台 Windows 11，未验证 Windows 10，未在 Android 手机上实际运行，也未进行真实账号业务验收。升级影响：安装 0.4.1 LastOrder 后，须在无活跃任务时将全部 Sisters（含 Linux/macOS）重新部署为 `0.4.1`，避免统一版本校验拒绝旧包；重部署会停止当前任务并清空远程任务记录，账号、任务配置、云资源记录与本地存储格式不变，无需重新登录或重建。每次失败的 0.4.0 部署会留下一个停在读取中的 `powershell.exe`（父进程 `cmd.exe`）和被它占用的 0 字节 `payload.zip`，重启或结束这些进程后，管理员可核对并删除对应的未启用版本目录；它们不妨碍重新部署。
+- 验证范围：本地 macOS 全量 Go race/vet 与 Windows x64 测试程序交叉编译、vet 通过；Windows 原生回归已由上述 Windows Server 2022 预构建 CI 执行通过（不代表 Windows 10 真机）。真机结果只覆盖上述一台 Windows 11，未验证 Windows 10，未在 Android 手机上实际运行，也未进行真实账号业务验收。升级影响：安装 0.4.1 LastOrder 后，须在无活跃任务时将全部 Sisters（含 Linux/macOS）重新部署为 `0.4.1`，避免统一版本校验拒绝旧包；重部署会停止当前任务并清空远程任务记录，账号、任务配置、云资源记录与本地存储格式不变，无需重新登录或重建。每次失败的 0.4.0 部署会留下一个停在读取中的 `powershell.exe`（父进程 `cmd.exe`）和被它占用的 0 字节 `payload.zip`，重启或结束这些进程后，管理员可核对并删除对应的未启用版本目录；它们不妨碍重新部署。
 
 ## 0.4.0 — 2026-11-14
 
