@@ -9,6 +9,7 @@ import tarfile
 import tempfile
 
 from build_bundles import BILI_VERSION, ROOT, TARGETS, VERSION
+from bundle_manifest import verify_windows_bundle
 
 
 def collect_artifacts(directory: Path) -> list[dict]:
@@ -36,6 +37,8 @@ def collect_artifacts(directory: Path) -> list[dict]:
             if len(manifests) != 1 or not manifests[0].isfile() or not 0 < manifests[0].size <= 65536:
                 raise ValueError(f"Bundle manifest missing, duplicated or invalid: {name}")
             manifest = json.loads(archive.extractfile(manifests[0]).read())
+            if platform == "windows":
+                verify_windows_bundle(archive, expected)
         if not isinstance(manifest, dict) or any(manifest.get(key) != value for key, value in expected.items()):
             raise ValueError(f"Bundle version or platform mismatch: {name}")
         artifacts.append(dict(name=name, bytes=size, sha256=checksum, **expected))

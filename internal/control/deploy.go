@@ -279,7 +279,7 @@ func (b *limitedBuffer) Write(p []byte) (int, error) {
 func remotePlatform(c *ssh.Client) (string, string, error) {
 	out, e := run(c, "uname -s; uname -m", nil)
 	if e != nil {
-		return "", "", errors.New("无法识别远程系统")
+		return remoteWindowsPlatform(c)
 	}
 	p := strings.Fields(out)
 	if len(p) != 2 {
@@ -319,7 +319,7 @@ func remotePlatform(c *ssh.Client) (string, string, error) {
 			return "", "", errors.New("远程 Linux 需要 glibc 2.39 或更新版本")
 		}
 	default:
-		return "", "", errors.New("只支持 Linux 和 macOS 的 Sisters 部署")
+		return remoteWindowsPlatform(c)
 	}
 	return platform, arch, nil
 }
@@ -501,6 +501,9 @@ func Deploy(r Request) (Deployment, error) {
 	cert, key, ca, e := ServerIdentity(r.PKIDirectory, r.ServerName)
 	if e != nil {
 		return result, e
+	}
+	if platform == "windows" {
+		return deployWindows(client, r, identity, cert, key, ca, f, progress, staging.Stop, staged)
 	}
 	if platform == "linux" {
 		if e = ensureLinger(client, r.Username, r.EnableLingerWithSudo); e != nil {

@@ -174,6 +174,7 @@ class ReleaseCITests(unittest.TestCase):
         self.assertIn("不代表真实登录", notes)
         self.assertIn("Android 使用发布密钥", notes)
         self.assertIn("本次发布为正式 Release", notes)
+        self.assertIn("Windows x64 五种 Sisters 离线部署包", notes)
         self.assertNotIn("标记为预发布", notes)
         self.assertIn(f"{VERSION}+{BUILD}", notes)
 

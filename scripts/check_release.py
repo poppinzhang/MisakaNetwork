@@ -12,6 +12,7 @@ import zipfile
 
 from android_manifest import attributes as android_attributes
 from android_runtime_manifest import verify_android_runtime
+from bundle_manifest import verify_windows_bundle
 from release_config import APP_TARGETS, TARGETS, android_bundle_asset, artifact_name
 APP_CONTENTS = "LastOrder.app/Contents/"
 WINDOWS_CRT_DLLS = ("msvcp140.dll", "vcruntime140.dll", "vcruntime140_1.dll")
@@ -101,6 +102,8 @@ def verify_bundles(archive: zipfile.ZipFile, prefix: str, release: dict, *, andr
             require(len(manifests) == 1 and manifests[0].isfile(), "Nested bundle manifest missing or duplicated")
             actual = json.loads(bundle.extractfile(manifests[0]).read())
             require(all(actual.get(key) == value for key, value in manifest.items()), "Nested bundle manifest mismatch")
+            if platform == "windows":
+                verify_windows_bundle(bundle, manifest)
 
 
 def scan_bytes(data: bytes, forbidden: list[bytes], label: str) -> None:

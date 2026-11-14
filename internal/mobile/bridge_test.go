@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -20,7 +21,9 @@ func TestHandleInitializesPrivatePKI(t *testing.T) {
 	}
 	for _, name := range []string{"ca.pem", "ca.key", "client.pem", "client.key"} {
 		info, err := os.Stat(filepath.Join(directory, name))
-		if err != nil || info.Mode().Perm() != 0600 {
+		// Windows uses a protected DACL; its native ACL regression lives in
+		// internal/control/permissions_windows_test.go, not POSIX mode bits.
+		if err != nil || (runtime.GOOS != "windows" && info.Mode().Perm() != 0600) {
 			t.Fatalf("invalid private key permissions: %v", err)
 		}
 	}
@@ -38,10 +41,15 @@ func TestHandleRejectsInvalidEnvelope(t *testing.T) {
 func TestHandleRejectsEscapingPaths(t *testing.T) {
 	root, outside := t.TempDir(), t.TempDir()
 	link := filepath.Join(root, "link")
-	if err := os.Symlink(outside, link); err != nil {
+	candidates := []string{outside, "relative", root}
+	if err := os.Symlink(outside, link); err == nil {
+		candidates = append(candidates, filepath.Join(link, "new"))
+	} else if runtime.GOOS != "windows" {
 		t.Fatal(err)
+	} else {
+		t.Log("symlink subcase unavailable without Windows symlink privilege")
 	}
-	for _, candidate := range []string{outside, filepath.Join(link, "new"), "relative", root} {
+	for _, candidate := range candidates {
 		data, _ := json.Marshal(control.Request{Action: "init_pki", Directory: candidate})
 		var response control.Response
 		json.Unmarshal(Handle(data, root), &response)

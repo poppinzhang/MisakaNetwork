@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"regexp"
@@ -47,7 +46,7 @@ var safeVersion = regexp.MustCompile(`^[a-zA-Z0-9._+\-]{1,64}$`)
 
 func (r executableRunner) probe(ctx context.Context) (string, error) {
 	info, err := os.Stat(r.path)
-	if err != nil || !info.Mode().IsRegular() || info.Mode()&0111 == 0 {
+	if err != nil || !runtimeExecutable(info) {
 		return "", errors.New("runtime executable unavailable")
 	}
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
@@ -67,17 +66,31 @@ func (r executableRunner) invoke(ctx context.Context, input []byte, emit func(pr
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, r.path)
-	isolateProcess(cmd)
 	cmd.WaitDelay = 2 * time.Second
 	cmd.Stdin = bytes.NewReader(input)
-	cmd.Stderr = io.Discard // Runtime output may contain cookies or account information.
-	out, err := cmd.StdoutPipe()
+	// A nil stderr connects directly to the null device. Using io.Discard
+	// would introduce an exec copy pipe that descendants could keep open.
+	// Runtime output may contain cookies or account information.
+	cmd.Stderr = nil
+	// Own the pipe so Wait can reap the parent and clean up its descendants
+	// even when a descendant keeps stdout open after the parent has exited.
+	out, writer, err := os.Pipe()
 	if err != nil {
 		return result{}, errors.New("cannot open runtime output")
 	}
-	if err := cmd.Start(); err != nil {
+	defer out.Close()
+	cmd.Stdout = writer
+	cleanup, err := startIsolatedProcess(cmd)
+	writer.Close()
+	if err != nil {
 		return result{}, errors.New("cannot start runtime")
 	}
+	waited := make(chan error, 1)
+	go func() {
+		err := cmd.Wait()
+		cleanup()
+		waited <- err
+	}()
 	scanner := bufio.NewScanner(out)
 	scanner.Buffer(make([]byte, 4096), 1024*1024)
 	var terminal *frame
@@ -118,7 +131,7 @@ func (r executableRunner) invoke(ctx context.Context, input []byte, emit func(pr
 		protocolErr = true
 		cancel()
 	}
-	waitErr := cmd.Wait()
+	waitErr := <-waited
 	// Cancellation can arrive after a valid final frame was written. That
 	// confirmed order must survive killing the already-finishing process. A
 	// progress frame, protocol error or ordinary nonzero exit still fails.

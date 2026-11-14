@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:last_order/generated/misaka/v1/sisters.pbgrpc.dart';
 import 'package:last_order/src/app.dart';
 import 'package:last_order/src/controller.dart';
 import 'package:last_order/src/models.dart';
@@ -95,6 +96,40 @@ Future<void> _startMachine(AppController c, {String name = '测试部署节点'}
     );
 
 void main() {
+  testWidgets('Windows deployment explains setup and reports its platform', (
+    tester,
+  ) async {
+    final deployments = _Deployments();
+    final c = await _openMachines(tester, deployments);
+    (c.gateway as FakeGateway).statusHandler = (_) async => AgentStatus(
+      version: '0.3.2',
+      runtimeReady: true,
+      platform: 'windows/amd64',
+      maxConcurrency: 2,
+    );
+    expect(find.textContaining('支持 Windows 10+ x64'), findsOneWidget);
+    await tester.tap(find.text('添加机器'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('具有管理员权限的 SSH 账号'), findsOneWidget);
+    await tester.enterText(_field('机器名称'), 'Windows 执行节点');
+    await tester.enterText(_field('主机地址'), '192.0.2.20');
+    await tester.enterText(_field('SSH 用户'), 'deploy-user');
+    await tester.enterText(_field('SSH 密码（仅用于本次部署）'), 'synthetic-password');
+    await tester.tap(find.text('安全部署'));
+    await tester.pumpAndSettle();
+    deployments.calls.single.result.complete({
+      ..._Deployments.credentials,
+      'platform': 'windows',
+      'arch': 'amd64',
+      'reachable': true,
+    });
+    await tester.pumpAndSettle();
+    expect(c.statuses[c.state.machines.single.id]?.platform, 'windows/amd64');
+    expect(find.text('windows/amd64'), findsOneWidget);
+    expect(find.text('在线'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('secure deployment closes the form and permits a second host', (
     tester,
   ) async {

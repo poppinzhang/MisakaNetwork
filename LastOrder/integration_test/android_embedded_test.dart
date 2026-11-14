@@ -169,6 +169,7 @@ void main() {
       'linux-arm64',
       'macos-amd64',
       'macos-arm64',
+      'windows-amd64',
     ]) {
       final bundle = File('$root/bundles/$target.tar.gz');
       expect(await bundle.exists(), isTrue);

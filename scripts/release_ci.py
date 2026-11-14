@@ -134,7 +134,7 @@ def release_notes(tag: str, commit: str, repository: str, root: Path = ROOT) -> 
     return (f"# MisakaNetwork {VERSION}\n\n"
             f"GitHub Actions 从标签 `{tag}`（提交 `{commit}`）构建，统一版本 **{VERSION}+{BUILD}**。\n\n"
             "Assets 提供 macOS arm64/x64、Windows x64、Android arm64/x64 五种完整 LastOrder 包，"
-            "每份均内含 Linux/macOS 四种 Sisters 离线部署包。下载对应程序包即可；"
+            "每份均内含 Linux/macOS arm64/x64 与 Windows x64 五种 Sisters 离线部署包。下载对应程序包即可；"
             "`.sha256`、`SHA256SUMS` 和 `release.json` 用于核对文件。\n\n"
             "本次 CI 完成源码测试、运行时离线检查和完整包核验，不代表真实登录、下单或出票验收。"
             "macOS 使用 ad-hoc 签名且未公证；Windows 未使用 Authenticode 签名；Android 使用发布密钥。"

@@ -39,6 +39,7 @@ func checkBundleReader(source io.Reader, platform, arch string) error {
 	tr := tar.NewReader(gz)
 	var m Manifest
 	found := map[string]*tar.Header{}
+	windowsNames := map[string]*tar.Header{}
 	links := map[string]string{}
 	var total int64
 	for {
@@ -57,6 +58,12 @@ func checkBundleReader(source io.Reader, platform, arch string) error {
 		original = strings.TrimPrefix(original, "./")
 		if n == "." || n != original || path.IsAbs(n) || n == ".." || strings.HasPrefix(n, "../") || strings.Contains(n, "\\") || strings.ContainsFunc(n, unicode.IsControl) {
 			return errors.New("部署包包含不安全路径")
+		}
+		if platform == "windows" {
+			if !safeWindowsArchivePath(n) || windowsNames[strings.ToLower(n)] != nil || h.Typeflag == tar.TypeSymlink {
+				return errors.New("Windows 部署包包含不安全或冲突路径")
+			}
+			windowsNames[strings.ToLower(n)] = h
 		}
 		if found[n] != nil {
 			return errors.New("部署包包含重复条目")
@@ -104,7 +111,11 @@ func checkBundleReader(source io.Reader, platform, arch string) error {
 	}
 	for n, h := range found {
 		for parent := path.Dir(n); parent != "."; parent = path.Dir(parent) {
-			if entry := found[parent]; entry != nil && entry.Typeflag != tar.TypeDir {
+			entry := found[parent]
+			if platform == "windows" {
+				entry = windowsNames[strings.ToLower(parent)]
+			}
+			if entry != nil && entry.Typeflag != tar.TypeDir {
 				return errors.New("部署包文件路径穿过非目录条目")
 			}
 		}
@@ -114,14 +125,18 @@ func checkBundleReader(source io.Reader, platform, arch string) error {
 			}
 		}
 	}
-	for _, n := range []string{"sisters", "runtime/misaka-runtime"} {
+	executables := []string{"sisters", "runtime/misaka-runtime"}
+	if platform == "windows" {
+		executables = []string{"sisters.exe", "runtime/misaka-runtime.exe"}
+	}
+	for _, n := range executables {
 		h := found[n]
 		if h == nil || (h.Typeflag != tar.TypeReg && h.Typeflag != tar.TypeRegA) || h.Size == 0 {
 			return errors.New("部署包缺少可执行文件")
 		}
 	}
 	for _, n := range []string{"config.json", "ca.pem", "server.pem", "server.key"} {
-		if found[n] != nil {
+		if found[n] != nil || (platform == "windows" && windowsNames[n] != nil) {
 			return errors.New("部署包不得包含私有配置或证书")
 		}
 	}
@@ -129,6 +144,33 @@ func checkBundleReader(source io.Reader, platform, arch string) error {
 		return errors.New("部署包版本、平台或文件不匹配")
 	}
 	return nil
+}
+
+// Windows path aliases must be rejected before extraction: a colon opens an
+// alternate stream, names are case-insensitive, and trailing spaces/dots and
+// DOS device names do not designate ordinary files.
+func safeWindowsArchivePath(name string) bool {
+	for _, part := range strings.Split(name, "/") {
+		if part == "" || strings.ContainsAny(part, `<>:"\\|?*`) || strings.HasSuffix(part, ".") || strings.HasSuffix(part, " ") {
+			return false
+		}
+		// Win32 also recognizes a device stem followed by spaces before its
+		// extension (for example, "CON .txt") as the reserved device.
+		stem := strings.ToUpper(strings.TrimRight(strings.SplitN(part, ".", 2)[0], " "))
+		switch stem {
+		case "CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$":
+			return false
+		}
+		if len(stem) == 4 && (strings.HasPrefix(stem, "COM") || strings.HasPrefix(stem, "LPT")) && stem[3] >= '0' && stem[3] <= '9' {
+			return false
+		}
+		for _, prefix := range []string{"COM", "LPT"} {
+			if stem == prefix+"¹" || stem == prefix+"²" || stem == prefix+"³" {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // Resolve symlinks component by component, including links followed by '..'.

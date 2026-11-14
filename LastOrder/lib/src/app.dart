@@ -802,7 +802,12 @@ class _ControlCenterState extends State<ControlCenter> {
               ),
               const SizedBox(height: 24),
               for (final step in [
-                (1, '部署 Sisters', '录入 Linux 或 macOS 主机，通过 SSH 安装内置版本。', 1),
+                (
+                  1,
+                  '部署 Sisters',
+                  '录入 Windows、Linux 或 macOS 主机，通过 SSH 安装内置版本。',
+                  1,
+                ),
                 (2, '添加账号与任务', '扫码登录，选择演出、票档和购票人。', 2),
                 (3, '分发并查看结果', '选择执行机器，在任务监控中查看实时进度。', 3),
               ])
@@ -853,7 +858,7 @@ class _ControlCenterState extends State<ControlCenter> {
       heading(
         'SISTERS',
         '连接你的执行节点',
-        '支持 Linux 与 macOS；部署时自动记录并校验服务器身份。',
+        '支持 Windows 10+ x64、Linux 与 macOS。',
         trailing: Wrap(
           spacing: 12,
           runSpacing: 10,
@@ -2281,6 +2286,17 @@ class _MachineDialogState extends State<MachineDialog> {
       field(host, '主机地址', hint: 'IP 或域名，不含协议前缀'),
       field(port, 'gRPC 端口'),
       if (!manual) ...[
+        Padding(
+          padding: const EdgeInsets.only(bottom: 14),
+          child: Text(
+            'Windows 机器需先启用 OpenSSH 服务，并使用具有管理员权限的 SSH 账号部署。'
+            '安装后 Sisters 会以专用服务账户在后台运行。',
+            style: TextStyle(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+              fontSize: 12,
+            ),
+          ),
+        ),
         field(username, 'SSH 用户'),
         field(sshPort, 'SSH 端口'),
         field(password, 'SSH 密码（仅用于本次部署）', secret: true),

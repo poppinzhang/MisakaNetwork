@@ -1,10 +1,27 @@
 package main
 
 import (
+	"os"
 	"testing"
 
 	pb "github.com/MisakaNetwork/MisakaNetwork/gen/misaka/v1"
 )
+
+func TestExecutablePermissionsAcrossNativePlatforms(t *testing.T) {
+	for _, platform := range []string{"windows", "linux", "darwin"} {
+		if !executableFile(0755, platform) {
+			t.Fatalf("regular executable rejected on %s", platform)
+		}
+		if executableFile(0644, platform) != (platform == "windows") {
+			t.Fatalf("incorrect native executable permission check on %s", platform)
+		}
+		for _, mode := range []os.FileMode{os.ModeDir | 0755, os.ModeNamedPipe | 0755, os.ModeDevice | 0755} {
+			if executableFile(mode, platform) {
+				t.Fatalf("non-regular executable accepted on %s", platform)
+			}
+		}
+	}
+}
 
 func TestOfflineTaskCannotBeConfiguredWithTicketsOrCredentials(t *testing.T) {
 	request := invalidTask()

@@ -68,7 +68,7 @@ LastOrder 模块 在本地部署，可以完成 抢票 Agent 部署、抢票平�
 
 以下是从用户 README 集中到本文件的实现摘要；调整对应功能时同步维护详细文档及用户可见的行为说明。
 
-* 当前交付基线见 [0.3.2 记录](docs/releases/0.3.2.md)：LastOrder 为 macOS arm64/x64、Windows x64、Android arm64/x64；Sisters 为 Linux/macOS arm64/x64。Windows Sisters 是项目目标，尚未实现。每份完整 LastOrder 均携带四种同版本 Sisters 离线部署包，包含 Python、biliTickerBuy 及依赖；部署时不在远程下载程序。
+* 当前交付基线见 [0.3.2 记录](docs/releases/0.3.2.md)：LastOrder 为 macOS arm64/x64、Windows x64、Android arm64/x64；已发布 Sisters 为 Linux/macOS arm64/x64，每份完整 LastOrder 携带四种同版本 Sisters 离线部署包。`unstaged` 新增 Windows 10+ x64 Sisters，源码打包矩阵扩展为五种离线包，包含 Python、biliTickerBuy 及依赖；部署时不在远程下载程序。Windows 使用 OpenSSH 管理员会话安装 SCM 服务，Sisters 以专用虚拟服务账户运行，服务目录严格 DACL，运行时通过 Job Object 清理进程树；详见 [Windows Sisters](docs/Sisters/Windows支持.md)。未构建或发布新安装包，不能把交叉编译、模拟测试或 Windows Server CI 当作 Windows 10 真机验收。
 * LastOrder 通过 SSH 密码或私钥部署；0.3.0 起采用首次使用时信任（TOFU），首次自动保存主机指纹后继续部署，后续严格验证已保存指纹，拒绝静默更换（0.2.3 及更早由用户手工核对 SHA-256 指纹）。Linux 使用 systemd 用户服务，部署前检查 linger；无法开启时停止部署并提示管理员执行 `sudo loginctl enable-linger <用户名>`。macOS 使用 launchd 后台用户域。新机器默认 gRPC 端口为 `20001`；已有显式端口不变，切换须重新部署并放行对应 TCP 端口。部署后从控制端直连检查，具体失败与回滚语义见[部署说明](docs/架构与通信.md#部署)。
 * LastOrder 与 Sisters 使用 gRPC 和双向 TLS，双方验证证书，不提供跳过验证的入口。Windows 加密存储与 Android Keystore 支持的加密存储保持不变；0.3.0 起 macOS 改为钥匙串保存单一主密钥、应用私有文件保存 AES-256-GCM 密文，同一会话复用主密钥，不再逐条读取钥匙串（0.2.3 及更早直接逐条存入 macOS 登录钥匙串）。SSH 密码不持久化。Sisters 在内存中持有任务秘密，通过标准输入交给独立运行时，只回传白名单结构化进度，不转发上游原始日志。
 * 0.3.0 的 macOS 加密存储使用独立 `macos-vault-v1` 目录，元数据、证书和导入凭据也隔离到该目录；不读取、迁移或删除旧资料。升级需重新添加/部署机器、登录账号、创建任务和配置云凭据；切换前先停止或等待远端任务结束，并核对、释放不再使用的云资源，清空本地视图不会停止任务或计费。主密钥丢失、拒绝授权或密文损坏时保留文件并阻止继续读写，不自动重置。此变更不保证系统永远只提示一次，也不改变 ad-hoc 签名状态；详见 [macOS 加密存储](docs/LastOrder/macOS加密存储.md)。
@@ -107,6 +107,7 @@ LastOrder 模块 在本地部署，可以完成 抢票 Agent 部署、抢票平�
 | [应用图标](docs/LastOrder/应用图标.md) | 图标来源和各平台资源生成 |
 | [开源许可](docs/LastOrder/开源许可.md) | 第三方声明收集、离线展示及更新验证 |
 | [Sisters 实现](docs/Sisters/0.1.0实现.md) | 服务配置、任务队列和运行方式 |
+| [Windows Sisters](docs/Sisters/Windows支持.md) | Windows 10 x64、OpenSSH 准备、SCM 服务、DACL、进程树清理与验证边界 |
 | [biliTickerBuy 运行时](docs/biliTickerBuy运行时.md) | 内嵌适配、安全约束、导入与升级复核 |
 | [付款码回显](docs/付款码回显.md) | 支付结果回传、链接校验、订单去重、内存生命周期与验证边界 |
 | [打包与发布](docs/打包与发布.md) | 全平台构建、统一版本、签名、校验和与发布流程 |
@@ -150,7 +151,7 @@ Android 内嵌客户端携带 `runtime/requirements-android.lock`（含 HTTPX/HT
 
 ## 流程规范
 
-* Codex 在本项目后续参与完成的每次 Git 提交中，必须在提交说明末尾附上 `Assisted-by: Codex (OpenAI)` 署名，便于在 GitHub 提交记录中识别。保留仓库现有 Git 作者配置，不修改用户身份。
+* Codex 在本项目后续参与完成的每次 Git 提交中，必须在提交说明正文之后空一行，附上 GitHub 共同作者格式的 `Co-authored-by: Codex <noreply@openai.com>`，并保留 `Assisted-by: Codex (OpenAI)`。两项各占一行，作为提交说明末尾的 trailers；不能仅用 Assisted-by 代替共同作者署名。保留仓库现有 Git 作者配置，不修改用户身份。
 
 * **1.0.0 之前的所有版本均属于早期研发版本。方案调整时，优先采用正确性、架构与可维护性更优的实现，不受历史研发版本兼容性约束，不为兼容旧方案而妥协；无需专门保留兼容分支或数据迁移逻辑。** 允许调整数据格式、接口与行为；发布说明必须明确重新登录、重建配置或重新部署等升级影响。
 * **所有平台统一版本号，每次新增版本号都必须同步打包所有已支持的平台与架构。** LastOrder 与内嵌 Sisters 使用同一项目版本号；即使某个平台或模块没有修改，也必须随本次版本重新打包，不能保留旧版本或跳过该平台。这是为简化后续开发与版本管理而采用的统一发布约定。

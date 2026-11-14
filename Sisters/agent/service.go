@@ -69,7 +69,7 @@ func newService(c Config, r runner) *Service {
 	return s
 }
 
-// Close cancels queued work and terminates all active runtime process groups.
+// Close cancels queued work and terminates all active runtime process trees.
 func (s *Service) Close() {
 	s.mu.Lock()
 	if !s.closed {

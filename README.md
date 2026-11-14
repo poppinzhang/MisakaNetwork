@@ -58,7 +58,9 @@
 
 执行任务的 **Sisters** 支持 macOS 15.0 及以上，以及 Ubuntu 24.04 LTS 同代 Linux，两者均提供 x64 与 arm64 版本。其他 Linux 发行版请由机器维护者核对[运行要求](docs/架构与通信.md#部署)。
 
-Windows 和 Android 目前可用于管理任务，尚不支持在这些系统上运行 Sisters。所需 Sisters 部署包已随 LastOrder 提供，无需单独寻找下载。
+当前公开的 0.3.2 安装包中，Windows 和 Android 可用于管理任务，尚不支持在这些系统上运行 Sisters。所需 Sisters 部署包已随 LastOrder 提供，无需单独寻找下载。
+
+开发中的下一版新增 **Windows 10 及以上 x64** 执行机器支持，尚未发布安装包。Windows 机器需由管理员提前开启远程连接，并使用管理员账号在「机器管理」部署；准备步骤见 [Windows 执行机器部署说明](docs/Sisters/Windows支持.md#机器准备)。Android 仍仅用于管理任务。
 
 ## 主要功能
 

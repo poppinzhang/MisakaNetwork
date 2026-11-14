@@ -85,7 +85,7 @@ class EmbeddedBridge(private val context: Context) {
     private fun extractBundles(): File {
         val root = File(context.filesDir, "misaka-${BuildConfig.VERSION_NAME}")
         val destination = File(root, "bundles")
-        val required = listOf("linux-amd64", "linux-arm64", "macos-amd64", "macos-arm64").map { "$it.tar.gz" }
+        val required = listOf("linux-amd64", "linux-arm64", "macos-amd64", "macos-arm64", "windows-amd64").map { "$it.tar.gz" }
         if (File(root, ".complete").isFile && required.all { File(destination, it).isFile }) return root
         val temporary = File(context.filesDir, "misaka-${BuildConfig.VERSION_NAME}.pending")
         if (temporary.exists()) check(temporary.deleteRecursively())

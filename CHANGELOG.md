@@ -2,6 +2,12 @@
 
 ## unstaged
 
+- 新增 Windows 10 及以上 x64 Sisters 源码支持：前台运行及 SCM 后台服务、专用虚拟服务账户与私有临时目录、Windows Job Object 进程树取消和退出清理。
+- LastOrder 的 SSH 部署支持 Windows 主机，要求管理员会话；使用编码 PowerShell、私有 DACL、离线包上传、自检、服务切换与失败回滚，保留 TOFU、双向 TLS 与部署后直连检查。机器管理补充 Windows 准备提示；三家公有云模板仍仅创建 Linux 机器。
+- Sisters 离线包矩阵新增 `windows-amd64`，每份完整 LastOrder 必须携带全部五种部署包；Android 资源解包、归档检查和 Windows 原生 CI 同步扩展。版本号保持 `0.3.2+12`，此处为未发布源码，已有 0.3.2 安装包不包含该能力。下次正式发布须递增统一版本并重建所有已支持平台。
+- 验证范围与部署步骤见 [Windows Sisters](docs/Sisters/Windows支持.md)；未执行 Windows 10 真机部署或真实登录、下单与出票验收。
+- 本地 Go 全量 race/vet、Windows x64 交叉编译/vet、133 项打包脚本测试、Flutter analyze 与 915 项测试（2 项可选跳过）通过；桌面依赖 runtime 回归 106 项通过/9 项跳过，新建 macOS arm64 runtime 的离线检查与 Sisters 回环 mTLS 冒烟通过。Windows 原生服务测试已加入 CI，尚未执行远程 CI 或发布完整安装包。
+
 ## 0.3.2 — 2026-11-14
 
 - 交付状态：统一版本 **0.3.2+12** 已通过 GitHub Actions（[43588004693](https://github.com/poppinzhang/MisakaNetwork/actions/runs/43588004693)）完成所有已支持平台构建、清单与校验检查，并公开为 [正式 Release](https://github.com/poppinzhang/MisakaNetwork/releases/tag/0.3.2)（标签 `0.3.2`，提交 `b867b012a862c88d7b70d535effbf068ff96a2f1`，共 12 个资产、`Latest`）。详情与各平台安装包校验信息见 [0.3.2 记录](docs/releases/0.3.2.md)。内嵌 biliTickerBuy 保持 **2.15.18**。

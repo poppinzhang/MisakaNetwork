@@ -1,7 +1,15 @@
-//go:build !darwin && !linux
+//go:build !darwin && !linux && !windows
 
 package agent
 
-import "os/exec"
+import (
+	"errors"
+	"os"
+	"os/exec"
+)
 
-func isolateProcess(cmd *exec.Cmd) {}
+func startIsolatedProcess(cmd *exec.Cmd) (func(), error) {
+	return nil, errors.New("unsupported runtime platform")
+}
+
+func runtimeExecutable(info os.FileInfo) bool { return false }

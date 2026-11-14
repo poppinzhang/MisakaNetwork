@@ -18,6 +18,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -102,6 +103,11 @@ func pause(ctx context.Context) error {
 	}
 }
 
+func executableFile(mode os.FileMode, platform string) bool {
+	// Windows reports ordinary .exe files without POSIX executable bits.
+	return mode.IsRegular() && (platform == "windows" || mode&0111 != 0)
+}
+
 func smoke(ctx context.Context, sisters, runtimeBinary, expectedPlatform string) (out report, resultErr error) {
 	out.Checks = []string{}
 	sisters, err := filepath.Abs(sisters)
@@ -114,7 +120,7 @@ func smoke(ctx context.Context, sisters, runtimeBinary, expectedPlatform string)
 	}
 	for _, binary := range []string{sisters, runtimeBinary} {
 		info, err := os.Stat(binary)
-		if err != nil || info.IsDir() || info.Mode()&0111 == 0 {
+		if err != nil || !executableFile(info.Mode(), runtime.GOOS) {
 			return out, errors.New("a required executable is missing or not executable")
 		}
 	}
@@ -156,8 +162,14 @@ func smoke(ctx context.Context, sisters, runtimeBinary, expectedPlatform string)
 	processDone := make(chan error, 1)
 	go func() { processDone <- process.Wait() }()
 	defer func() {
-		// Let Sisters cancel its own child process groups and close the listener.
-		_ = process.Process.Signal(os.Interrupt)
+		// Windows cannot send os.Interrupt to another process. Its per-runtime
+		// Job Objects close when Sisters exits and terminate any runtime tree.
+		// Unix lets Sisters cancel its process groups gracefully first.
+		if runtime.GOOS == "windows" {
+			_ = process.Process.Kill()
+		} else {
+			_ = process.Process.Signal(os.Interrupt)
+		}
 		select {
 		case <-processDone:
 		case <-time.After(5 * time.Second):

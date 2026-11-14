@@ -10,32 +10,22 @@ import (
 	"time"
 )
 
-func script(t *testing.T, body string) string {
-	t.Helper()
-	p := filepath.Join(t.TempDir(), "runtime")
-	if err := os.WriteFile(p, []byte("#!/bin/sh\n"+body+"\n"), 0700); err != nil {
-		t.Fatal(err)
-	}
-	return p
-}
-
 func TestRuntimeRequiresValidTerminalResult(t *testing.T) {
 	for _, tc := range []struct {
-		name, body string
-		wantError  bool
+		name      string
+		fixture   runtimeFixture
+		wantError bool
 	}{
-		{"exit_zero", "read -r input\nexit 0", true},
-		{"invalid_json", "echo 'cookie: secret'", true},
-		{"false", `echo '{"type":"result","ok":false,"error":{"message":"secret"}}'`, true},
-		{"nonzero", "echo '{\"type\":\"result\",\"ok\":true,\"data\":{\"status\":\"succeeded\"}}'\nexit 1", true},
-		{"duplicate", "echo '{\"type\":\"result\",\"ok\":true}'\necho '{\"type\":\"result\",\"ok\":true}'", true},
-		{"progress_after_result", `echo '{"type":"result","ok":true,"data":{"status":"succeeded","order_id":"12"}}'
-echo '{"type":"progress","status":"succeeded"}'`, true},
-		{"success", `echo '{"type":"progress","stage":"ordering","message":"cookie secret"}'
-echo '{"type":"result","ok":true,"data":{"status":"succeeded","order_id":"private"}}'`, false},
+		{"exit_zero", runtimeFixture{}, true},
+		{"invalid_json", runtimeFixture{Frames: []string{"cookie: secret"}}, true},
+		{"false", runtimeFixture{Frames: []string{`{"type":"result","ok":false,"error":{"message":"secret"}}`}}, true},
+		{"nonzero", runtimeFixture{Frames: []string{`{"type":"result","ok":true,"data":{"status":"succeeded"}}`}, ExitCode: 1}, true},
+		{"duplicate", runtimeFixture{Frames: []string{`{"type":"result","ok":true}`, `{"type":"result","ok":true}`}}, true},
+		{"progress_after_result", runtimeFixture{Frames: []string{`{"type":"result","ok":true,"data":{"status":"succeeded","order_id":"12"}}`, `{"type":"progress","status":"succeeded"}`}}, true},
+		{"success", runtimeFixture{Frames: []string{`{"type":"progress","stage":"ordering","message":"cookie secret"}`, `{"type":"result","ok":true,"data":{"status":"succeeded","order_id":"private"}}`}}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			r := executableRunner{path: script(t, tc.body)}
+			r := fixtureRunner(t, tc.fixture)
 			out, err := r.run(context.Background(), []byte("{}\n"), func(p progress) {
 				if event, line := progressText(p); strings.Contains(event+line, "secret") {
 					t.Fatal("unsafe progress")
@@ -97,15 +87,15 @@ func TestRuntimeProbeChecksDependencyReadiness(t *testing.T) {
 		body  string
 		ready bool
 	}{
-		{`echo '{"type":"result","ok":true,"data":{"version":"` + Version + `","protocol":1,"ready":true,"bili_version":"2.15.18"}}'`, true},
-		{`echo '{"type":"result","ok":true,"data":{"version":"` + Version + `","protocol":2,"ready":true,"bili_version":"2.15.18"}}'`, false},
-		{`echo '{"type":"result","ok":true,"data":{"version":"` + Version + `","protocol":1,"ready":false,"bili_version":"2.15.18"}}'`, false},
-		{`echo '{"type":"result","ok":true,"data":{"version":"` + Version + `","protocol":1,"ready":true,"bili_version":"private account"}}'`, false},
-		{`echo '{"type":"result","ok":true,"data":{"version":"0.1.0","protocol":1,"ready":true,"bili_version":"2.15.18"}}'`, false},
-		{`echo '{"type":"result","ok":true,"data":{"protocol":1,"ready":true,"bili_version":"2.15.18"}}'`, false},
-		{"exit 0", false},
+		{`{"type":"result","ok":true,"data":{"version":"` + Version + `","protocol":1,"ready":true,"bili_version":"2.15.18"}}`, true},
+		{`{"type":"result","ok":true,"data":{"version":"` + Version + `","protocol":2,"ready":true,"bili_version":"2.15.18"}}`, false},
+		{`{"type":"result","ok":true,"data":{"version":"` + Version + `","protocol":1,"ready":false,"bili_version":"2.15.18"}}`, false},
+		{`{"type":"result","ok":true,"data":{"version":"` + Version + `","protocol":1,"ready":true,"bili_version":"private account"}}`, false},
+		{`{"type":"result","ok":true,"data":{"version":"0.1.0","protocol":1,"ready":true,"bili_version":"2.15.18"}}`, false},
+		{`{"type":"result","ok":true,"data":{"protocol":1,"ready":true,"bili_version":"2.15.18"}}`, false},
+		{"", false},
 	} {
-		r := executableRunner{path: script(t, tc.body)}
+		r := fixtureRunner(t, runtimeFixture{Frames: []string{tc.body}})
 		_, err := r.probe(context.Background())
 		if (err == nil) != tc.ready {
 			t.Fatalf("ready=%v error=%v", tc.ready, err)
@@ -120,11 +110,14 @@ func TestRuntimeProbeChecksDependencyReadiness(t *testing.T) {
 func TestRuntimeCancellationKillsProcessGroup(t *testing.T) {
 	// A child holds stdout open after its parent dies. Cancellation must kill
 	// descendants too, otherwise scanner.Scan remains blocked indefinitely.
-	r := executableRunner{path: script(t, "sleep 60 &\nwait")}
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	marker := filepath.Join(t.TempDir(), "child-ready")
+	r := fixtureRunner(t, runtimeFixture{Child: true, Wait: true, ChildMarker: marker})
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	done := make(chan error, 1)
 	go func() { _, err := r.run(ctx, []byte("{}\n"), nil); done <- err }()
+	waitRuntimeMarker(t, marker)
+	cancel()
 	select {
 	case err := <-done:
 		if err == nil {
@@ -135,9 +128,63 @@ func TestRuntimeCancellationKillsProcessGroup(t *testing.T) {
 	}
 }
 
+func waitRuntimeMarker(t *testing.T, marker string) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if _, err := os.Stat(marker); err == nil {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("runtime helper did not start")
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+func TestRuntimeCleansDescendantsAfterParentExit(t *testing.T) {
+	marker := filepath.Join(t.TempDir(), "child-ready")
+	r := fixtureRunner(t, runtimeFixture{Child: true, ChildMarker: marker, Frames: []string{`{"type":"result","ok":true,"data":{"status":"completed"}}`}})
+	done := make(chan error, 1)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	go func() { _, err := r.run(ctx, []byte("{}\n"), nil); done <- err }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("normal runtime exit failed: %v", err)
+		}
+		if _, err := os.Stat(marker); err != nil {
+			t.Fatal("descendant never started")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("normal runtime exit left a descendant holding stdout")
+	}
+}
+
+func TestRuntimeCancellationDuringStart(t *testing.T) {
+	r := fixtureRunner(t, runtimeFixture{Child: true, Wait: true})
+	for i := 0; i < 20; i++ {
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan error, 1)
+		go func() { _, err := r.run(ctx, []byte("{}\n"), nil); done <- err }()
+		if i%2 == 0 {
+			time.Sleep(time.Millisecond)
+		}
+		cancel()
+		select {
+		case err := <-done:
+			if err == nil {
+				t.Fatal("cancelled runtime succeeded")
+			}
+		case <-time.After(3 * time.Second):
+			t.Fatal("cancellation raced past process isolation")
+		}
+	}
+}
+
 func TestRuntimeReadsPaymentOnlyFromFinalResult(t *testing.T) {
-	r := executableRunner{path: script(t, `echo '{"type":"progress","status":"succeeded","order_id":"99","payment_code_url":"https://evil.test","message":"private payment"}'
-echo '{"type":"result","ok":true,"data":{"status":"succeeded","order_id":"12","order_detail_url":"https://show.bilibili.com/platform/orderDetail.html?order_id=12","payment_code_url":"weixin://wxpay/bizpayurl?pr=synthetic_token"}}'`)}
+	r := fixtureRunner(t, runtimeFixture{Frames: []string{`{"type":"progress","status":"succeeded","order_id":"99","payment_code_url":"https://evil.test","message":"private payment"}`, `{"type":"result","ok":true,"data":{"status":"succeeded","order_id":"12","order_detail_url":"https://show.bilibili.com/platform/orderDetail.html?order_id=12","payment_code_url":"weixin://wxpay/bizpayurl?pr=synthetic_token"}}`}})
 	out, err := r.run(context.Background(), []byte("{}\n"), func(p progress) {
 		if event, line := progressText(p); strings.Contains(event+line, "private") || strings.Contains(event+line, "https://") {
 			t.Fatal("payment fields leaked from progress")
@@ -153,16 +200,16 @@ func TestRuntimeFinalOrderSurvivesLateCancellation(t *testing.T) {
 		name, frames string
 		wantSuccess  bool
 	}{
-		{"success", `echo '{"type":"result","ok":true,"data":{"status":"succeeded","order_id":"12","payment_code_url":"weixin://wxpay/bizpayurl?pr=synthetic_token"}}'`, true},
-		{"duplicate", `echo '{"type":"result","ok":true,"data":{"status":"duplicate_order","order_id":"12"}}'`, true},
-		{"progress_only", `echo '{"type":"progress","status":"succeeded"}'`, false},
-		{"completed", `echo '{"type":"result","ok":true,"data":{"status":"completed","order_id":"12"}}'`, false},
+		{"success", `{"type":"result","ok":true,"data":{"status":"succeeded","order_id":"12","payment_code_url":"weixin://wxpay/bizpayurl?pr=synthetic_token"}}`, true},
+		{"duplicate", `{"type":"result","ok":true,"data":{"status":"duplicate_order","order_id":"12"}}`, true},
+		{"progress_only", `{"type":"progress","status":"succeeded"}`, false},
+		{"completed", `{"type":"result","ok":true,"data":{"status":"completed","order_id":"12"}}`, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			// This marker contains no business data; it establishes that all
 			// stdout frames have been written before cancellation is requested.
 			marker := filepath.Join(t.TempDir(), "ready")
-			r := executableRunner{path: script(t, tc.frames+"\nprintf ready > '"+marker+"'\nexec sleep 60")}
+			r := fixtureRunner(t, runtimeFixture{Frames: []string{tc.frames}, Marker: marker, Wait: true})
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			type outcome struct {

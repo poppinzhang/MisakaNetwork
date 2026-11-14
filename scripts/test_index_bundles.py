@@ -8,6 +8,7 @@ import unittest
 
 from build_bundles import BILI_VERSION, TARGETS, VERSION
 from index_bundles import index_bundles
+from test_windows_binary import pe_binary
 
 
 class BundleIndexTests(unittest.TestCase):
@@ -20,7 +21,8 @@ class BundleIndexTests(unittest.TestCase):
         self.index = self.directory / "bundles.json"
         self.index.write_text("existing index remains until all inputs pass\n")
 
-    def write_bundle(self, target, version=VERSION, platform_override=None, duplicate=False):
+    def write_bundle(self, target, version=VERSION, platform_override=None, duplicate=False,
+                     windows_overrides=None, omitted_windows_file=None):
         platform, arch = target.split("-")
         data = json.dumps(dict(version=version, bili_version=BILI_VERSION,
                                platform=platform_override or platform, arch=arch)).encode()
@@ -30,6 +32,18 @@ class BundleIndexTests(unittest.TestCase):
                 member = tarfile.TarInfo("manifest.json")
                 member.size = len(data)
                 archive.addfile(member, io.BytesIO(data))
+            if platform == "windows":
+                files = {
+                    "sisters.exe": pe_binary(), "runtime/misaka-runtime.exe": pe_binary(),
+                    "runtime/RUNTIME-MANIFEST.json": json.dumps(json.loads(data) | {"protocol": 1}).encode(),
+                }
+                files.update(windows_overrides or {})
+                for name, payload in files.items():
+                    if name == omitted_windows_file:
+                        continue
+                    member = tarfile.TarInfo(name)
+                    member.size = len(payload)
+                    archive.addfile(member, io.BytesIO(payload))
         digest = hashlib.sha256(path.read_bytes()).hexdigest()
         (self.directory / (path.name + ".sha256")).write_text(f"{digest}  {path.name}\n")
 
@@ -49,6 +63,28 @@ class BundleIndexTests(unittest.TestCase):
             data = (self.directory / item["name"]).read_bytes()
             self.assertEqual(item["bytes"], len(data))
             self.assertEqual(item["sha256"], hashlib.sha256(data).hexdigest())
+
+    def test_windows_bundle_is_required(self):
+        self.assertIn("windows-amd64", TARGETS)
+        (self.directory / "windows-amd64.tar.gz").unlink()
+        self.assert_rejected("Required regular bundle")
+
+    def test_windows_executables_are_individually_required_and_architecture_checked(self):
+        for name in ("sisters.exe", "runtime/misaka-runtime.exe"):
+            with self.subTest(name=name):
+                self.write_bundle("windows-amd64", omitted_windows_file=name)
+                self.assert_rejected("Windows bundle required regular file")
+                self.write_bundle("windows-amd64", windows_overrides={name: pe_binary(machine=0xAA64)})
+                self.assert_rejected("x64 PE executable")
+        self.write_bundle("windows-amd64", omitted_windows_file="runtime/RUNTIME-MANIFEST.json")
+        self.assert_rejected("Windows bundle required regular file")
+
+    def test_windows_runtime_manifest_must_match_release_and_protocol(self):
+        self.write_bundle("windows-amd64", windows_overrides={
+            "runtime/RUNTIME-MANIFEST.json": json.dumps(dict(version=VERSION, bili_version=BILI_VERSION,
+                                                            platform="windows", arch="amd64", protocol=2)).encode(),
+        })
+        self.assert_rejected("Windows bundle runtime version or platform mismatch")
 
     def test_missing_bundle(self):
         (self.directory / (TARGETS[-1] + ".tar.gz")).unlink()
@@ -74,7 +110,10 @@ class BundleIndexTests(unittest.TestCase):
         path = self.directory / (TARGETS[-1] + ".tar.gz")
         moved = self.directory / "moved.tar.gz"
         path.rename(moved)
-        path.symlink_to(moved.name)
+        try:
+            path.symlink_to(moved.name)
+        except (OSError, NotImplementedError):
+            self.skipTest("Creating symbolic links is unavailable")
         self.assert_rejected("Required regular bundle")
 
 

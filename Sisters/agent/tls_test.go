@@ -173,3 +173,31 @@ func TestServeShutdown(t *testing.T) {
 		t.Fatalf("clean shutdown: %v", err)
 	}
 }
+
+func TestServeReadinessFollowsTLSAndListenerSetup(t *testing.T) {
+	c, _ := tlsFixture(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ready := false
+	if err := ServeWithReady(ctx, c, func() { ready = true; cancel() }); err != nil {
+		t.Fatalf("ready service did not stop cleanly: %v", err)
+	}
+	if !ready {
+		t.Fatal("ready service did not notify its host")
+	}
+	ready = false
+	c.Cert = filepath.Join(t.TempDir(), "missing.pem")
+	if err := ServeWithReady(context.Background(), c, func() { ready = true }); err == nil || ready {
+		t.Fatal("failed TLS setup reported service readiness")
+	}
+	c, _ = tlsFixture(t)
+	occupied, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer occupied.Close()
+	c.Listen = occupied.Addr().String()
+	if err := ServeWithReady(context.Background(), c, func() { ready = true }); err == nil || ready {
+		t.Fatal("failed listener setup reported service readiness")
+	}
+}

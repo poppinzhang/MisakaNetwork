@@ -13,9 +13,12 @@ import tempfile
 
 from release_config import BILI_VERSION, ROOT, TARGETS, VERSION
 from runtime_manifest import validate_runtime
+from windows_binary import verify_windows_executable
 
 
 def build(target: str, runtime_root: Path, output: Path) -> dict:
+    if target not in TARGETS:
+        raise ValueError("Unsupported Sisters target")
     platform, arch = target.split("-")
     runtime = runtime_root / target / "misaka-runtime"
     validate_runtime(runtime, target)
@@ -23,7 +26,12 @@ def build(target: str, runtime_root: Path, output: Path) -> dict:
     with tempfile.TemporaryDirectory(prefix="misaka-bundle-") as temporary:
         stage = Path(temporary)
         env = dict(os.environ, GOOS="darwin" if platform == "macos" else platform, GOARCH=arch, CGO_ENABLED="0")
-        subprocess.run(["go", "build", "-trimpath", "-ldflags=-s -w -buildid=", "-o", str(stage / "sisters"), "./Sisters/cmd/sisters"], cwd=ROOT, env=env, check=True)
+        executable = "sisters.exe" if platform == "windows" else "sisters"
+        subprocess.run(["go", "build", "-trimpath", "-ldflags=-s -w -buildid=", "-o", str(stage / executable), "./Sisters/cmd/sisters"], cwd=ROOT, env=env, check=True)
+        if platform == "windows":
+            for binary in (stage / executable, runtime / "misaka-runtime.exe"):
+                with binary.open("rb") as source:
+                    verify_windows_executable(source.read(1024 * 1024), binary.name)
         shutil.copytree(runtime, stage / "runtime", symlinks=True)
         shutil.copy2(ROOT / "runtime/NOTICE.txt", stage / "NOTICE.txt")
         shutil.copy2(ROOT / "runtime/vendor/biliTickerBuy/LICENSE", stage / "BILITICKERBUY-LICENSE.txt")

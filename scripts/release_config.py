@@ -6,7 +6,7 @@ VERSION = "0.3.2"
 BUILD = 12
 RELEASE_DATE = "2026-11-14"
 BILI_VERSION = "2.15.18"
-TARGETS = ("linux-amd64", "linux-arm64", "macos-amd64", "macos-arm64")
+TARGETS = ("linux-amd64", "linux-arm64", "macos-amd64", "macos-arm64", "windows-amd64")
 APP_TARGETS = ("macos-amd64", "macos-arm64", "windows-amd64", "android-arm64", "android-amd64")
 
 

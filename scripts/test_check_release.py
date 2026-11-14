@@ -13,6 +13,7 @@ from check_release import APP_CONTENTS, TARGETS, WINDOWS_CRT_DLLS, verify_releas
 from package_windows import validate_app_crt
 from release_config import APP_TARGETS, BILI_VERSION, BUILD, VERSION, android_bundle_asset, artifact_name
 from test_android_runtime_manifest import elf_binary, runtime_assets
+from test_windows_binary import pe_binary
 
 
 def crt_binary(*, machine=0x8664, dll=True):
@@ -28,7 +29,8 @@ def crt_binary(*, machine=0x8664, dll=True):
 
 def app_archive(*, target="macos-amd64", app_version=VERSION, build=str(BUILD), bundle_version=VERSION,
                 bundle_platform=None, nested_sidecar=True, private_marker=False, missing_native=False,
-                min_sdk=36, android_legacy_gzip_assets=False, missing_crt=None, misplaced_crt=False, crt_data=None):
+                min_sdk=36, android_legacy_gzip_assets=False, missing_crt=None, misplaced_crt=False, crt_data=None,
+                omitted_bundle=None, omitted_windows_file=None, windows_bundle_binary=None):
     result = io.BytesIO()
     index = {"version": VERSION, "bili_version": BILI_VERSION, "artifacts": []}
     with zipfile.ZipFile(result, "w", compression=zipfile.ZIP_DEFLATED) as archive:
@@ -62,6 +64,8 @@ def app_archive(*, target="macos-amd64", app_version=VERSION, build=str(BUILD), 
                 archive.writestr(name, data)
             prefix = "assets/bundles/"
         for target in TARGETS:
+            if target == omitted_bundle:
+                continue
             platform, arch = target.split("-")
             manifest = dict(version=bundle_version, bili_version=BILI_VERSION,
                             platform=bundle_platform or platform, arch=arch)
@@ -71,6 +75,17 @@ def app_archive(*, target="macos-amd64", app_version=VERSION, build=str(BUILD), 
                 member = tarfile.TarInfo("manifest.json")
                 member.size = len(data)
                 bundle.addfile(member, io.BytesIO(data))
+                if platform == "windows":
+                    executable = pe_binary() if windows_bundle_binary is None else windows_bundle_binary
+                    for name, payload in {
+                        "sisters.exe": executable, "runtime/misaka-runtime.exe": executable,
+                        "runtime/RUNTIME-MANIFEST.json": json.dumps(manifest | {"protocol": 1}).encode(),
+                    }.items():
+                        if name == omitted_windows_file:
+                            continue
+                        member = tarfile.TarInfo(name)
+                        member.size = len(payload)
+                        bundle.addfile(member, io.BytesIO(payload))
                 if private_marker:
                     data = b"SYNTHETIC_PRIVATE_MARKER"
                     member = tarfile.TarInfo("runtime/sample")
@@ -123,6 +138,27 @@ class ReleaseTests(unittest.TestCase):
         self.write_release(targets=("macos-amd64", "macos-arm64"))
         with self.assertRaisesRegex(ValueError, "Release must contain"):
             verify_release(self.directory, [])
+
+    def test_every_lastorder_platform_requires_the_windows_sisters_bundle(self):
+        for target in APP_TARGETS:
+            with self.subTest(target=target):
+                self.write_release(targets=(target,), omitted_bundle="windows-amd64")
+                with self.assertRaisesRegex(ValueError, "all supported Sisters targets"):
+                    verify_release(self.directory, [], expected_targets=(target,))
+
+    def test_windows_bundle_requires_both_executables_and_runtime_manifest(self):
+        for name in ("sisters.exe", "runtime/misaka-runtime.exe", "runtime/RUNTIME-MANIFEST.json"):
+            with self.subTest(name=name):
+                self.write_release(targets=("macos-amd64",), omitted_windows_file=name)
+                with self.assertRaisesRegex(ValueError, "Windows bundle required regular file"):
+                    verify_release(self.directory, [], expected_targets=("macos-amd64",))
+
+    def test_windows_bundle_rejects_wrong_native_architecture(self):
+        for data in (pe_binary(machine=0x14C), pe_binary(machine=0xAA64), pe_binary(dll=True), b"not an exe"):
+            with self.subTest(data=data[:8]):
+                self.write_release(targets=("android-arm64",), windows_bundle_binary=data)
+                with self.assertRaisesRegex(ValueError, "x64 PE executable"):
+                    verify_release(self.directory, [], expected_targets=("android-arm64",))
 
     def test_each_matrix_platform_is_validated(self):
         for target in APP_TARGETS:

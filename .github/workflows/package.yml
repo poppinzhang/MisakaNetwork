@@ -66,18 +66,40 @@ jobs:
   bundles:
     needs: prepare
     timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    env:
+      PYTHONUTF8: '1'
     strategy:
       fail-fast: false
       matrix:
         include:
           - runner: ubuntu-24.04
             target: linux-amd64
+            goos: linux
+            python: bin/python
+            extension: ''
           - runner: ubuntu-24.04-arm
             target: linux-arm64
+            goos: linux
+            python: bin/python
+            extension: ''
           - runner: macos-15-intel
             target: macos-amd64
+            goos: darwin
+            python: bin/python
+            extension: ''
           - runner: macos-15
             target: macos-arm64
+            goos: darwin
+            python: bin/python
+            extension: ''
+          - runner: windows-2022
+            target: windows-amd64
+            goos: windows
+            python: Scripts/python.exe
+            extension: '.exe'
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
@@ -90,18 +112,40 @@ jobs:
         with:
           python-version: '3.12'
       - run: go test -race ./... && go vet ./...
+        env:
+          MISAKA_TEST_WINDOWS_SERVICE: ${{ matrix.goos == 'windows' && '1' || '' }}
       - name: Install isolated runtime build dependencies
         run: |
           python -m venv .build/runtime-venv
-          .build/runtime-venv/bin/python -m pip install -r runtime/requirements-build.lock
-          .build/runtime-venv/bin/python -m pip check
-      - run: .build/runtime-venv/bin/python -m unittest discover -s runtime/tests -v
-      - run: .build/runtime-venv/bin/python -m unittest discover -s scripts -p 'test_*.py' -v
-      - run: .build/runtime-venv/bin/python runtime/build.py --output .build/runtime/${{ matrix.target }}
-      - run: .build/runtime-venv/bin/python runtime/check_bundle.py .build/runtime/${{ matrix.target }}/misaka-runtime/misaka-runtime
+          .build/runtime-venv/${{ matrix.python }} -m pip install -r runtime/requirements-build.lock
+          .build/runtime-venv/${{ matrix.python }} -m pip check
+      - run: .build/runtime-venv/${{ matrix.python }} -m unittest discover -s runtime/tests -v
+      - run: .build/runtime-venv/${{ matrix.python }} -m unittest discover -s scripts -p 'test_*.py' -v
+      - run: .build/runtime-venv/${{ matrix.python }} runtime/build.py --output .build/runtime/${{ matrix.target }}
+      - run: .build/runtime-venv/${{ matrix.python }} runtime/check_bundle.py .build/runtime/${{ matrix.target }}/misaka-runtime/misaka-runtime${{ matrix.extension }}
       # Upstream wheels may contain generic runner-home paths; scan this checkout's specific path.
-      - run: .build/runtime-venv/bin/python runtime/check_privacy.py .build/runtime/${{ matrix.target }}/misaka-runtime --marker "$GITHUB_WORKSPACE"
+      - run: .build/runtime-venv/${{ matrix.python }} runtime/check_privacy.py .build/runtime/${{ matrix.target }}/misaka-runtime --marker "$GITHUB_WORKSPACE"
       - run: python scripts/build_bundles.py --targets ${{ matrix.target }}
+      - name: Verify the native Sisters bundle over loopback mutual TLS
+        env:
+          BUNDLE_TARGET: ${{ matrix.target }}
+          BUNDLE_GOOS: ${{ matrix.goos }}
+          BUNDLE_EXTENSION: ${{ matrix.extension }}
+        run: |
+          python - <<'PY'
+          import os, subprocess, tarfile
+          from pathlib import Path
+          target = os.environ['BUNDLE_TARGET']
+          suffix = os.environ['BUNDLE_EXTENSION']
+          destination = Path('.build/smoke').resolve()
+          destination.mkdir(parents=True)
+          with tarfile.open('.build/bundles/' + target + '.tar.gz', 'r:gz') as archive:
+              archive.extractall(destination, filter='data')
+          subprocess.run(['go', 'run', './cmd/misaka-smoke',
+              '--sisters', str(destination / ('sisters' + suffix)),
+              '--runtime', str(destination / 'runtime' / ('misaka-runtime' + suffix)),
+              '--expect-platform', os.environ['BUNDLE_GOOS'] + '/' + target.split('-')[1]], check=True)
+          PY
       - uses: actions/upload-artifact@v4
         with:
           name: internal-bundle-${{ matrix.target }}
@@ -182,8 +226,6 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - run: go test ./internal/control ./cmd/misakactl
-      - run: go vet ./internal/control ./cmd/misakactl
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -200,16 +242,12 @@ jobs:
       - name: Test LastOrder
         working-directory: LastOrder
         run: flutter pub get --enforce-lockfile && flutter analyze && flutter test
-      - name: Install isolated runtime build dependencies
+      - name: Restore native local runtime
         run: |
-          python -m venv .build/runtime-venv
-          .build/runtime-venv/Scripts/python.exe -m pip install -r runtime/requirements-build.lock
+          New-Item -ItemType Directory -Force .build/unpack, .build/runtime/windows-amd64 | Out-Null
+          tar -xzf .build/bundles/windows-amd64.tar.gz -C .build/unpack
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          .build/runtime-venv/Scripts/python.exe -m pip check
-      - run: .build/runtime-venv/Scripts/python.exe runtime/build.py --output .build/runtime/windows-amd64
-      - run: .build/runtime-venv/Scripts/python.exe runtime/check_bundle.py .build/runtime/windows-amd64/misaka-runtime/misaka-runtime.exe
-      # Upstream wheels may contain generic runner-home paths; scan this checkout's specific path.
-      - run: .build/runtime-venv/Scripts/python.exe runtime/check_privacy.py .build/runtime/windows-amd64/misaka-runtime --marker "$env:GITHUB_WORKSPACE"
+          Move-Item .build/unpack/runtime .build/runtime/windows-amd64/misaka-runtime
       - run: python scripts/build_windows.py
       - run: python scripts/package_windows.py
       - run: python scripts/check_release.py "$env:RELEASE_DIR" --target windows-amd64 --forbid "$env:GITHUB_WORKSPACE"

@@ -34,9 +34,11 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - run: go test ./internal/control ./cmd/misakactl
+      - run: go test -race ./...
         if: runner.os == 'Windows'
-      - run: go vet ./internal/control ./cmd/misakactl
+        env:
+          MISAKA_TEST_WINDOWS_SERVICE: '1'
+      - run: go vet ./...
         if: runner.os == 'Windows'
       - name: Install pinned Flutter on macOS
         if: runner.os != 'Windows'
@@ -108,5 +110,5 @@ jobs:
           arch: x86_64
           disable-animations: true
           working-directory: LastOrder
-          # Source verification has no four-platform deployment bundles.
+          # Source verification has no offline deployment bundles.
           script: flutter test integration_test/android_embedded_test.dart -d emulator-5554 --name 'Android (embedded|JNI|Keystore)'

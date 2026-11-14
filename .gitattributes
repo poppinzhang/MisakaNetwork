@@ -1,0 +1,3 @@
+# The embedded snapshot is verified against raw SHA-256 bytes on every host.
+# Windows checkout must not rewrite the audited upstream source to CRLF.
+runtime/vendor/** -text
