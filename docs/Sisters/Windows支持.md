@@ -40,7 +40,7 @@
 
 0.4.0 的上传脚本直接用 `[Console]::OpenStandardInput()` 读取数据。在真实 Win32-OpenSSH 会话中，读取一旦追上网络传入的数据就会停滞，约 2 分钟后连接被停滞检测中断，界面显示「上传或解压 Windows 部署包失败；当前版本未变更」。问题位于远程 Windows 一侧，与使用 Android、macOS 还是 Windows 管理端无关；写入私有配置的步骤使用同一读取方式，存在同样隐患。0.4.0 的 CI 以匿名管道直接启动 PowerShell，没有覆盖这一条件。修复目前位于源码 `unstaged`，随后续版本发布后才对用户生效。
 
-一台 Windows 11 开发机上的三次 0.4.0 部署留下了实际现场：每次都在 `%ProgramData%\MisakaNetwork\Sisters\releases` 下留下未启用的版本目录，其中 `payload.zip` 为 0 字节且仍被占用；对应的 `cmd.exe` 与 `powershell.exe` 在一个多小时后仍在运行。读取在第一段数据之后就停住（首段数据仍在 `FileStream` 缓冲中，未写入磁盘），而 sshd 把会话作业对象的句柄交给了 `cmd.exe`，`cmd.exe` 又在等待卡住的 PowerShell，所以 SSH 会话结束也不会回收它们。这些进程不影响已运行的服务，也不妨碍修复版重新部署；需要释放内存或删除这些版本目录时，重启机器，或结束命令行含 `-EncodedCommand`、父进程为 `cmd.exe` 的对应 `powershell.exe`，再在核对服务路径后删除目录。
+一台 Windows 11 开发机上的三次 0.4.0 部署留下了实际现场：每次都在 `%ProgramData%\MisakaNetwork\Sisters\releases` 下留下未启用的版本目录，其中 `payload.zip` 仍被占用；对应的 `cmd.exe` 与 `powershell.exe` 在一个多小时后仍在运行。文件打开期间目录列表显示为 0 字节（Windows 不随写入更新目录项中的大小），结束这些进程后才显示实际写入的 110,592 字节（108 KiB，ZIP 开头的许可文件等），即三次上传都在同一位置、约 108 KiB 后停住。sshd 把会话作业对象的句柄交给了 `cmd.exe`，`cmd.exe` 又在等待卡住的 PowerShell，所以 SSH 会话结束也不会回收它们。这些进程不影响已运行的服务，也不妨碍修复版重新部署；需要释放内存或删除这些版本目录时，重启机器，或结束命令行含 `-EncodedCommand`、父进程为 `cmd.exe` 的对应 `powershell.exe`，再在核对服务路径后删除目录。
 
 ## 验证范围
 

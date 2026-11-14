@@ -8,7 +8,7 @@
 - 上传失败提示区分本地部署包读取失败、远程写入或解压失败（提示检查系统盘空间和安全软件拦截）与 SSH 连接中断，不转发远程原始错误。
 - 测试：新增 Windows 原生回归，按 Win32-OpenSSH 的方式以重叠 I/O 命名管道（4 KiB 缓冲、仅继承标准句柄）和间歇写入作为 PowerShell 标准输入，覆盖读取辅助函数、上传解压与写入配置脚本，并记录 .NET 控制台流在该条件下的停滞；补充 ZIP 压缩往返、keepalive 应答等待与停止、失败分类及实际发送命令长度的跨平台测试。新增可选真机用例 `internal/control/live_windows_ssh_test.go`，主机与密钥只经环境变量传入，未设置时跳过。
 - 真机验证（Windows 11 build 26200、内置 OpenSSH_9.5p2、Windows PowerShell 5.1 / .NET Framework 4.8.1、Defender 开启，从 macOS 连接）：旧读取方式复现停滞；新读取 1 MiB 分段输入完整；以 0.4.0 正式 Windows 包运行生产上传与写入配置脚本，5.5 秒完成，182 个文件与 4 个配置文件哈希一致；通过 `Deploy` 完整部署 37 秒完成，服务以虚拟账户运行并通过 mTLS 检查，测试服务与目录随后删除。首次真机运行还发现动态定义的 `GetStdHandle` 缺少 `PreserveSig` 时返回无效句柄，已修正并加入回归断言。
-- 验证范围：本地 macOS 全量 Go race/vet 与 Windows x64 测试程序交叉编译、vet 通过；Windows 原生回归只在 CI 的 Windows 作业执行。真机结果只覆盖上述一台 Windows 11，未验证 Windows 10，未在 Android 手机上实际运行，也未进行真实账号业务验收。升级影响：发布后安装新版 LastOrder 再部署即可，无需重建其他数据。每次失败的 0.4.0 部署会留下一个停在读取中的 `powershell.exe`（父进程 `cmd.exe`）和被它占用的 0 字节 `payload.zip`，重启或结束这些进程后，管理员可核对并删除对应的未启用版本目录；它们不妨碍重新部署。
+- 验证范围：本地 macOS 全量 Go race/vet 与 Windows x64 测试程序交叉编译、vet 通过；Windows 原生回归只在 CI 的 Windows 作业执行。真机结果只覆盖上述一台 Windows 11，未验证 Windows 10，未在 Android 手机上实际运行，也未进行真实账号业务验收。升级影响：发布后安装新版 LastOrder 再部署即可，无需重建其他数据。每次失败的 0.4.0 部署会留下一个停在读取中的 `powershell.exe`（父进程 `cmd.exe`）和被它占用、只写入约 108 KiB 的 `payload.zip`（进程结束前目录列表显示为 0 字节），重启或结束这些进程后，管理员可核对并删除对应的未启用版本目录；它们不妨碍重新部署。
 
 ## 0.4.0 — 2026-11-14
 
