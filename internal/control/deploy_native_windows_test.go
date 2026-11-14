@@ -19,10 +19,14 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	pb "github.com/MisakaNetwork/MisakaNetwork/gen/misaka/v1"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 )
 
 func nativePowerShell(script string, input io.Reader) (string, error) {
-	script = "$ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue';[Console]::OutputEncoding=New-Object Text.UTF8Encoding($false);try {\n" + script + "\n} catch { Write-Output $_.Exception.Message; exit 1 };exit 0"
+	script = "$ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue';[Console]::OutputEncoding=New-Object Text.UTF8Encoding($false);try {\n" + script + "\n} catch { Write-Output $_.Exception.Message;Write-Output $_.ScriptStackTrace;exit 1 };exit 0"
 	command := powershellCommand(script)
 	encoded := strings.TrimPrefix(command, "powershell.exe -NoLogo -NoProfile -NonInteractive -EncodedCommand ")
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
@@ -158,13 +162,15 @@ func TestWindowsNativeDeploymentServiceLifecycle(t *testing.T) {
 import("encoding/json";"os";"path/filepath";"golang.org/x/sys/windows")
 func main(){
  var request map[string]any;if json.NewDecoder(os.Stdin).Decode(&request)!=nil {os.Exit(1)}
- ready:=true
- user,err:=windows.GetCurrentProcessToken().GetTokenUser();if err!=nil||user.User.Sid.String()!=` + strconv.Quote(windowsServiceSID()) + ` {ready=false}
+	 checks:=map[string]bool{}
+	 user,err:=windows.GetCurrentProcessToken().GetTokenUser();checks["service_sid"]=err==nil&&user.User.Sid.String()==` + strconv.Quote(windowsServiceSID()) + `
  executable,err:=os.Executable();if err!=nil {os.Exit(1)}
  key:=filepath.Join(filepath.Dir(executable),"..","server.key")
- readable,err:=os.Open(key);if err!=nil {ready=false}else{readable.Close()}
- writable,err:=os.OpenFile(key,os.O_WRONLY,0);if err==nil {ready=false;writable.Close()}
- temp,err:=os.CreateTemp(os.TempDir(),"service-temp-check-");if err!=nil {ready=false}else{name:=temp.Name();temp.Close();os.Remove(name)}
+	 readable,err:=os.Open(key);checks["key_readable"]=err==nil;if err==nil {readable.Close()}
+	 writable,err:=os.OpenFile(key,os.O_WRONLY,0);checks["key_read_only"]=os.IsPermission(err);if err==nil {writable.Close()}
+	 temp,err:=os.CreateTemp(os.TempDir(),"service-temp-check-");checks["temp_writable"]=err==nil;if err==nil {name:=temp.Name();temp.Close();os.Remove(name)}
+	 diagnostic,_:=json.Marshal(checks);os.WriteFile(filepath.Join(os.TempDir(),"misaka-fixture-runtime.json"),diagnostic,0600)
+	 ready:=true;for _,passed:=range checks {ready=ready&&passed}
  json.NewEncoder(os.Stdout).Encode(map[string]any{"type":"result","ok":true,"data":map[string]any{"ready":ready,"protocol":1,"version":` + strconv.Quote(Version) + `,"bili_version":` + strconv.Quote(BiliVersion) + `}})
 }`
 	sourceFile := filepath.Join(buildDir, "runtime.go")
@@ -235,12 +241,59 @@ func main(){
 		}
 	}
 	stage(first)
+	serviceDiagnostics := func() {
+		t.Helper()
+		output, err := nativePowerShell(windowsServiceHelpers+`$s=Find-Service;if ($null -eq $s) {'service absent'} else {@{state=$s.State;exit_code=$s.ExitCode;service_exit_code=$s.ServiceSpecificExitCode}|ConvertTo-Json -Compress}`, nil)
+		t.Logf("native SCM state: output=%q error=%v", output, err)
+		if data, err := os.ReadFile(filepath.Join(first.Temp, "misaka-fixture-runtime.json")); err == nil {
+			t.Logf("synthetic runtime permission checks: %s", data)
+		} else {
+			t.Logf("synthetic runtime diagnostics unavailable (missing=%v)", os.IsNotExist(err))
+		}
+		tlsConfig, err := deploymentTLS(identity, cert, "localhost")
+		if err != nil {
+			t.Logf("synthetic health client setup failed: %v", err)
+			return
+		}
+		client, err := grpc.NewClient("passthrough:///sisters-fixture", grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)), grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
+			return (&net.Dialer{}).DialContext(ctx, "tcp", endpoint)
+		}))
+		if err != nil {
+			t.Logf("synthetic health client creation failed: %v", err)
+			return
+		}
+		defer client.Close()
+		ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+		defer cancel()
+		state, err := pb.NewSistersClient(client).GetStatus(ctx, &pb.Empty{})
+		if err != nil {
+			t.Logf("synthetic GetStatus failed: %v", err)
+		} else {
+			t.Logf("synthetic GetStatus: version=%q bili_version=%q runtime_ready=%v", state.Version, state.BiliVersion, state.RuntimeReady)
+		}
+	}
+	runNative := func(script string, input io.Reader) (string, error) {
+		// Keep the production operation intact while including its numeric WMI
+		// failure code in this isolated fixture's diagnostics.
+		script = strings.ReplaceAll(script, "throw 'SCM rejected operation'", "throw ('SCM rejected operation: '+$r.ReturnValue)")
+		output, err := nativePowerShell(script, input)
+		if err != nil {
+			t.Logf("native SCM script failed: %v", err)
+			serviceDiagnostics()
+		}
+		return output, err
+	}
 	health := func() error {
-		return awaitHealthy(context.Background(), identity, cert, "localhost", 10*time.Second, func(ctx context.Context) (net.Conn, error) {
+		err := awaitHealthy(context.Background(), identity, cert, "localhost", 10*time.Second, func(ctx context.Context) (net.Conn, error) {
 			return (&net.Dialer{}).DialContext(ctx, "tcp", endpoint)
 		})
+		if err != nil {
+			t.Logf("native mTLS health failed: %v", err)
+			serviceDiagnostics()
+		}
+		return err
 	}
-	if err := activateWindows(nativePowerShell, first, health); err != nil {
+	if err := activateWindows(runNative, first, health); err != nil {
 		t.Fatalf("native SCM service must pass mTLS, service SID, read-only key and writable temp checks: %v", err)
 	}
 	secondID := Version + "-second"
@@ -253,7 +306,7 @@ func main(){
 		t.Fatal(err)
 	}
 	stage(second)
-	if err := activateWindows(nativePowerShell, second, func() error { return errors.New("injected health failure") }); err == nil || !strings.Contains(err.Error(), "恢复旧版本") {
+	if err := activateWindows(runNative, second, func() error { return errors.New("injected health failure") }); err == nil || !strings.Contains(err.Error(), "恢复旧版本") {
 		t.Fatalf("redeploy rollback: %v", err)
 	}
 	if err := health(); err != nil {
@@ -269,7 +322,7 @@ func main(){
 	if _, err := nativePowerShell(windowsServiceHelpers+`$deadline=[DateTime]::UtcNow.AddSeconds(10);while ($null -ne (Find-Service)) {if ([DateTime]::UtcNow -ge $deadline) {throw 'service deletion pending'};Start-Sleep -Milliseconds 200}`, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := activateWindows(nativePowerShell, second, func() error { return errors.New("first deployment health failure") }); err == nil || !strings.Contains(err.Error(), "移除新服务") {
+	if err := activateWindows(runNative, second, func() error { return errors.New("first deployment health failure") }); err == nil || !strings.Contains(err.Error(), "移除新服务") {
 		t.Fatalf("first deployment cleanup: %v", err)
 	}
 	if output, err := nativePowerShell(windowsServiceHelpers+`if ($null -ne (Find-Service)) {throw 'service remains'};'removed'`, nil); err != nil || output != "removed" {
