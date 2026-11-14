@@ -28,9 +28,19 @@
 
 默认安装到 `%ProgramData%\MisakaNetwork\Sisters`，每次上传使用独立版本目录。本地先校验 Windows 离线包，拒绝路径逃逸、链接、Windows 保留文件名、备用数据流和大小写冲突，再通过 SSH 流上传。PowerShell 脚本使用 UTF-16LE `-EncodedCommand`，用户路径作为数据引用，兼容空格与非 ASCII 字符。远端目录拒绝重解析点，不沿链接写入其他目录。
 
+上传时，本地把已校验的 tar.gz 转为 Deflate 最快级别压缩的 ZIP 流，传输量接近离线包本身（以 Linux 包估算，由不压缩的 104 MB 降至 42 MB）；远端先写入版本目录内的临时 `payload.zip`，再用 .NET `ZipFile` 解压并删除。Win32-OpenSSH 为命令提供的标准输入是以 `FILE_FLAG_OVERLAPPED` 打开的命名管道（源码 `contrib/win32/win32compat/fileio.c` 的 `fileio_pipe`），而 Windows PowerShell 的 `[Console]::OpenStandardInput()` 是 .NET Framework 控制台流，每次读取前都会调用 `WaitForAvailableConsoleInput`，在这类管道暂时读空后不再返回（见 [PowerShell/PowerShell#14478](https://github.com/PowerShell/PowerShell/issues/14478#issuecomment-1064764004)）。因此上传和写入私有配置都改用在内存中定义的 `GetStdHandle` 取得继承的标准输入句柄，以同步 `FileStream` 读取；不调用 `Add-Type` 编译代码，也不从可写临时目录向提升后的会话加载 DLL。以 `DefinePInvokeMethod` 定义的 P/Invoke 必须显式设置 `PreserveSig`：缺少时运行时按返回 HRESULT 的方法调用，丢弃 `GetStdHandle` 返回的句柄并得到 0，Windows 11 真机上表现为「standard input unavailable」。
+
+远端解压、安全软件扫描新文件和运行时首次启动期间，连接可能长时间没有数据。准备阶段（上传、写入配置与两项自检）每 30 秒发送一次 SSH keepalive，并等到应答后才发下一次：服务器停止应答时仍由停滞检测在约 2 分钟内中断，整个阶段仍受 15 分钟准备预算约束；切换服务前停止发送，服务切换与回滚继续只受停滞检测约束。上传失败按本地部署包读取失败、远程写入或解压失败（提示检查系统盘空间和安全软件拦截）以及 SSH 连接中断三类给出固定提示，不转发远程原始错误。
+
 安装包和配置在受限目录中准备，运行时自检通过后才切换服务程序路径。新服务通过 SSH 隧道完成 mTLS 检查后，再从 LastOrder 直接检查所选端口；直连失败保留已启动的服务并提示检查网络。切换失败会停止新服务并恢复旧服务配置；首次部署失败则清理新服务。回滚失败明确报错，不能将“已尝试恢复”视为旧服务已正常运行。
 
 源码离线包为 `windows-amd64.tar.gz`，根目录包含 `sisters.exe`、`runtime/misaka-runtime.exe` 与依赖、许可证和版本清单，不包含节点私钥或用户 Cookie。Windows Python 运行时必须原生构建，不能用交叉编译的 Go EXE 替代完整包。全部 LastOrder 目标须包含 Linux/macOS arm64/x64 加 Windows x64 共五份同版本包。
+
+### 0.4.0 上传停滞问题
+
+0.4.0 的上传脚本直接用 `[Console]::OpenStandardInput()` 读取数据。在真实 Win32-OpenSSH 会话中，读取一旦追上网络传入的数据就会停滞，约 2 分钟后连接被停滞检测中断，界面显示「上传或解压 Windows 部署包失败；当前版本未变更」。问题位于远程 Windows 一侧，与使用 Android、macOS 还是 Windows 管理端无关；写入私有配置的步骤使用同一读取方式，存在同样隐患。0.4.0 的 CI 以匿名管道直接启动 PowerShell，没有覆盖这一条件。修复目前位于源码 `unstaged`，随后续版本发布后才对用户生效。
+
+一台 Windows 11 开发机上的三次 0.4.0 部署留下了实际现场：每次都在 `%ProgramData%\MisakaNetwork\Sisters\releases` 下留下未启用的版本目录，其中 `payload.zip` 为 0 字节且仍被占用；对应的 `cmd.exe` 与 `powershell.exe` 在一个多小时后仍在运行。读取在第一段数据之后就停住（首段数据仍在 `FileStream` 缓冲中，未写入磁盘），而 sshd 把会话作业对象的句柄交给了 `cmd.exe`，`cmd.exe` 又在等待卡住的 PowerShell，所以 SSH 会话结束也不会回收它们。这些进程不影响已运行的服务，也不妨碍修复版重新部署；需要释放内存或删除这些版本目录时，重启机器，或结束命令行含 `-EncodedCommand`、父进程为 `cmd.exe` 的对应 `powershell.exe`，再在核对服务路径后删除目录。
 
 ## 验证范围
 
@@ -51,3 +61,16 @@
 | Windows 10 真机与业务 | 未执行真机 SSH 部署、自启动、实际断连场景或真实账号登录、下单、付款与出票验收；Windows Server CI 不代替这些验证 |
 
 原生 SCM 用例只允许在没有现存 `MisakaSisters` 服务的隔离管理员环境运行，不接管用户服务。它使用随机目录与虚构 runtime，验证中文/空格/单引号路径、普通及悬空 Junction 拒绝、虚拟账户 SID、证书可读不可写、临时目录可写、mTLS 健康检查、失败恢复及首次失败删除；不使用实际账号或订单。
+
+`unstaged` 的上传停滞修复另有 Windows 原生回归（`internal/control/deploy_stdin_windows_test.go`）：按 Win32-OpenSSH 的方式启动 PowerShell，标准输入为以 `FILE_FLAG_OVERLAPPED` 打开、4 KiB 缓冲的命名管道，进程只继承三个标准句柄；脚本开始后再分段间歇写入，使读取方反复遇到空管道。用例覆盖标准输入辅助函数、上传解压与写入私有配置三个生产脚本，并记录 .NET 控制台流在同样条件下停滞（若将来的 Windows 更新不再停滞则跳过而非失败）。用例不经过 `cmd.exe /c` 与真实 sshd，只在 Windows CI 作业运行；本地 macOS 已完成全量 Go race/vet 与 Windows x64 测试程序交叉编译、vet，未在本机执行这些 Windows 测试。
+
+可选真机用例 `internal/control/live_windows_ssh_test.go` 从控制端通过与生产相同的 `x/crypto/ssh` 连接真实 Windows OpenSSH，主机、账号与密钥只经环境变量（`MISAKA_TEST_WINDOWS_SSH` 等，见文件注释）传入，未设置时跳过，CI 不运行；完整部署用例另需 `MISAKA_TEST_WINDOWS_SSH_DEPLOY=1`，拒绝在已有 `MisakaSisters` 服务或 20001 端口被占用的主机运行，结束后删除测试服务与独立目录。2026-11-15 在一台 Windows 11（build 26200，内置 OpenSSH_9.5p2 for Windows，默认 `cmd.exe`，Windows PowerShell 5.1 / .NET Framework 4.8.1，Defender 实时保护开启）开发机上，从 macOS 运行的结果：
+
+| 项目 | 结果 |
+| --- | --- |
+| 旧读取方式（`[Console]::OpenStandardInput()`） | 分段输入下 30 秒无输出，复现停滞；用例随后结束卡住的进程 |
+| `Open-StandardInput` | 1 MiB 分段输入完整读取，SHA-256 一致，用时 2.4 秒；首次运行发现缺少 `PreserveSig` 时返回无效句柄，修正后通过 |
+| 生产上传与写入配置脚本 + 0.4.0 正式 Windows 包 | 上传并解压 5.5 秒；182 个文件与 4 个私有配置文件哈希一致（配置以 1 KiB 分段间歇写入） |
+| 通过 `Deploy` 完整部署 0.4.0 正式 Windows 包 | 37 秒完成；`sisters.exe` 与真实 biliTickerBuy 运行时自检通过，服务以 `NT SERVICE\MisakaSisters` 自动启动并通过 SSH 隧道 mTLS 检查；未放行防火墙，直连检查为不可达；测试服务与目录已删除 |
+
+真机结果只覆盖这一台 Windows 11 与上述版本，不代表 Windows 10 或其他 OpenSSH 版本；Android 管理端运行同一 Go 部署代码，但本轮未在手机上实际运行，也未进行真实账号登录、下单、付款或长时间运行验收。

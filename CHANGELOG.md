@@ -2,6 +2,14 @@
 
 ## unstaged
 
+- **修复 Windows Sisters 部署停在「上传并解压安装包」**：0.4.0 远程 Windows PowerShell 用 `[Console]::OpenStandardInput()` 读取上传数据。Win32-OpenSSH 提供的标准输入是以 `FILE_FLAG_OVERLAPPED` 打开的命名管道，.NET Framework 控制台流每次读取前调用的 `WaitForAvailableConsoleInput` 在这类管道暂时读空后不再返回，读取追上网络数据即停滞，约 2 分钟后被停滞检测中断，显示「上传或解压 Windows 部署包失败；当前版本未变更」。问题位于远程 Windows 一侧，从 Android、macOS 或 Windows 管理端部署均受影响；写入私有配置的步骤使用同一读取方式，同样修复。现通过在内存中定义的 `GetStdHandle` 取得继承句柄，以同步 `FileStream` 读取，不调用 `Add-Type` 编译代码，也不从可写临时目录加载 DLL。详见 [Windows Sisters](docs/Sisters/Windows支持.md#040-上传停滞问题)。
+- Windows 上传改为 Deflate 最快级别压缩的 ZIP，传输量接近离线包本身（以 Linux 包估算由 104 MB 降至 42 MB），降低手机网络下超过 15 分钟准备预算的风险。
+- Windows 准备阶段（上传、写入配置与自检）每 30 秒发送 SSH keepalive，避免远程解压、安全软件扫描或运行时首次启动期间连接无数据被误判停滞；每次等到应答才发下一次，服务器无响应时仍按停滞检测中断，切换服务前停止发送。
+- 上传失败提示区分本地部署包读取失败、远程写入或解压失败（提示检查系统盘空间和安全软件拦截）与 SSH 连接中断，不转发远程原始错误。
+- 测试：新增 Windows 原生回归，按 Win32-OpenSSH 的方式以重叠 I/O 命名管道（4 KiB 缓冲、仅继承标准句柄）和间歇写入作为 PowerShell 标准输入，覆盖读取辅助函数、上传解压与写入配置脚本，并记录 .NET 控制台流在该条件下的停滞；补充 ZIP 压缩往返、keepalive 应答等待与停止、失败分类及实际发送命令长度的跨平台测试。新增可选真机用例 `internal/control/live_windows_ssh_test.go`，主机与密钥只经环境变量传入，未设置时跳过。
+- 真机验证（Windows 11 build 26200、内置 OpenSSH_9.5p2、Windows PowerShell 5.1 / .NET Framework 4.8.1、Defender 开启，从 macOS 连接）：旧读取方式复现停滞；新读取 1 MiB 分段输入完整；以 0.4.0 正式 Windows 包运行生产上传与写入配置脚本，5.5 秒完成，182 个文件与 4 个配置文件哈希一致；通过 `Deploy` 完整部署 37 秒完成，服务以虚拟账户运行并通过 mTLS 检查，测试服务与目录随后删除。首次真机运行还发现动态定义的 `GetStdHandle` 缺少 `PreserveSig` 时返回无效句柄，已修正并加入回归断言。
+- 验证范围：本地 macOS 全量 Go race/vet 与 Windows x64 测试程序交叉编译、vet 通过；Windows 原生回归只在 CI 的 Windows 作业执行。真机结果只覆盖上述一台 Windows 11，未验证 Windows 10，未在 Android 手机上实际运行，也未进行真实账号业务验收。升级影响：发布后安装新版 LastOrder 再部署即可，无需重建其他数据。每次失败的 0.4.0 部署会留下一个停在读取中的 `powershell.exe`（父进程 `cmd.exe`）和被它占用的 0 字节 `payload.zip`，重启或结束这些进程后，管理员可核对并删除对应的未启用版本目录；它们不妨碍重新部署。
+
 ## 0.4.0 — 2026-11-14
 
 - **交付状态：统一版本 0.4.0+13 已公开正式发布。** [GitHub Release 0.4.0](https://github.com/poppinzhang/MisakaNetwork/releases/tag/0.4.0) 对应标签 `0.4.0`、提交 `33a140a0462ec718d8c973fa3c6cede6f6c7e7a6`；正式 Actions [43597192222](https://github.com/poppinzhang/MisakaNetwork/actions/runs/43597192222) 完成五种 Sisters、五种 LastOrder 的全量重建与校验，12 个资产已核验并标记 `Latest`（Release ID `445314611`，非草稿、非预发布）。安装包和摘要见 [0.4.0 发布记录](docs/releases/0.4.0.md)。

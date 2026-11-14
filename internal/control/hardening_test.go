@@ -418,6 +418,103 @@ func TestStallConnFailsOnlyWithoutProgress(t *testing.T) {
 	}
 }
 
+// keepaliveServer reports each global request a client sends and, when reply
+// is set, refuses it as servers do for request types they do not implement.
+func keepaliveServer(t *testing.T, reply bool) (*ssh.Client, <-chan string) {
+	t.Helper()
+	_, private, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signer, err := ssh.NewSignerFromKey(private)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := &ssh.ServerConfig{NoClientAuth: true}
+	config.AddHostKey(signer)
+	// Both handshake sides write first, so an unbuffered net.Pipe deadlocks.
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { lis.Close() })
+	requests := make(chan string, 64)
+	go func() {
+		raw, err := lis.Accept()
+		if err != nil {
+			return
+		}
+		conn, channels, global, err := ssh.NewServerConn(raw, config)
+		if err != nil {
+			raw.Close()
+			return
+		}
+		defer conn.Close()
+		go func() {
+			for channel := range channels {
+				channel.Reject(ssh.Prohibited, "unsupported")
+			}
+		}()
+		for request := range global {
+			requests <- request.Type
+			if reply {
+				request.Reply(false, nil)
+			}
+		}
+	}()
+	client, err := ssh.Dial("tcp", lis.Addr().String(), &ssh.ClientConfig{User: "test", HostKeyCallback: hostCallback(ssh.FingerprintSHA256(signer.PublicKey())), Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { client.Close() })
+	return client, requests
+}
+
+func TestKeepAliveRepeatsUntilStopped(t *testing.T) {
+	client, requests := keepaliveServer(t, true)
+	stop := keepAlive(client, 10*time.Millisecond)
+	for i := 0; i < 3; i++ {
+		select {
+		case kind := <-requests:
+			if kind != "keepalive@openssh.com" {
+				t.Fatalf("unexpected global request %q", kind)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("keepalive was not sent")
+		}
+	}
+	stop()
+	stop()
+	// A request already in flight when stop ran may still arrive.
+	time.Sleep(50 * time.Millisecond)
+	for len(requests) > 0 {
+		<-requests
+	}
+	select {
+	case kind := <-requests:
+		t.Fatalf("keepalive continued after stop: %q", kind)
+	case <-time.After(150 * time.Millisecond):
+	}
+}
+
+// A dead peer never answers, so only one request is ever outstanding and the
+// connection falls silent: stall detection still closes it.
+func TestKeepAliveWaitsForEachReply(t *testing.T) {
+	client, requests := keepaliveServer(t, false)
+	stop := keepAlive(client, 10*time.Millisecond)
+	defer stop()
+	select {
+	case <-requests:
+	case <-time.After(5 * time.Second):
+		t.Fatal("keepalive was not sent")
+	}
+	select {
+	case <-requests:
+		t.Fatal("sent another keepalive before the server replied")
+	case <-time.After(150 * time.Millisecond):
+	}
+}
+
 func TestLingerIsVerifiedBeforeLinuxDeployment(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("remote POSIX service fixture requires a POSIX shell")

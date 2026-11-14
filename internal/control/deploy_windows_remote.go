@@ -6,6 +6,7 @@ import (
 	"archive/tar"
 	"archive/zip"
 	"bytes"
+	"compress/flate"
 	"compress/gzip"
 	"context"
 	"crypto/rand"
@@ -55,6 +56,12 @@ func powershellCommand(script string) string {
 	return "powershell.exe -NoLogo -NoProfile -NonInteractive -EncodedCommand " + base64.StdEncoding.EncodeToString(utf16LE(bootstrap))
 }
 
+// windowsRemoteScript is the form in which runPowerShell sends script: output
+// after outputMarker is the result, and any error ends it with exit status 1.
+func windowsRemoteScript(script string) string {
+	return "$ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue';[Console]::OutputEncoding=New-Object Text.UTF8Encoding($false);[Console]::Write('" + outputMarker + "');try {\n" + script + "\n} catch { exit 1 }; exit 0"
+}
+
 func runPowerShell(c *ssh.Client, script string, input io.Reader) (string, error) {
 	session, err := c.NewSession()
 	if err != nil {
@@ -65,8 +72,7 @@ func runPowerShell(c *ssh.Client, script string, input io.Reader) (string, error
 	var out limitedBuffer
 	session.Stdout = &out
 	session.Stderr = io.Discard
-	script = "$ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue';[Console]::OutputEncoding=New-Object Text.UTF8Encoding($false);[Console]::Write('" + outputMarker + "');try {\n" + script + "\n} catch { exit 1 }; exit 0"
-	command := powershellCommand(script)
+	command := powershellCommand(windowsRemoteScript(script))
 	if len(command) >= 8191 {
 		return "", errors.New("Windows 部署命令超过系统长度限制")
 	}
@@ -195,6 +201,30 @@ func parseWindowsPaths(output, releaseID string) (windowsPaths, error) {
 	return paths, nil
 }
 
+// Win32-OpenSSH gives a command the client end of a named pipe opened with
+// FILE_FLAG_OVERLAPPED (contrib/win32/win32compat/fileio.c, fileio_pipe).
+// Windows PowerShell's [Console]::OpenStandardInput() is a .NET Framework
+// console stream that calls WaitForAvailableConsoleInput before every read, and
+// that wait blocks indefinitely on such a pipe once it is momentarily empty
+// (PowerShell/PowerShell#14478): a streamed upload stalls as soon as the reader
+// catches up with the network. Open-StandardInput reads the inherited handle
+// through an ordinary synchronous FileStream, whose ReadFile waits for the
+// pending read itself. The P/Invoke is emitted in memory, so no compiler runs
+// and no DLL is loaded from a writable temporary directory into this elevated
+// session. Unlike [DllImport], an emitted P/Invoke needs PreserveSig set
+// explicitly; without it the runtime expects an HRESULT, discards the handle
+// GetStdHandle returns, and yields zero.
+const windowsStandardInputHelper = `function Open-StandardInput {
+  $type=[AppDomain]::CurrentDomain.DefineDynamicAssembly((New-Object Reflection.AssemblyName('MisakaStandardInput')),[Reflection.Emit.AssemblyBuilderAccess]::Run).DefineDynamicModule('MisakaStandardInput').DefineType('MisakaStandardInput',[Reflection.TypeAttributes]'Public,Abstract,Sealed')
+  $method=$type.DefinePInvokeMethod('GetStdHandle','kernel32.dll',[Reflection.MethodAttributes]'Public,Static,PinvokeImpl',[Reflection.CallingConventions]::Standard,[IntPtr],[Type[]]@([int]),[Runtime.InteropServices.CallingConvention]::Winapi,[Runtime.InteropServices.CharSet]::Unicode)
+  $method.SetImplementationFlags([Reflection.MethodImplAttributes]::PreserveSig)
+  $native=$type.CreateType()
+  $handle=New-Object Microsoft.Win32.SafeHandles.SafeFileHandle(($native::GetStdHandle(-10)),$false)
+  if ($handle.IsInvalid) {throw 'standard input unavailable'}
+  New-Object IO.FileStream($handle,[IO.FileAccess]::Read,65536,$false)
+}
+`
+
 // Convert the already-validated tar.gz to an ordinary ZIP stream. Windows 10
 // includes .NET ZipFile even on releases predating the bundled tar.exe.
 func windowsBundleZIP(source io.Reader) (io.ReadCloser, <-chan error) {
@@ -217,6 +247,20 @@ func writeWindowsBundleZIP(destination io.Writer, source io.Reader) error {
 	defer gz.Close()
 	tarReader := tar.NewReader(gz)
 	zipWriter := zip.NewWriter(destination)
+	// Stored entries would send the runtime uncompressed, about two and a half
+	// times the offline bundle. The fastest Deflate level keeps the transfer near
+	// the bundle size while staying well ahead of a phone's uplink. Entries are
+	// written one at a time, so a single compressor is reset for each.
+	var compressor *flate.Writer
+	zipWriter.RegisterCompressor(zip.Deflate, func(w io.Writer) (io.WriteCloser, error) {
+		if compressor == nil {
+			var err error
+			compressor, err = flate.NewWriter(w, flate.BestSpeed)
+			return compressor, err
+		}
+		compressor.Reset(w)
+		return compressor, nil
+	})
 	for {
 		header, err := tarReader.Next()
 		if err == io.EOF {
@@ -231,7 +275,7 @@ func writeWindowsBundleZIP(destination io.Writer, source io.Reader) error {
 		if header.Typeflag != tar.TypeReg && header.Typeflag != tar.TypeRegA {
 			return errors.New("Windows 部署包不支持链接")
 		}
-		entry, err := zipWriter.CreateHeader(&zip.FileHeader{Name: strings.TrimPrefix(header.Name, "./"), Method: zip.Store})
+		entry, err := zipWriter.CreateHeader(&zip.FileHeader{Name: strings.TrimPrefix(header.Name, "./"), Method: zip.Deflate})
 		if err != nil {
 			return err
 		}
@@ -242,20 +286,37 @@ func writeWindowsBundleZIP(destination io.Writer, source io.Reader) error {
 }
 
 func windowsUploadScript(release string) string {
-	return windowsDirectoryHelpers() + `
+	return windowsDirectoryHelpers() + windowsStandardInputHelper + `
 $release=` + powershellQuote(release) + `;Assert-NoReparse $release
 $archive=[IO.Path]::Combine($release,'payload.zip')
 $file=New-Object IO.FileStream($archive,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
-try {[Console]::OpenStandardInput().CopyTo($file)} finally {$file.Dispose()}
+try {$stdin=Open-StandardInput;try {$stdin.CopyTo($file,65536)} finally {$stdin.Dispose()}} finally {$file.Dispose()}
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 try {[IO.Compression.ZipFile]::ExtractToDirectory($archive,$release)} finally {[IO.File]::Delete($archive)}
 `
 }
 
+// windowsUploadError explains a failed upload without forwarding remote error
+// text: whether the local bundle, the connection, or the remote write and
+// extraction failed decides what the user should check before retrying.
+func windowsUploadError(runErr, convertErr error) string {
+	var exit *ssh.ExitError
+	switch {
+	// Conversion also stops with io.ErrClosedPipe once a failed upload closes
+	// the stream; that is a consequence, not the cause.
+	case convertErr != nil && !errors.Is(convertErr, io.ErrClosedPipe):
+		return "无法读取本地 Windows 部署包，请重新安装完整发行包后重试；当前版本未变更"
+	case errors.As(runErr, &exit):
+		return "远程 Windows 写入或解压部署包失败；请检查系统盘剩余空间，以及安全软件是否拦截或隔离了部署文件；当前版本未变更"
+	default:
+		return "上传 Windows 部署包时 SSH 连接中断或远程 PowerShell 未正常结束；请检查网络和 SSH 服务后重试；当前版本未变更"
+	}
+}
+
 func windowsSecretScript(release string) string {
-	return windowsDirectoryHelpers() + `
+	return windowsDirectoryHelpers() + windowsStandardInputHelper + `
 $release=` + powershellQuote(release) + `;Assert-NoReparse $release
-$reader=New-Object IO.StreamReader([Console]::OpenStandardInput(),[Text.Encoding]::UTF8)
+$reader=New-Object IO.StreamReader((Open-StandardInput),[Text.Encoding]::UTF8)
 $files=$reader.ReadToEnd()|ConvertFrom-Json
 foreach ($name in @('server.pem','server.key','ca.pem','config.json')) {
   $target=[IO.Path]::Combine($release,$name);Assert-NoReparse $target
@@ -292,13 +353,20 @@ func deployWindows(c *ssh.Client, request Request, identity Identity, cert, key,
 		return result, errors.New("无法读取部署包大小")
 	}
 	progress.report(20, "上传并解压安装包")
+	// Windows unpacks only after the whole archive has arrived, and antivirus
+	// scanning of the new files and the runtime's first start can keep a command
+	// silent past the stall timeout. Keepalive replies show that the server is
+	// still answering; a dead peer stops replying, so stall detection still
+	// fails it promptly, and the staging budget bounds the phase.
+	stopKeepalive := keepAlive(c, stagingKeepalive)
+	defer stopKeepalive()
 	upload := &uploadProgressReader{reader: bundle, total: info.Size(), report: progress.report}
 	stream, converted := windowsBundleZIP(upload)
 	_, err = run(windowsUploadScript(paths.Release), stream)
 	_ = stream.Close()
 	convertErr := <-converted
 	if err != nil || convertErr != nil {
-		return result, staged("上传或解压 Windows 部署包失败；当前版本未变更")
+		return result, staged(windowsUploadError(err, convertErr))
 	}
 	progress.report(78, "写入安全配置")
 	cfg, _ := json.Marshal(map[string]any{"listen": fmt.Sprintf("0.0.0.0:%d", request.GRPCPort), "cert": "server.pem", "key": "server.key", "ca": "ca.pem", "runtime": "runtime/misaka-runtime.exe", "max_concurrency": 2, "queue_capacity": 64})
@@ -321,6 +389,9 @@ func deployWindows(c *ssh.Client, request Request, identity Identity, cert, key,
 	if !stopStaging() {
 		return result, errStagingExpired
 	}
+	// Activation is bounded by stall detection alone; keepalives must not hold
+	// the connection open while a service step hangs.
+	stopKeepalive()
 	progress.report(90, "启动 Sisters")
 	err = activateWindows(run, paths, func() error {
 		progress.report(94, "验证安全连接")

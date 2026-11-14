@@ -18,6 +18,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 	"unicode"
@@ -37,6 +38,9 @@ const (
 	// Upload and self-checks change nothing that is active, so stopping them
 	// at this budget always leaves the current version in place.
 	stagingBudget = 15 * time.Minute
+	// Remote steps that work without output send keepalives at this interval,
+	// well within stallTimeout.
+	stagingKeepalive = 30 * time.Second
 )
 
 var errStagingExpired = errors.New("上传与自检超过 15 分钟仍未完成，已中止；当前版本未变更。请在网络更稳定时重试")
@@ -66,6 +70,38 @@ func (c *stallConn) Write(p []byte) (int, error) {
 		c.Conn.SetDeadline(time.Now().Add(c.idle))
 	}
 	return n, e
+}
+
+// keepAlive asks the server for a reply every interval until stop is called, so
+// a remote command that works without output does not look like a stalled
+// transfer. Each request waits for its reply before the next is sent: a dead
+// peer never answers, traffic stops, and stall detection closes the connection
+// as before. stop may be called more than once.
+func keepAlive(c ssh.Conn, interval time.Duration) (stop func()) {
+	done := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+			}
+			select {
+			case <-done:
+				return
+			default:
+			}
+			// Servers answer requests they do not recognize with a failure
+			// message, which shows they are alive just as well.
+			if _, _, err := c.SendRequest("keepalive@openssh.com", true, nil); err != nil {
+				return
+			}
+		}
+	}()
+	var once sync.Once
+	return func() { once.Do(func() { close(done) }) }
 }
 
 type Request struct {
