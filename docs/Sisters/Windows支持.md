@@ -1,6 +1,6 @@
-# Windows Sisters（0.4.0）
+# Windows Sisters（0.4.1）
 
-0.4.0 新增 Windows 10 及以上的 **x64 / amd64** Sisters 实现，不支持 Windows 7/8/8.1、32 位 Windows 或 Windows arm64。每份完整 LastOrder 携带 Linux/macOS arm64/x64 与 Windows x64 共五种同版本离线包；0.3.2 及更早安装包不包含 Windows Sisters。本文描述已[公开发布的 0.4.0+13](https://github.com/poppinzhang/MisakaNetwork/releases/tag/0.4.0) 的实现与部署要求，全平台预构建、正式构建和 Windows 原生 CI 证据见 [0.4.0 发布记录](../releases/0.4.0.md)。
+0.4.0 新增 Windows 10 及以上的 **x64 / amd64** Sisters 实现，不支持 Windows 7/8/8.1、32 位 Windows 或 Windows arm64；0.4.1 修复了 Win32-OpenSSH 上传与写入配置停滞并已[公开发布](https://github.com/poppinzhang/MisakaNetwork/releases/tag/0.4.1)。每份完整 LastOrder 携带 Linux/macOS arm64/x64 与 Windows x64 共五种同版本离线包；0.3.2 及更早安装包不包含 Windows Sisters。0.4.1 全平台预构建、正式 Tag 构建与 Windows 原生 CI 证据见 [0.4.1 发布记录](../releases/0.4.1.md)（0.4.0 交付记录见 [0.4.0 发布记录](../releases/0.4.0.md)）。
 
 ## 机器准备
 
@@ -62,7 +62,7 @@
 
 原生 SCM 用例只允许在没有现存 `MisakaSisters` 服务的隔离管理员环境运行，不接管用户服务。它使用随机目录与虚构 runtime，验证中文/空格/单引号路径、普通及悬空 Junction 拒绝、虚拟账户 SID、证书可读不可写、临时目录可写、mTLS 健康检查、失败恢复及首次失败删除；不使用实际账号或订单。
 
-0.4.1 的上传停滞修复另有 Windows 原生回归（`internal/control/deploy_stdin_windows_test.go`）：按 Win32-OpenSSH 的方式启动 PowerShell，标准输入为以 `FILE_FLAG_OVERLAPPED` 打开、4 KiB 缓冲的命名管道，进程只继承三个标准句柄；脚本开始后再分段间歇写入，使读取方反复遇到空管道。用例覆盖标准输入辅助函数、上传解压与写入私有配置三个生产脚本，并记录 .NET 控制台流在同样条件下停滞（若将来的 Windows 更新不再停滞则跳过而非失败）。用例不经过 `cmd.exe /c` 与真实 sshd，只在 Windows CI 作业运行（已于 0.4.1 标签前预构建 [43633472727](https://github.com/poppinzhang/MisakaNetwork/actions/runs/43633472727/job/132565093627) 的 Windows Server 2022 作业中非缓存执行通过）；本地 macOS 已完成全量 Go race/vet 与 Windows x64 测试程序交叉编译、vet，未在本机执行这些 Windows 测试。
+0.4.1 的上传停滞修复另有 Windows 原生回归（`internal/control/deploy_stdin_windows_test.go`）：按 Win32-OpenSSH 的方式启动 PowerShell，标准输入为以 `FILE_FLAG_OVERLAPPED` 打开、4 KiB 缓冲的命名管道，进程只继承三个标准句柄；脚本开始后再分段间歇写入，使读取方反复遇到空管道。用例覆盖标准输入辅助函数、上传解压与写入私有配置三个生产脚本，并记录 .NET 控制台流在同样条件下停滞（若将来的 Windows 更新不再停滞则跳过而非失败）。用例不经过 `cmd.exe /c` 与真实 sshd，只在 Windows CI 作业运行（已在 0.4.1 标签前预构建 [43633472727](https://github.com/poppinzhang/MisakaNetwork/actions/runs/43633472727/job/132565093627) 与正式构建 [43636837211](https://github.com/poppinzhang/MisakaNetwork/actions/runs/43636837211/job/132575462778) 的 Windows Server 2022 作业中均以非缓存方式执行通过；正式构建另完成全平台重建、8 项 `windows/amd64` mTLS 冒烟与 12 个公开资产核验）；本地 macOS 已完成全量 Go race/vet 与 Windows x64 测试程序交叉编译、vet，未在本机执行这些 Windows 测试。
 
 可选真机用例 `internal/control/live_windows_ssh_test.go` 从控制端通过与生产相同的 `x/crypto/ssh` 连接真实 Windows OpenSSH，主机、账号与密钥只经环境变量（`MISAKA_TEST_WINDOWS_SSH` 等，见文件注释）传入，未设置时跳过，CI 不运行；完整部署用例另需 `MISAKA_TEST_WINDOWS_SSH_DEPLOY=1`，拒绝在已有 `MisakaSisters` 服务或 20001 端口被占用的主机运行，结束后删除测试服务与独立目录。2026-11-15 在一台 Windows 11（build 26200，内置 OpenSSH_9.5p2 for Windows，默认 `cmd.exe`，Windows PowerShell 5.1 / .NET Framework 4.8.1，Defender 实时保护开启）开发机上，从 macOS 运行的结果：
 
