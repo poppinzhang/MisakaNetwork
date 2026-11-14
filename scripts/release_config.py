@@ -2,9 +2,9 @@
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = "0.4.0"
-BUILD = 13
-RELEASE_DATE = "2026-11-14"
+VERSION = "0.4.1"
+BUILD = 14
+RELEASE_DATE = "2026-11-15"
 BILI_VERSION = "2.15.18"
 TARGETS = ("linux-amd64", "linux-arm64", "macos-amd64", "macos-arm64", "windows-amd64")
 APP_TARGETS = ("macos-amd64", "macos-arm64", "windows-amd64", "android-arm64", "android-amd64")

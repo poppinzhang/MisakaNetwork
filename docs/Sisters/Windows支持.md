@@ -38,7 +38,7 @@
 
 ### 0.4.0 上传停滞问题
 
-0.4.0 的上传脚本直接用 `[Console]::OpenStandardInput()` 读取数据。在真实 Win32-OpenSSH 会话中，读取一旦追上网络传入的数据就会停滞，约 2 分钟后连接被停滞检测中断，界面显示「上传或解压 Windows 部署包失败；当前版本未变更」。问题位于远程 Windows 一侧，与使用 Android、macOS 还是 Windows 管理端无关；写入私有配置的步骤使用同一读取方式，存在同样隐患。0.4.0 的 CI 以匿名管道直接启动 PowerShell，没有覆盖这一条件。修复目前位于源码 `unstaged`，随后续版本发布后才对用户生效。
+0.4.0 的上传脚本直接用 `[Console]::OpenStandardInput()` 读取数据。在真实 Win32-OpenSSH 会话中，读取一旦追上网络传入的数据就会停滞，约 2 分钟后连接被停滞检测中断，界面显示「上传或解压 Windows 部署包失败；当前版本未变更」。问题位于远程 Windows 一侧，与使用 Android、macOS 还是 Windows 管理端无关；写入私有配置的步骤使用同一读取方式，存在同样隐患。0.4.0 的 CI 以匿名管道直接启动 PowerShell，没有覆盖这一条件。修复随统一版本 [0.4.1](../releases/0.4.1.md) 交付，安装新版 LastOrder 并重新部署后才对用户生效；0.4.1 的构建与发布状态以该记录为准。
 
 一台 Windows 11 开发机上的三次 0.4.0 部署留下了实际现场：每次都在 `%ProgramData%\MisakaNetwork\Sisters\releases` 下留下未启用的版本目录，其中 `payload.zip` 为 0 字节且仍被占用；对应的 `cmd.exe` 与 `powershell.exe` 在一个多小时后仍在运行。读取在第一段数据之后就停住（首段数据仍在 `FileStream` 缓冲中，未写入磁盘），而 sshd 把会话作业对象的句柄交给了 `cmd.exe`，`cmd.exe` 又在等待卡住的 PowerShell，所以 SSH 会话结束也不会回收它们。这些进程不影响已运行的服务，也不妨碍修复版重新部署；需要释放内存或删除这些版本目录时，重启机器，或结束命令行含 `-EncodedCommand`、父进程为 `cmd.exe` 的对应 `powershell.exe`，再在核对服务路径后删除目录。
 
@@ -62,7 +62,7 @@
 
 原生 SCM 用例只允许在没有现存 `MisakaSisters` 服务的隔离管理员环境运行，不接管用户服务。它使用随机目录与虚构 runtime，验证中文/空格/单引号路径、普通及悬空 Junction 拒绝、虚拟账户 SID、证书可读不可写、临时目录可写、mTLS 健康检查、失败恢复及首次失败删除；不使用实际账号或订单。
 
-`unstaged` 的上传停滞修复另有 Windows 原生回归（`internal/control/deploy_stdin_windows_test.go`）：按 Win32-OpenSSH 的方式启动 PowerShell，标准输入为以 `FILE_FLAG_OVERLAPPED` 打开、4 KiB 缓冲的命名管道，进程只继承三个标准句柄；脚本开始后再分段间歇写入，使读取方反复遇到空管道。用例覆盖标准输入辅助函数、上传解压与写入私有配置三个生产脚本，并记录 .NET 控制台流在同样条件下停滞（若将来的 Windows 更新不再停滞则跳过而非失败）。用例不经过 `cmd.exe /c` 与真实 sshd，只在 Windows CI 作业运行；本地 macOS 已完成全量 Go race/vet 与 Windows x64 测试程序交叉编译、vet，未在本机执行这些 Windows 测试。
+0.4.1 的上传停滞修复另有 Windows 原生回归（`internal/control/deploy_stdin_windows_test.go`）：按 Win32-OpenSSH 的方式启动 PowerShell，标准输入为以 `FILE_FLAG_OVERLAPPED` 打开、4 KiB 缓冲的命名管道，进程只继承三个标准句柄；脚本开始后再分段间歇写入，使读取方反复遇到空管道。用例覆盖标准输入辅助函数、上传解压与写入私有配置三个生产脚本，并记录 .NET 控制台流在同样条件下停滞（若将来的 Windows 更新不再停滞则跳过而非失败）。用例不经过 `cmd.exe /c` 与真实 sshd，只在 Windows CI 作业运行；本地 macOS 已完成全量 Go race/vet 与 Windows x64 测试程序交叉编译、vet，未在本机执行这些 Windows 测试。
 
 可选真机用例 `internal/control/live_windows_ssh_test.go` 从控制端通过与生产相同的 `x/crypto/ssh` 连接真实 Windows OpenSSH，主机、账号与密钥只经环境变量（`MISAKA_TEST_WINDOWS_SSH` 等，见文件注释）传入，未设置时跳过，CI 不运行；完整部署用例另需 `MISAKA_TEST_WINDOWS_SSH_DEPLOY=1`，拒绝在已有 `MisakaSisters` 服务或 20001 端口被占用的主机运行，结束后删除测试服务与独立目录。2026-11-15 在一台 Windows 11（build 26200，内置 OpenSSH_9.5p2 for Windows，默认 `cmd.exe`，Windows PowerShell 5.1 / .NET Framework 4.8.1，Defender 实时保护开启）开发机上，从 macOS 运行的结果：
 
