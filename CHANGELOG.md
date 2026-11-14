@@ -4,7 +4,7 @@
 
 ## 0.3.1 — 2026-11-14
 
-发布准备：统一版本 **0.3.1+11**，包含扫码登录自动检测、登录会话与例行账号巡检协调，并修复 Android 扫码登录无法生成二维码及补齐 Android 依赖集 CI 回归检查；待通过 GitHub Actions 完成全平台构建、核验并公开发布，详情见 [0.3.1 记录](docs/releases/0.3.1.md)。内嵌 biliTickerBuy 保持 **2.15.18**。
+交付状态：统一版本 **0.3.1+11** 已通过 GitHub Actions（[43576574662](https://github.com/poppinzhang/MisakaNetwork/actions/runs/43576574662)）完成所有已支持平台构建、清单与校验检查，并公开为 [正式 Release](https://github.com/poppinzhang/MisakaNetwork/releases/tag/0.3.1)（标签 `0.3.1`，提交 `d2fba649bd72cea53f758b8d36937f6a5c090c41`，共 12 个资产、`Latest`）。详情与各平台安装包校验信息见 [0.3.1 记录](docs/releases/0.3.1.md)。内嵌 biliTickerBuy 保持 **2.15.18**。
 
 ### 功能
 
@@ -20,7 +20,7 @@
 - 各组件、平台版本声明与构建号统一更新为 **0.3.1+11**（Sisters、control/helper、Python runtime、LastOrder、Windows PE 资源与测试基线同步更新），并为所有已支持平台与架构重新准备构建。
 - `verify.yml` 与 `package.yml` 的 Android 作业先按 `runtime/requirements-android.lock` 建立独立环境，断言包含 qrcode 与 PyPNG 且不含 Pillow，再运行全部 runtime 测试，避免含 Pillow 的桌面依赖掩盖同类问题。
 - 扫码自动检测新增 26 项界面回归与 14 项例行巡检调度回归；二维码编码修复新增工厂选择、缺组件报错及无 Pillow 环境下真实生成登录/付款 PNG 与二维码矩阵比对回归；运行时覆盖单次查询、平台状态与过期判定、异常分类、身份校验、TLS 默认验证和禁止重定向，并用真实 `Set-Cookie → RequestsCookieJar` 解析核对域、路径、过期和重名。扫码 Cookie 扁平化前仅保留显式根域、根路径且未过期的候选，拒绝合格候选重名，不扩大 host-only 或较窄路径的使用范围。
-- 按接入安全约束复核嵌入适配：上游 v2.15.18 / `227ebf73f5af3eec0019984a7cbcb722977453e8`、vendor 快照、导入白名单、依赖锁定、`standard` 下单参数、空通知与无 Web UI/Gradio 约束均未改变；编码只在内存处理链接，不访问该链接、不落盘，`qr_poll` 只请求固定官方 HTTPS 登录状态接口并保持默认证书校验与禁止重定向。详见 [biliTickerBuy 运行时](docs/biliTickerBuy运行时.md#登录二维码编码修复复核未发布) 与 [自动扫码轮询适配](docs/biliTickerBuy运行时.md#自动扫码轮询适配复核未发布)。
+- 按接入安全约束复核嵌入适配：上游 v2.15.18 / `227ebf73f5af3eec0019984a7cbcb722977453e8`、vendor 快照、导入白名单、依赖锁定、`standard` 下单参数、空通知与无 Web UI/Gradio 约束均未改变；编码只在内存处理链接，不访问该链接、不落盘，`qr_poll` 只请求固定官方 HTTPS 登录状态接口并保持默认证书校验与禁止重定向。GitHub Actions [43576574662](https://github.com/poppinzhang/MisakaNetwork/actions/runs/43576574662) 已在 `package / android` 独立无 Pillow 环境完成 runtime 回归并产出全平台包与校验清单元数据。详见 [biliTickerBuy 运行时](docs/biliTickerBuy运行时.md#登录二维码编码修复复核) 与 [自动扫码轮询适配](docs/biliTickerBuy运行时.md#自动扫码轮询适配复核)。
 - 0.3.1+11 本地源码验证（2026-11-14）：`flutter analyze` 无问题，`flutter test` 910 项通过、2 项可选测试跳过；`go test -race ./...`、`go vet ./...`、110 项脚本测试与 `collect_licenses.py --check` 通过；runtime 测试在 Android 锁定依赖环境通过 105 项（跳过 3 项）、完整桌面依赖环境通过 106 项（跳过 2 项）。尚未构建或发布新安装包，未进行真实平台扫码、真机前后台切换或真实下单付款验收。
 - 升级后须重新部署全部 Sisters 至 `0.3.1`（统一版本校验），升级前先核对已有订单并停止或等待远端任务结束；Android 沿用长期发布密钥且构建号增至 `11`，可直接覆盖升级 `0.2.1`/`0.2.3`/`0.3.0` 正式签名版本（从 `0.2.0` 等测试签名 APK 升级仍需卸载重装）；macOS 沿用 `0.3.0` 启用的独立 `macos-vault-v1` 资料目录（从 `0.2.3` 及更早首次升级仍不迁移旧资料），因 ad-hoc 签名更新仍可能再次提示钥匙串授权。
 
