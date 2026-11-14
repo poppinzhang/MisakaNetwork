@@ -128,7 +128,7 @@ void main() {
         expectUnifiedCard();
         expect(find.text('测试部署失败'), findsNothing);
         expect(find.text('在线'), findsOneWidget);
-        expect(find.text('Sisters 0.3.1'), findsOneWidget);
+        expect(find.text('Sisters 0.3.2'), findsOneWidget);
         expect(find.text('并发上限 2'), findsOneWidget);
       } finally {
         await tester.pumpWidget(const SizedBox.shrink());
@@ -197,7 +197,7 @@ void main() {
         await tester.pumpAndSettle();
         final id = h.controller.tencentMachine(resourceId)!.id;
         h.gateway.statusHandler = (_) async => AgentStatus(
-          version: '0.3.1',
+          version: '0.3.2',
           biliVersion: '2.15.18',
           platform: 'linux/arm64',
           runtimeReady: false,

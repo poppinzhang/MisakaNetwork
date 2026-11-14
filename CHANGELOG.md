@@ -2,13 +2,14 @@
 
 ## unstaged
 
+## 0.3.2 — 2026-11-14
+
+- 发布准备：统一版本 **0.3.2+12**（Sisters、部署 helper 与运行时 `0.3.2`，构建号 `12`，内嵌 biliTickerBuy `v2.15.18`），补充 [0.3.2 发布记录](docs/releases/0.3.2.md)，待推送 Tag `0.3.2` 后由 GitHub Actions 完成全平台构建、核验并公开发布。
 - 修复 Android 读取演出、购票人和地址时缺失 HTTPX/HTTP2 依赖的问题；补齐与桌面相同版本的纯 Python 依赖，自检实际构造标准 HTTP/2 客户端，避免仅导入模块就误报可用。
 - Android 查询只协商可解码的 gzip/deflate，避免上游固定声明 Brotli/Zstandard 却未携带解码器；每次内嵌调用独立初始化并关闭上游 HTTP 连接、数据库和临时状态，恢复环境，覆盖连续调用与异常清理。
-- 补充真实引擎客户端链路、TLS、原生二维码与配置回归，增加 API 36 模拟器 CI 和 APK Python 模块、依赖、CA、16 KB ELF/ZIP 对齐校验。复核固定上游、标准 TLS、内存 Cookie、空通知和无 Web UI 限制，详见 [Android 兼容性排查](docs/LastOrder/Android兼容性排查.md)。未更新项目版本或发布安装包，未进行真实账号或购票验收。
-
-- 本地验证：Android 依赖 runtime 112 项通过/3 项跳过，桌面依赖 106 项通过/9 项跳过；脚本 122 项通过，Flutter analyze 与 910 项测试通过（2 项可选跳过），Go race/vet 通过。API 36 arm64 模拟器原生 5 项通过；arm64/x64 测试 APK 构建与 Python/依赖/CA/16 KB 静态检查通过。模拟器为 4 KB 页，未验收 16 KB 真机、x64 实际运行或真实登录下单，未运行远程 CI。
+- 补充真实引擎客户端链路、TLS、原生二维码与配置回归，增加 API 36 模拟器 CI 和 APK Python 模块、依赖、CA、16 KB ELF/ZIP 对齐校验。复核固定上游、标准 TLS、内存 Cookie、空通知和无 Web UI 限制，详见 [Android 兼容性排查](docs/LastOrder/Android兼容性排查.md)。
 - 修复 Android 扫码登录窗口一直停在「正在生成登录二维码…」：`0.3.1` 扫码窗口只在 Flutter 生命周期为 `resumed` 时自动生成、检测和保存，并在等待自动生成期间禁用「重新生成二维码」。Android 在应用仍可见、但分屏或系统/第三方悬浮窗等其他窗口持有输入焦点时报告 `inactive`；此时打开窗口既不请求二维码，也没有可点击的恢复入口。现按可见性处理：`resumed` 与 `inactive` 照常生成、检测和保存，仅 `hidden`/`paused`/`detached`（切到其他应用、窗口最小化等）暂停，恢复可见后立即检查一次；点击「重新生成二维码」「重试连接」「重试保存」、切换登录方式或提交 Cookie 均视为窗口可见，「重新生成二维码」只在自动生成即将开始时短暂禁用。桌面窗口失去焦点但仍可见时同样继续检测。`0.3.1` 的 PyPNG 编码修复本身有效：官方 arm64 APK 在模拟器前台可正常生成登录二维码。详见 [Android 兼容性排查](docs/LastOrder/Android兼容性排查.md#扫码窗口在失去焦点时停在生成中)。
-- 扫码窗口本地验证：`qr_login_test.dart` 新增 4 项生命周期回归（修复前其中 2 项失败），`flutter analyze` 无问题，`flutter test` 914 项通过、2 项可选跳过。API 36 arm64 模拟器上，官方 `0.3.1` arm64 APK（SHA-256 与发布一致）前台生成正常；使用真实内嵌运行时和网络、在窗口创建前将生命周期置为 `inactive`，`0.3.1` 窗口 20 秒内未请求二维码，修复后约 4 秒显示二维码且首次检测返回 `pending`；修复后的测试签名 release APK 前台生成、切到后台再返回均保持同一二维码。未在报告问题的 Pixel 真机复验，导致焦点丢失的具体窗口未确认，未进行真实扫码登录。
+- 发布前验证：递增版本号至 `0.3.2+12` 后，本地 `go test -race ./...`、`go vet ./...`、`python3 scripts/collect_licenses.py --check`、`scripts` 单元测试 122 项、`runtime/tests`（Android 依赖环境 112 项通过/3 项跳过，桌面依赖环境 106 项通过/9 项跳过）、`flutter analyze` 与 `flutter test`（914 项通过/2 项可选跳过）全部通过；专项合入前基线另在 API 36 arm64 模拟器验证原生 5 项、arm64/x64 测试 APK 构建及静态检查，并复现 `0.3.1` 与修复版在 `inactive` 下的扫码生成/轮询行为。尚未在报告问题的 Pixel 真机或 16 KB 真机复验，未进行 x86_64 实际运行或真实账号登录下单验收。
 
 ## 0.3.1 — 2026-11-14
 

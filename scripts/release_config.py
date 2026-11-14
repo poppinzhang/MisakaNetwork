@@ -2,8 +2,8 @@
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = "0.3.1"
-BUILD = 11
+VERSION = "0.3.2"
+BUILD = 12
 RELEASE_DATE = "2026-11-14"
 BILI_VERSION = "2.15.18"
 TARGETS = ("linux-amd64", "linux-arm64", "macos-amd64", "macos-arm64")

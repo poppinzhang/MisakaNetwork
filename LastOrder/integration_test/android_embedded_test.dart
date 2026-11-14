@@ -18,7 +18,7 @@ void main() {
     expect(Platform.isAndroid, isTrue);
     final runtime = LocalRuntime();
     final status = await runtime.call('ping', {});
-    expect(status['version'], '0.3.1');
+    expect(status['version'], '0.3.2');
     expect(status['ready'], isTrue);
     expect(status['bili_version'], '2.15.18');
     final validation = await runtime.call('validate', {'config': {}});
