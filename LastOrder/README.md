@@ -1,6 +1,6 @@
 # LastOrder
 
-MisakaNetwork 的 Flutter 管理台，源码版本 **0.3.2+12**（`0.3.2` 发布准备中）。目标平台为 macOS 15.0+（arm64/x64）、Windows 10+（x64）、Android 16 / API 36（arm64/x64）。当前公开下载与已交付版本见 [0.3.1 发布记录](../docs/releases/0.3.1.md)，[0.3.2 发布记录](../docs/releases/0.3.2.md) 与 [0.3.0 交付记录](../docs/releases/0.3.0.md) 供对照查阅。
+MisakaNetwork 的 Flutter 管理台，版本 **0.3.2+12**。目标平台为 macOS 15.0+（arm64/x64）、Windows 10+（x64）、Android 16 / API 36（arm64/x64）。实际安装包、下载入口与验证边界见 [0.3.2 发布记录](../docs/releases/0.3.2.md) 与 [0.3.1 发布记录](../docs/releases/0.3.1.md)。
 
 提供 Sisters 部署、账号登录、任务创建、分发与监控。基础功能见 [实现文档](../docs/LastOrder/0.1.0实现.md)，账号状态见 [Cookie 生命周期](../docs/LastOrder/Cookie生命周期.md)，新增平台见 [Windows 与 Android](../docs/LastOrder/Windows与Android.md)。
 

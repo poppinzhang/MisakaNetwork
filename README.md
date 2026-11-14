@@ -26,7 +26,7 @@
 
 ## 快速开始
 
-**当前公开发布版本为 0.3.1，可前往[正式下载页](https://github.com/poppinzhang/MisakaNetwork/releases/tag/0.3.1)（安装包与升级说明见 [0.3.1 发布记录](docs/releases/0.3.1.md)）。**
+**当前公开发布版本为 0.3.2，可前往[正式下载页](https://github.com/poppinzhang/MisakaNetwork/releases/tag/0.3.2)（安装包与升级说明见 [0.3.2 发布记录](docs/releases/0.3.2.md)）。**
 
 **1 · 安装 LastOrder。** 根据[支持的平台](#支持的平台)选择安装包：
 
@@ -34,7 +34,7 @@
 - **Windows**：完整解压 ZIP 后打开 `LastOrder/LastOrder.exe`，不要只复制 EXE 文件。
 - **Android**：通常选择 arm64 APK，通过手机的系统安装器安装。
 
-当前 macOS 包尚未通过 Apple 公证，Windows 包未签名，Android 包使用长期发布密钥签名；安装时可能出现系统提示。具体安装说明见 [0.3.1 安装说明](docs/releases/0.3.1.md#安装包)。
+当前 macOS 包尚未通过 Apple 公证，Windows 包未签名，Android 包使用长期发布密钥签名；安装时可能出现系统提示。具体安装说明见 [0.3.2 安装说明](docs/releases/0.3.2.md#安装包)。
 
 **2 · 添加执行任务的机器。** 准备一台符合要求的 macOS 或 Linux 机器，在「机器管理」填写连接地址、用户名和密码，也可以选择私钥文件，或者在「公有云部署」录入并验证云凭据后直接创建云服务器。点击「安全部署」后会在后台安装 Sisters，首次连接会自动记住服务器身份并继续部署，之后连接仍严格核对主机身份。
 
@@ -114,7 +114,7 @@ Windows 和 Android 目前可用于管理任务，尚不支持在这些系统上
 
 ## 更多说明
 
-- [0.3.1 发布与升级记录](docs/releases/0.3.1.md)：0.3.1 下载入口、安装包说明、验证范围与升级注意事项（历史交付见 [0.3.0 交付记录](docs/releases/0.3.0.md)）。
+- [0.3.2 发布与升级记录](docs/releases/0.3.2.md)：0.3.2 下载入口、安装包说明、验证范围与升级注意事项（历史交付见 [0.3.1 发布记录](docs/releases/0.3.1.md) 与 [0.3.0 交付记录](docs/releases/0.3.0.md)）。
 - [更新记录](CHANGELOG.md)：各版本变化与尚未发布的改动。
 - [开发与维护指南](AGENTS.md)：供开发者和 AI Agent 查阅的环境、测试、打包与实现文档。
 

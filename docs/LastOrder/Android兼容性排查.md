@@ -1,6 +1,6 @@
 # Android 内嵌运行时兼容性排查（0.3.2）
 
-2026-11-14 针对 LastOrder Android 的 biliTickerBuy 调用链进行源码、离线模拟与 API 36 模拟器检查。上游保持 v2.15.18 / `227ebf73f5af3eec0019984a7cbcb722977453e8`，不更新 vendor 快照；相关修复已并入主分支并随 `0.3.2+12` 进入全平台发布准备。Android 只负责登录、查询和任务配置，实际抢票仍交给远程 Sisters。
+2026-11-14 针对 LastOrder Android 的 biliTickerBuy 调用链进行源码、离线模拟与 API 36 模拟器检查。上游保持 v2.15.18 / `227ebf73f5af3eec0019984a7cbcb722977453e8`，不更新 vendor 快照；相关修复已随 [0.3.2 Release](../releases/0.3.2.md) 完成全平台打包与公开发布。Android 只负责登录、查询和任务配置，实际抢票仍交给远程 Sisters。
 
 ## 已确认问题与修复
 
@@ -53,7 +53,7 @@ Cookie、购票人、地址和配置仍通过内存及已认证通道处理；�
 
 ## 验证边界
 
-上述修复已合并至 `0.3.2+12` 发布准备，GitHub Actions 构建与发布尚在进行。源码测试、模拟响应、模拟器测试和 APK 静态检查分别记录，不等同于 Android 真机、全部设备/页大小、x86_64 实际运行或真实账号登录、下单、付款、出票验收。Flutter 的请求超时不会强制中断共享 Python 解释器；网络超时和串行队列仍是其现有运行边界。
+上述修复已随 `0.3.2+12` 完成 GitHub Actions（[43588004693](https://github.com/poppinzhang/MisakaNetwork/actions/runs/43588004693)）全平台打包、APK 静态校验与公开发布。源码测试、模拟响应、模拟器测试和 APK 静态检查分别记录，不等同于 Android 真机、全部设备/页大小、x86_64 实际运行或真实账号登录、下单、付款、出票验收。Flutter 的请求超时不会强制中断共享 Python 解释器；网络超时和串行队列仍是其现有运行边界。
 
 ## 本地验证结果（2026-11-14）
 
@@ -72,4 +72,4 @@ Cookie、购票人、地址和配置仍通过内存及已认证通道处理；�
 
 16 KB 检查分别核对 ELF 的 LOAD 段和 APK 内可直接映射的库文件数据偏移，依据 [Android 官方页大小说明](https://developer.android.com/guide/practices/page-sizes)。Chaquopy 内嵌归档中运行时解包的库只做 ELF 对齐检查。静态通过不等于 16 KB 真机已运行。
 
-公开版本在 `0.3.2` 发布核验完成前仍以 [0.3.1 发布记录](../releases/0.3.1.md) 为准。
+公开版本状态、校验和与验证边界见 [0.3.2 发布记录](../releases/0.3.2.md)。
