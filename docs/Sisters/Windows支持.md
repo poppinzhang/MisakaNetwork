@@ -1,6 +1,6 @@
-# Windows Sisters（0.4.0，发布准备）
+# Windows Sisters（0.4.0）
 
-Sisters 新增 Windows 10 及以上的 **x64 / amd64** 实现，不支持 Windows 7/8/8.1、32 位 Windows 或 Windows arm64。当前公开的 0.3.2 包仍只包含 Linux/macOS 四种 Sisters 包；本文描述 `0.4.0+13` 源码，待全平台原生构建和正式发布，不能把现有安装包视为已支持 Windows；当前进度见 [0.4.0 发布记录](../releases/0.4.0.md)。
+0.4.0 新增 Windows 10 及以上的 **x64 / amd64** Sisters 实现，不支持 Windows 7/8/8.1、32 位 Windows 或 Windows arm64。每份完整 LastOrder 携带 Linux/macOS arm64/x64 与 Windows x64 共五种同版本离线包；0.3.2 及更早安装包不包含 Windows Sisters。本文描述 `0.4.0+13` 的实现与部署要求，全平台预构建和 Windows 原生 CI 证据见 [0.4.0 发布记录](../releases/0.4.0.md)，正式交付以实际 Release Assets 及其清单为准。
 
 ## 机器准备
 
@@ -38,16 +38,16 @@ Sisters 新增 Windows 10 及以上的 **x64 / amd64** 实现，不支持 Window
 
 本地验证和实际原生验收分别记录；Windows 测试包含 SCM 控制与 Job Object 进程树用例，CI Windows 作业运行全量 Go 测试和真实离线运行时冒烟。CI 使用 Windows Server runner，通过也不能替代 Windows 10 实机安装、自启动、SSH 部署/重部署、故障回滚及断连后继续服务的验收。未执行真实账号登录、下单或出票测试，不把源码和模拟验证表述为发行二进制或业务安全验收。
 
-2026-11-14 合入前基线验证记录（当时版本声明为 `0.3.2`，不等同于 `0.4.0` 发布验证；本版结果以 [发布记录](../releases/0.4.0.md) 为准）：
+2026-11-14 的 `0.4.0+13` 验证记录（标签前预构建 [43595038721](https://github.com/poppinzhang/MisakaNetwork/actions/runs/43595038721)，完整范围以 [发布记录](../releases/0.4.0.md) 为准）：
 
 | 范围 | 结果 |
 | --- | --- |
-| Go 源码 | macOS 宿主全量 `go test -race ./...`、`go vet ./...` 通过 |
-| Windows 编译 | 全项目 Windows x64 构建、测试程序交叉编译与目标平台 vet 通过；未执行 Windows 测试二进制 |
-| Flutter | `flutter analyze` 通过；915 项测试通过、2 项可选测试跳过，含 Windows 部署提示/状态及桌面与窄屏布局 |
-| 打包脚本 | 133 项测试通过，含第五种包、Windows x64 EXE、运行时清单及错误架构/缺文件拒绝 |
-| 桌面 runtime | 锁定依赖环境 106 项通过、9 项 Android 专用依赖测试跳过；标准 TLS 和空通知限制回归通过 |
-| 现有平台回归 | 临时构建匹配版本的 macOS arm64 runtime，4 项离线检查与 8 项真实 Sisters + runtime 回环 mTLS 冒烟通过；不是完整 LastOrder 发行包 |
-| Windows 原生与发行 | 已添加真实 PowerShell 脚本解析和可选 SCM 集成测试，两个 Windows CI 入口设置 `MISAKA_TEST_WINDOWS_SERVICE=1`；本次未运行远程 CI、Windows 10 真机或完整全平台发行构建 |
+| Go 源码与 Windows 原生服务 | 本地全量 Go race/vet 通过；Windows Server CI 全量 Go race/vet、PowerShell 与隔离 SCM 测试通过，覆盖服务账户、权限、mTLS、失败回滚与进程树清理 |
+| Flutter | 本地 macOS analyze 通过、915 项测试通过/2 项跳过；Windows 原生 CI analyze 通过、910 项测试通过/2 项跳过 |
+| 打包脚本 | 本地 135 项通过；Windows CI 113 项通过、22 项 POSIX/macOS 专用测试跳过 |
+| Windows runtime | 117 项中 108 项通过、9 项跳过；4 项离线检查、覆盖 1208 项内容的隐私扫描通过，标准 TLS 与空通知约束保持有效 |
+| Windows Sisters 冒烟 | 真实 Sisters + runtime 的 8 项 `windows/amd64` 回环 mTLS 冒烟通过，版本为 `0.4.0` / biliTickerBuy `2.15.18` |
+| 全平台完整包 | 五种 Sisters、五种 LastOrder 和聚合校验全部通过；正式 Release 从 Tag 全量重建并核验独立产物 |
+| Windows 10 真机与业务 | 未执行真机 SSH 部署、自启动、实际断连场景或真实账号登录、下单、付款与出票验收；Windows Server CI 不代替这些验证 |
 
 原生 SCM 用例只允许在没有现存 `MisakaSisters` 服务的隔离管理员环境运行，不接管用户服务。它使用随机目录与虚构 runtime，验证中文/空格/单引号路径、普通及悬空 Junction 拒绝、虚拟账户 SID、证书可读不可写、临时目录可写、mTLS 健康检查、失败恢复及首次失败删除；不使用实际账号或订单。
