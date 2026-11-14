@@ -5,6 +5,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"compress/gzip"
+	"crypto/rand"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
@@ -13,6 +14,8 @@ import (
 	"strings"
 	"testing"
 	"unicode/utf16"
+
+	"golang.org/x/crypto/ssh"
 )
 
 func windowsBundleFixture(t *testing.T, extras ...*tar.Header) []byte {
@@ -61,8 +64,31 @@ func TestWindowsBundleRejectsFilesystemAliases(t *testing.T) {
 	}
 }
 
-func TestWindowsArchiveConversionPreservesFiles(t *testing.T) {
-	source := windowsBundleFixture(t)
+// tarGzipFiles builds a gzip-compressed tar archive of regular files.
+func tarGzipFiles(t *testing.T, files map[string][]byte) []byte {
+	t.Helper()
+	var buffer bytes.Buffer
+	gz := gzip.NewWriter(&buffer)
+	tarWriter := tar.NewWriter(gz)
+	for name, data := range files {
+		if err := tarWriter.WriteHeader(&tar.Header{Name: name, Size: int64(len(data)), Mode: 0644}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tarWriter.Write(data); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tarWriter.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buffer.Bytes()
+}
+
+func convertWindowsBundle(t *testing.T, source []byte) *zip.Reader {
+	t.Helper()
 	stream, done := windowsBundleZIP(bytes.NewReader(source))
 	data, err := io.ReadAll(stream)
 	stream.Close()
@@ -76,24 +102,100 @@ func TestWindowsArchiveConversionPreservesFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(archive.File) != 3 {
+	return archive
+}
+
+func TestWindowsArchiveConversionPreservesFiles(t *testing.T) {
+	random := make([]byte, 96<<10)
+	if _, err := rand.Read(random); err != nil {
+		t.Fatal(err)
+	}
+	// Several entries share one compressor, which must restart cleanly for each,
+	// including after incompressible data.
+	files := map[string][]byte{
+		"manifest.json":              []byte(`{"version":"test"}`),
+		"sisters.exe":                random,
+		"runtime/misaka-runtime.exe": bytes.Repeat([]byte("MisakaNetwork runtime\n"), 8192),
+		"runtime/_internal/empty":    {},
+		"runtime/_internal/data.bin": random[:4096],
+	}
+	archive := convertWindowsBundle(t, tarGzipFiles(t, files))
+	if len(archive.File) != len(files) {
 		t.Fatalf("lost files: %d", len(archive.File))
 	}
 	for _, file := range archive.File {
+		if file.Method != zip.Deflate {
+			t.Fatalf("%s is not compressed for upload", file.Name)
+		}
 		reader, err := file.Open()
 		if err != nil {
 			t.Fatal(err)
 		}
 		content, err := io.ReadAll(reader)
 		reader.Close()
-		if err != nil || len(content) == 0 {
+		if err != nil || !bytes.Equal(content, files[file.Name]) {
 			t.Fatalf("corrupt converted file: %s", file.Name)
 		}
+		// Upload size, not the stored size, decides how long a slow link takes.
+		if file.Name == "runtime/misaka-runtime.exe" && file.CompressedSize64*10 > file.UncompressedSize64 {
+			t.Fatalf("compressible file not compressed: %d of %d bytes", file.CompressedSize64, file.UncompressedSize64)
+		}
 	}
-	stream, done = windowsBundleZIP(bytes.NewReader(source))
+	if len(convertWindowsBundle(t, windowsBundleFixture(t)).File) != 3 {
+		t.Fatal("bundle fixture lost files")
+	}
+	stream, done := windowsBundleZIP(bytes.NewReader(windowsBundleFixture(t)))
 	stream.Close()
 	if err := <-done; err == nil {
 		t.Fatal("interrupted conversion reported success")
+	}
+}
+
+// Windows PowerShell's console stream never returns from a read once the
+// overlapped pipe Win32-OpenSSH provides as standard input runs empty; the
+// native tests reproduce that pipe. Guard the scripts against regressing to it.
+func TestWindowsStandardInputAvoidsConsoleStream(t *testing.T) {
+	for name, script := range map[string]string{"upload": windowsUploadScript(`C:\release`), "secrets": windowsSecretScript(`C:\release`)} {
+		if strings.Contains(script, "OpenStandardInput") || strings.Contains(strings.ToLower(script), "$input") {
+			t.Fatalf("%s script reads SSH standard input through the console stream", name)
+		}
+		if !strings.Contains(script, windowsStandardInputHelper) || !strings.Contains(script, "Open-StandardInput") {
+			t.Fatalf("%s script does not read the raw standard input handle", name)
+		}
+	}
+	helper := windowsStandardInputHelper
+	if !strings.Contains(helper, "GetStdHandle(-10)") || !strings.Contains(helper, "New-Object IO.FileStream($handle,[IO.FileAccess]::Read,65536,$false)") {
+		t.Fatal("standard input helper must wrap the raw handle in a synchronous FileStream")
+	}
+	// An emitted P/Invoke without PreserveSig is called as an HRESULT method
+	// and returns zero instead of the handle (seen on Windows 11).
+	if !strings.Contains(helper, "SetImplementationFlags([Reflection.MethodImplAttributes]::PreserveSig)") {
+		t.Fatal("emitted GetStdHandle must preserve its native signature")
+	}
+	// Add-Type would compile a DLL into the user's writable temporary directory
+	// and load it into the elevated session.
+	if strings.Contains(helper, "Add-Type") || strings.Contains(helper, "OpenStandardInput") {
+		t.Fatal("standard input helper must not compile code or use the console stream")
+	}
+}
+
+func TestWindowsUploadErrorNamesTheFailedSide(t *testing.T) {
+	local := windowsUploadError(&ssh.ExitError{}, errors.New("gzip: invalid checksum"))
+	remote := windowsUploadError(&ssh.ExitError{}, io.ErrClosedPipe)
+	dropped := windowsUploadError(&ssh.ExitMissingError{}, io.ErrClosedPipe)
+	for _, message := range []string{local, remote, dropped} {
+		if !strings.HasSuffix(message, "当前版本未变更") || strings.Contains(message, "gzip") {
+			t.Fatalf("upload error must be a fixed message that keeps the old version: %q", message)
+		}
+	}
+	if local == remote || remote == dropped || local == dropped {
+		t.Fatal("upload failures are indistinguishable")
+	}
+	if !strings.Contains(local, "本地") || !strings.Contains(remote, "安全软件") || !strings.Contains(dropped, "连接") {
+		t.Fatalf("upload errors name the wrong side: %q / %q / %q", local, remote, dropped)
+	}
+	if windowsUploadError(&ssh.ExitError{}, nil) != remote || windowsUploadError(errors.New("ssh: connection lost"), nil) != dropped {
+		t.Fatal("upload error classification depends on conversion state")
 	}
 }
 
@@ -183,8 +285,17 @@ func TestWindowsActivationRollbackAndHealth(t *testing.T) {
 }
 
 func TestPowerShellEncodingPreservesUnicodeAndFitsDefaultShell(t *testing.T) {
-	scripts := []string{windowsPrepareScript("Sisters", Version+"-0123456789abcdef"), windowsUploadScript(`C:\ProgramData\用户 O'Brien\Sisters`), windowsSecretScript(`C:\ProgramData\用户 O'Brien\Sisters`), windowsPlatformScript}
+	release := `C:\ProgramData\用户 O'Brien\Sisters\releases\` + Version + `-0123456789abcdef`
+	paths := windowsPaths{Root: `C:\ProgramData\用户 O'Brien\Sisters`, Release: release, Temp: `C:\ProgramData\用户 O'Brien\Sisters\tmp`}
+	scripts := []string{windowsPrepareScript("Sisters", Version+"-0123456789abcdef"), windowsUploadScript(release), windowsSecretScript(release), windowsPlatformScript}
+	_ = activateWindows(func(script string, _ io.Reader) (string, error) {
+		scripts = append(scripts, script)
+		return "null", nil
+	}, paths, func() error { return errors.New("force rollback") })
 	for _, script := range scripts {
+		// Measure the command exactly as runPowerShell sends it; cmd.exe, the
+		// default OpenSSH shell, rejects command lines of 8191 characters.
+		script = windowsRemoteScript(script)
 		command := powershellCommand(script)
 		if len(command) >= 8000 {
 			t.Fatalf("PowerShell command too long: %d", len(command))
