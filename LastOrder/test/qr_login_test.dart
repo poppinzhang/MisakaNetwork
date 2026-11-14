@@ -22,6 +22,7 @@ Future<({AppController c, FakeRuntime runtime, MemoryStore store})> mountLogin(
   FakeRuntime? runtime,
   MemoryStore? store,
   Account? account,
+  AppLifecycleState openedIn = AppLifecycleState.resumed,
 }) async {
   tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
   final r = runtime ?? FakeRuntime();
@@ -51,10 +52,21 @@ Future<({AppController c, FakeRuntime runtime, MemoryStore store})> mountLogin(
     ),
   );
   await tester.tap(find.text('打开登录'));
+  // The lifecycle can change between the tap and the dialog's first build.
+  switch (openedIn) {
+    case AppLifecycleState.resumed:
+      break;
+    case AppLifecycleState.inactive:
+      tester.binding.handleAppLifecycleStateChanged(openedIn);
+    default:
+      pauseApp(tester);
+  }
   await tester.pump();
   await tester.pump();
   return (c: c, runtime: r, store: s);
 }
+
+Finder qrButton() => find.widgetWithText(TextButton, '重新生成二维码');
 
 int polls(FakeRuntime runtime) =>
     runtime.calls.where((op) => op == 'qr_poll').length;
@@ -102,6 +114,84 @@ void main() {
       expect(f.runtime.calls, isNot(contains('login_state')));
     },
   );
+
+  testWidgets(
+    'Android inactive (visible without window focus) still generates and polls',
+    (tester) async {
+      // Android reports inactive while the activity is resumed but a split
+      // screen, system or third-party overlay holds window focus. 0.3.1 waited
+      // for resumed here and stayed on "正在生成" with a disabled button.
+      final f = await mountLogin(tester, openedIn: AppLifecycleState.inactive);
+      expect(f.runtime.calls, ['qr_start']);
+      expect(find.text('请使用手机客户端扫码并确认，完成后将自动登录。'), findsOneWidget);
+      expect(find.byType(Image), findsOneWidget);
+      await tester.pump(const Duration(seconds: 2));
+      expect(polls(f.runtime), 1);
+      f.runtime.responses['qr_poll'] = confirmed();
+      await tester.pump(const Duration(seconds: 2));
+      await tester.pumpAndSettle();
+      expect(f.c.state.accounts.single.uid, '123');
+      expect(find.byType(LoginDialog), findsNothing);
+    },
+  );
+
+  testWidgets('losing window focus keeps polling; only hiding pauses it', (
+    tester,
+  ) async {
+    final f = await mountLogin(tester);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    await tester.pump(const Duration(seconds: 2));
+    expect(polls(f.runtime), 1);
+    await tester.pump(const Duration(seconds: 2));
+    expect(polls(f.runtime), 2);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+    await tester.pump(const Duration(minutes: 1));
+    expect(polls(f.runtime), 2);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    await tester.pump();
+    expect(polls(f.runtime), 3);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+    expect(polls(f.runtime), 3);
+    expect(f.runtime.calls.where((op) => op == 'qr_start'), hasLength(1));
+  });
+
+  testWidgets(
+    'opened while hidden says why it waits and the button never dead-ends',
+    (tester) async {
+      final f = await mountLogin(tester, openedIn: AppLifecycleState.paused);
+      expect(f.runtime.calls, isEmpty);
+      expect(find.text('正在生成登录二维码…'), findsNothing);
+      expect(find.text('应用回到前台后将自动生成登录二维码。'), findsOneWidget);
+      // A tap proves the dialog is on screen even if a lifecycle event is late.
+      // Flutter renders no frames while paused, so only the request is visible
+      // here; the image appears once the platform reports visibility.
+      expect(tester.widget<TextButton>(qrButton()).onPressed, isNotNull);
+      await tester.tap(qrButton());
+      await tester.pump();
+      expect(f.runtime.calls, ['qr_start']);
+      resumeApp(tester);
+      await tester.pump();
+      expect(find.byType(Image), findsOneWidget);
+      expect(f.runtime.calls.where((op) => op == 'qr_start'), hasLength(1));
+      // Becoming visible checks once immediately, then keeps the 2 s cadence.
+      expect(polls(f.runtime), 1);
+      await tester.pump(const Duration(seconds: 2));
+      expect(polls(f.runtime), 2);
+    },
+  );
+
+  testWidgets('opened while hidden generates automatically on return', (
+    tester,
+  ) async {
+    final f = await mountLogin(tester, openedIn: AppLifecycleState.paused);
+    await tester.pump(const Duration(minutes: 1));
+    expect(f.runtime.calls, isEmpty);
+    resumeApp(tester);
+    await tester.pump();
+    expect(f.runtime.calls, ['qr_start']);
+    expect(find.byType(Image), findsOneWidget);
+  });
 
   testWidgets('slow calls never overlap or catch up missed timer ticks', (
     tester,

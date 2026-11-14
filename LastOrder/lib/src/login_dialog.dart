@@ -18,24 +18,36 @@ class LoginDialog extends StatefulWidget {
 
 class _LoginDialogState extends State<LoginDialog> with WidgetsBindingObserver {
   static const _pollInterval = Duration(seconds: 2);
+  static const _generating = '正在生成登录二维码…';
+  static const _waitingForApp = '应用回到前台后将自动生成登录二维码。';
   final _cookie = TextEditingController();
   Timer? _timer;
   Uint8List? _qr;
   String? _qrKey, _error;
-  String _status = '正在生成登录二维码…';
+  String _status = _generating;
   Map<String, dynamic>? _candidate;
   int _session = 0, _networkFailures = 0;
-  bool _manual = false, _foreground = true, _inFlight = false;
+  bool _manual = false, _visible = true, _inFlight = false;
   bool _needsQr = true, _polling = false, _holdingChecks = false;
   bool _saving = false, _saveFailed = false, _canRetryPoll = false;
   bool _closed = false;
+
+  /// Whether the dialog is on screen, which is all generating, checking and
+  /// saving need. Android reports `inactive` while the activity is resumed but
+  /// another window holds input focus (split screen, a system or third-party
+  /// overlay), and desktop reports it for an unfocused window; the QR stays
+  /// visible and scannable. Only hidden, paused and detached pause the flow.
+  static bool _isVisible(AppLifecycleState? state) =>
+      state == null ||
+      state == AppLifecycleState.resumed ||
+      state == AppLifecycleState.inactive;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    final lifecycle = WidgetsBinding.instance.lifecycleState;
-    _foreground = lifecycle == null || lifecycle == AppLifecycleState.resumed;
+    _visible = _isVisible(WidgetsBinding.instance.lifecycleState);
+    if (!_visible) _status = _waitingForApp;
     _holdChecks(true);
     WidgetsBinding.instance.addPostFrameCallback((_) => _continueFlow());
   }
@@ -56,11 +68,13 @@ class _LoginDialogState extends State<LoginDialog> with WidgetsBindingObserver {
   // which may only be available once. Explicit dismissal/replacement abandons it.
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    _foreground = state == AppLifecycleState.resumed;
-    if (!_foreground) {
+    final wasVisible = _visible;
+    _visible = _isVisible(state);
+    if (!_visible) {
       _timer?.cancel();
       _timer = null;
-    } else {
+    } else if (!wasVisible) {
+      // Focus changes between resumed and inactive keep the current cadence.
       _continueFlow(immediate: true);
     }
   }
@@ -91,7 +105,7 @@ class _LoginDialogState extends State<LoginDialog> with WidgetsBindingObserver {
   }
 
   void _continueFlow({bool immediate = false}) {
-    if (!mounted || _closed || !_foreground || _inFlight || _saving) return;
+    if (!mounted || _closed || !_visible || _inFlight || _saving) return;
     if (_candidate != null && !_saveFailed) {
       unawaited(_saveCandidate());
     } else if (!_manual && _needsQr) {
@@ -106,12 +120,12 @@ class _LoginDialogState extends State<LoginDialog> with WidgetsBindingObserver {
   }
 
   void _schedulePoll(Duration delay) {
-    if (!_foreground || !_polling || _manual || _closed) return;
+    if (!_visible || !_polling || _manual || _closed) return;
     final session = _session;
     _timer?.cancel();
     _timer = Timer(delay, () {
       _timer = null;
-      if (_current(session) && _foreground && !_inFlight) {
+      if (_current(session) && _visible && !_inFlight) {
         unawaited(_checkQr());
       }
     });
@@ -141,15 +155,27 @@ class _LoginDialogState extends State<LoginDialog> with WidgetsBindingObserver {
     _holdChecks(true);
     setState(() {
       _error = null;
-      _status = '正在生成登录二维码…';
+      _status = _visible ? _generating : _waitingForApp;
     });
     _continueFlow();
+  }
+
+  /// A tap proves the dialog is on screen even if the platform has not
+  /// reported a lifecycle change yet, so user actions never wait on it.
+  void _userActed() => _visible = true;
+
+  void _requestQr() {
+    _userActed();
+    _regenerate();
   }
 
   Future<void> _generateQr() async {
     final session = _session;
     _needsQr = false;
-    setState(() => _inFlight = true);
+    setState(() {
+      _inFlight = true;
+      _status = _generating;
+    });
     try {
       final result = await widget.controller.runtime.call('qr_start', {});
       if (!_current(session)) return;
@@ -189,7 +215,7 @@ class _LoginDialogState extends State<LoginDialog> with WidgetsBindingObserver {
   Future<void> _checkQr() async {
     final session = _session;
     final key = _qrKey;
-    if (key == null || !_polling || !_foreground || _inFlight) return;
+    if (key == null || !_polling || !_visible || _inFlight) return;
     _inFlight = true;
     try {
       final result = await widget.controller.runtime.call('qr_poll', {
@@ -283,7 +309,7 @@ class _LoginDialogState extends State<LoginDialog> with WidgetsBindingObserver {
 
   Future<void> _saveCandidate() async {
     final result = _candidate;
-    if (result == null || !_foreground || _saving || _closed) return;
+    if (result == null || !_visible || _saving || _closed) return;
     setState(() => _saving = true);
     try {
       final name = (result['username'] ?? '').toString();
@@ -322,11 +348,13 @@ class _LoginDialogState extends State<LoginDialog> with WidgetsBindingObserver {
   }
 
   void _retrySave() {
+    _userActed();
     setState(() => _saveFailed = false);
     _continueFlow();
   }
 
   void _retryPoll() {
+    _userActed();
     _networkFailures = 0;
     _canRetryPoll = false;
     _polling = true;
@@ -339,6 +367,7 @@ class _LoginDialogState extends State<LoginDialog> with WidgetsBindingObserver {
   }
 
   void _switchMode(bool manual) {
+    _userActed();
     _abandon();
     setState(() {
       _manual = manual;
@@ -348,6 +377,7 @@ class _LoginDialogState extends State<LoginDialog> with WidgetsBindingObserver {
   }
 
   Future<void> _submitCookie() async {
+    _userActed();
     final session = _session;
     setState(() {
       _inFlight = true;
@@ -476,7 +506,11 @@ class _LoginDialogState extends State<LoginDialog> with WidgetsBindingObserver {
                   ),
                 Center(
                   child: TextButton(
-                    onPressed: _saving || _needsQr ? null : _regenerate,
+                    // Disabled only while an automatic generation is about to
+                    // start, so a stalled lifecycle can never trap the dialog.
+                    onPressed: _saving || (_needsQr && _visible)
+                        ? null
+                        : _requestQr,
                     child: const Text('重新生成二维码'),
                   ),
                 ),
