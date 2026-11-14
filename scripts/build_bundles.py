@@ -36,7 +36,7 @@ def build(target: str, runtime_root: Path, output: Path) -> dict:
         shutil.copy2(ROOT / "runtime/NOTICE.txt", stage / "NOTICE.txt")
         shutil.copy2(ROOT / "runtime/vendor/biliTickerBuy/LICENSE", stage / "BILITICKERBUY-LICENSE.txt")
         manifest = dict(version=VERSION, bili_version=BILI_VERSION, platform=platform, arch=arch)
-        (stage / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+        (stage / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8", newline="\n")
         target_path = output / f"{target}.tar.gz"
         with tarfile.open(target_path, "w:gz") as archive:
             def metadata(info: tarfile.TarInfo) -> tarfile.TarInfo:
@@ -46,7 +46,7 @@ def build(target: str, runtime_root: Path, output: Path) -> dict:
             for item in sorted(stage.iterdir()):
                 archive.add(item, arcname=item.name, filter=metadata)
     digest = hashlib.sha256(target_path.read_bytes()).hexdigest()
-    (output / f"{target}.tar.gz.sha256").write_text(f"{digest}  {target_path.name}\n")
+    (output / f"{target}.tar.gz.sha256").write_text(f"{digest}  {target_path.name}\n", encoding="utf-8", newline="\n")
     return dict(name=target_path.name, bytes=target_path.stat().st_size, sha256=digest, **manifest)
 
 
@@ -57,7 +57,7 @@ def main() -> None:
     parser.add_argument("--targets", nargs="+", choices=TARGETS, default=list(TARGETS))
     args = parser.parse_args()
     artifacts = [build(target, args.runtime_root.resolve(), args.output.resolve()) for target in args.targets]
-    (args.output / "bundles.json").write_text(json.dumps(dict(version=VERSION, bili_version=BILI_VERSION, artifacts=artifacts), indent=2) + "\n")
+    (args.output / "bundles.json").write_text(json.dumps(dict(version=VERSION, bili_version=BILI_VERSION, artifacts=artifacts), indent=2) + "\n", encoding="utf-8", newline="\n")
     print(f"Built {len(artifacts)} offline Sisters bundles")
 
 

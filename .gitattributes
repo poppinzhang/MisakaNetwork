@@ -1,3 +1,16 @@
 # The embedded snapshot is verified against raw SHA-256 bytes on every host.
 # Windows checkout must not rewrite the audited upstream source to CRLF.
 runtime/vendor/** -text
+
+# Supplemental-license inputs and assets are also checked by raw SHA-256.
+# Keep their committed bytes stable under Windows core.autocrlf checkouts.
+go.mod text eol=lf
+go.sum text eol=lf
+runtime/requirements.lock text eol=lf
+runtime/requirements-android.lock text eol=lf
+runtime/requirements-build.lock text eol=lf
+runtime/NOTICE.txt text eol=lf
+LastOrder/android/settings.gradle.kts text eol=lf
+scripts/license_sources/loguru-0.7.3-LICENSE.txt text eol=lf
+scripts/license_sources/chaquopy-17.1.0-LICENSE.txt text eol=lf
+LastOrder/assets/licenses/third_party_licenses.json text eol=lf

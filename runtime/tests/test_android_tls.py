@@ -13,6 +13,8 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+from fixture_environment import isolated_environment
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import android_bridge
@@ -63,7 +65,7 @@ class AndroidTransportTLSTests(unittest.TestCase):
             cache = root / "cache"
             cache.mkdir()
             stack.enter_context(patch.object(sys, "path", [str(ROOT / "vendor/biliTickerBuy"), *sys.path]))
-            stack.enter_context(patch.dict(os.environ, clear=True))
+            stack.enter_context(patch.dict(os.environ, isolated_environment(), clear=True))
             connect = stack.enter_context(patch.object(socket.socket, "connect", side_effect=AssertionError("network forbidden")))
             connect_ex = stack.enter_context(patch.object(socket.socket, "connect_ex", side_effect=AssertionError("network forbidden")))
             stack.enter_context(patch.object(bridge, "process_request", inspect_transport))

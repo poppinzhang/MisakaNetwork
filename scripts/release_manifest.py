@@ -20,9 +20,9 @@ def write_manifest(directory: Path, release: dict) -> None:
     built = {f"{item['platform']}-{item['arch']}" for item in release["artifacts"]}
     release["missing_targets"] = [target for target in APP_TARGETS if target not in built]
     release["status"] = "incomplete" if release["missing_targets"] else "built-not-business-validated"
-    (directory / "release.json").write_text(json.dumps(release, indent=2) + "\n")
+    (directory / "release.json").write_text(json.dumps(release, indent=2) + "\n", encoding="utf-8", newline="\n")
     (directory / "SHA256SUMS").write_text("".join(
-        f"{item['sha256']}  {item['name']}\n" for item in release["artifacts"]))
+        f"{item['sha256']}  {item['name']}\n" for item in release["artifacts"]), encoding="utf-8", newline="\n")
 
 
 def record_artifact(path: Path, platform: str, arch: str, *, signing: str) -> dict:
@@ -37,7 +37,7 @@ def record_artifact(path: Path, platform: str, arch: str, *, signing: str) -> di
     item = dict(name=path.name, platform=platform, arch=arch, bytes=len(data),
                 sha256=hashlib.sha256(data).hexdigest(), signing=signing)
     release["artifacts"] = [old for old in release["artifacts"] if old["name"] != path.name] + [item]
-    (path.parent / (path.name + ".sha256")).write_text(f"{item['sha256']}  {path.name}\n")
+    (path.parent / (path.name + ".sha256")).write_text(f"{item['sha256']}  {path.name}\n", encoding="utf-8", newline="\n")
     write_manifest(path.parent, release)
     return release
 

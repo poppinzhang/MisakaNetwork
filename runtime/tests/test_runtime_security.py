@@ -20,6 +20,8 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
+from fixture_environment import isolated_environment
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import bridge
@@ -41,13 +43,13 @@ class EmbeddedRuntimeSecurityTests(unittest.TestCase):
         cls.directory = Path(directory)
         cls.resources.enter_context(patch.dict(sys.modules))
         cls.resources.enter_context(patch.object(sys, "path", list(sys.path)))
-        cls.resources.enter_context(patch.dict(os.environ, {
+        cls.resources.enter_context(patch.dict(os.environ, isolated_environment({
             "MISAKA_RUNTIME_STATE_DIR": directory,
             "BTB_CONFIG_PATH": str(cls.directory / "config.json"),
             "BTB_COOKIES_PATH": str(cls.directory / "cookies.json"),
             "BTB_LOG_DIR": str(cls.directory / "logs"),
             "BTB_SKIP_INITIAL_TIME_SYNC": "1",
-        }, clear=True))
+        }), clear=True))
         # Fail closed if an import or test starts an actual network connection.
         cls.connect = cls.resources.enter_context(patch.object(socket.socket, "connect", side_effect=AssertionError("network disabled")))
         cls.connect_ex = cls.resources.enter_context(patch.object(socket.socket, "connect_ex", side_effect=AssertionError("network disabled")))
