@@ -166,7 +166,7 @@ void main() {
   );
 
   testWidgets(
-    'lost create response recovers by token without another purchase',
+    'lost create response recovers automatically after failed and empty reads',
     (tester) async {
       final h = await harness();
       h.failAction = 'tencent_create';
@@ -174,15 +174,57 @@ void main() {
       await tester.pump();
       expect(h.c.jobs.single.phase, CloudMachinePhase.unknown);
       expect(h.c.jobs.single.error, isNot(contains('secret-sensitive')));
+      h.failAction = 'tencent_recover';
+      await tester.pump(const Duration(seconds: 5));
+      expect(h.c.jobs.single.phase, CloudMachinePhase.unknown);
       h.failAction = null;
-      await h.c.refreshTencentMachine(job.id);
+      h.exists = false;
+      await tester.pump(const Duration(seconds: 5));
+      expect(h.c.jobs.single.phase, CloudMachinePhase.unknown);
+      h.exists = true;
+      await tester.pump(const Duration(seconds: 5));
       expect(h.c.jobs.single.instanceId, 'ins-test1234');
       expect(h.c.jobs.single.phase, CloudMachinePhase.created);
       expect(
         h.helper.requests.where((r) => r['action'] == 'tencent_create').length,
         1,
       );
+      final recoveries = h.helper.requests.where(
+        (r) => r['action'] == 'tencent_recover',
+      );
+      expect(recoveries.length, 3);
+      expect(
+        recoveries.map((r) => (r['cloud'] as Map)['client_token']),
+        everyElement(job.clientToken),
+      );
+    },
+  );
+
+  testWidgets(
+    'unresolved purchase stops polling and can still be recovered manually',
+    (tester) async {
+      final h = await harness();
+      h.failAction = 'tencent_create';
+      h.exists = false;
+      final job = await h.create();
+      await tester.pump();
+      for (var i = 0; i < 60; i++) {
+        await tester.pump(const Duration(seconds: 5));
+      }
+      expect(h.c.jobs.single.phase, CloudMachinePhase.unknown);
+      expect(h.c.jobs.single.error, contains('手动刷新'));
+      final calls = h.helper.requests.length;
+      h.exists = true;
+      await tester.pump(const Duration(minutes: 1));
+      expect(h.helper.requests.length, calls);
+      expect(
+        h.helper.requests.where((r) => r['action'] == 'tencent_recover').length,
+        60,
+      );
+      await h.c.refreshTencentMachine(job.id);
+      expect(h.c.jobs.single.phase, CloudMachinePhase.created);
       expect(h.helper.requests.last['action'], 'tencent_recover');
+      expect(h.helper.requests.length, calls + 1);
     },
   );
 

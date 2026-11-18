@@ -340,8 +340,11 @@ void main() {
         h.c.removeCredential(CloudProvider.volcengine),
         throwsA(isA<UserError>()),
       );
+      h.exists = true;
+      await tester.pump(const Duration(seconds: 5));
+      expect(h.c.jobs.single.phase, CloudMachinePhase.created);
       expect(h.calls('create'), 1);
-      expect(h.calls('recover'), 1);
+      expect(h.calls('recover'), 2);
     },
   );
 
@@ -760,8 +763,8 @@ void main() {
           h.c.retryCloudPreparation(id),
           throwsA(isA<UserError>()),
         );
-        h.exists = false;
-        await h.c.refreshCloudMachine(id);
+        await tester.pump(const Duration(seconds: 5));
+        expect(h.c.jobs.single.phase, CloudMachinePhase.created);
         expect(h.calls('create'), 1);
         expect(h.calls('recover'), 1);
       },

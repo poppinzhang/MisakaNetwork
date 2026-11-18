@@ -249,6 +249,7 @@ class CloudMachine {
     this.error = '',
     this.isReal = false,
     this.createSubmitted = false,
+    this._creationDismissed = false,
     this.instanceId = '',
     this.eipId = '',
     this.releaseSubmitted = false,
@@ -266,6 +267,7 @@ class CloudMachine {
   });
   final String id, name, error;
   final bool isReal, createSubmitted, releaseSubmitted;
+  final bool _creationDismissed;
   final String instanceId,
       eipId,
       publicIp,
@@ -285,6 +287,14 @@ class CloudMachine {
       !isReal ||
       phase == CloudMachinePhase.released ||
       (phase == CloudMachinePhase.createFailed && !createSubmitted);
+  bool get canDismissCreation =>
+      isReal &&
+      phase == CloudMachinePhase.unknown &&
+      createSubmitted &&
+      instanceId.isEmpty &&
+      eipId.isEmpty &&
+      !releaseSubmitted;
+  bool get creationDismissed => _creationDismissed && canDismissCreation;
   // Confirmed resources leave the active list but keep their historical
   // association with task and payment reports. Previews have no API result.
   bool get releaseConfirmed =>
@@ -321,6 +331,7 @@ class CloudMachine {
     CloudMachinePhase? phase,
     String? error,
     bool? createSubmitted,
+    bool? creationDismissed,
     String? instanceId,
     String? eipId,
     bool? releaseSubmitted,
@@ -342,6 +353,7 @@ class CloudMachine {
     error: error ?? this.error,
     isReal: isReal,
     createSubmitted: createSubmitted ?? this.createSubmitted,
+    creationDismissed: creationDismissed ?? this.creationDismissed,
     instanceId: instanceId ?? this.instanceId,
     eipId: eipId ?? this.eipId,
     releaseSubmitted: releaseSubmitted ?? this.releaseSubmitted,
@@ -368,6 +380,7 @@ class CloudMachine {
     'error': error,
     'isReal': isReal,
     'createSubmitted': createSubmitted,
+    if (creationDismissed) 'creationDismissed': true,
     'instanceId': instanceId,
     'eipId': eipId,
     'releaseSubmitted': releaseSubmitted,
@@ -394,6 +407,7 @@ class CloudMachine {
     error: value['error'] as String,
     isReal: value['isReal'] as bool? ?? false,
     createSubmitted: value['createSubmitted'] as bool? ?? false,
+    creationDismissed: value['creationDismissed'] == true,
     instanceId: value['instanceId'] as String? ?? '',
     eipId: value['eipId'] as String? ?? '',
     releaseSubmitted: value['releaseSubmitted'] as bool? ?? false,

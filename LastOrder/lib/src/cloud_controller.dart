@@ -67,8 +67,9 @@ class CloudController extends ChangeNotifier {
     for (final entry in _credentials.entries) entry.key: entry.value.summary,
   });
   List<CloudMachine> get jobs => List.unmodifiable(_jobs);
-  List<CloudMachine> get visibleJobs =>
-      List.unmodifiable(_jobs.where((job) => !job.releaseConfirmed));
+  List<CloudMachine> get visibleJobs => List.unmodifiable(
+    _jobs.where((job) => !job.releaseConfirmed && !job.creationDismissed),
+  );
   CloudCredential? credentialFor(CloudProvider provider) =>
       _credentials[provider]?.summary;
 
@@ -166,7 +167,7 @@ class CloudController extends ChangeNotifier {
     if (!_disposed) await ensureSshIdentity();
     if (initialized && !_disposed) {
       for (final job in _jobs.where((job) => job.isReal && !job.canRemove)) {
-        _scheduleRealPoll(job.id);
+        await _scheduleRealPoll(job.id);
       }
     }
   }
@@ -512,6 +513,35 @@ class CloudController extends ChangeNotifier {
     _jobs = next;
     _notify();
   });
+
+  Future<void> dismissCloudCreation(String id) => _serialize(() async {
+    _requireInitialized();
+    final job = _requireJob(id);
+    if (!job.canDismissCreation) {
+      throw const UserError('云服务器状态已更新，仅可删除尚未找到实例的待核实卡片。');
+    }
+    await _saveCardVisibility([
+      for (final item in _jobs)
+        item.id == id ? item.copyWith(creationDismissed: true) : item,
+    ]);
+  });
+
+  Future<void> restoreDismissedCreations(CloudProvider provider) =>
+      _serialize(() async {
+        _requireInitialized();
+        await _saveCardVisibility([
+          for (final job in _jobs)
+            job.provider == provider && job.creationDismissed
+                ? job.copyWith(creationDismissed: false)
+                : job,
+        ]);
+      });
+
+  Future<void> _saveCardVisibility(List<CloudMachine> next) async {
+    await _persist(_credentials, next);
+    _jobs = next;
+    _notify();
+  }
 
   List<CloudTemplate> templatesFor(CloudProvider provider) =>
       List.unmodifiable(switch (provider) {
@@ -1101,7 +1131,7 @@ class CloudController extends ChangeNotifier {
             requestId: result['request_id'] as String? ?? '',
           ),
         );
-        _scheduleRealPoll(id);
+        await _scheduleRealPoll(id);
         return;
       }
     } catch (error) {
@@ -1121,7 +1151,7 @@ class CloudController extends ChangeNotifier {
                 ? CloudMachinePhase.unknown
                 : CloudMachinePhase.createFailed,
             error: purchaseSubmitted
-                ? '创建结果尚未确认，可能已经产生费用。请刷新查询；不要重复创建，必要时到云控制台核对。'
+                ? '创建结果尚未确认，应用会自动查询。云端可能已经开始计费，请到云控制台核对，避免重复购买。'
                 : error is _CloudZoneError
                 ? error.message
                 : error is _CloudNetworkError
@@ -1133,6 +1163,7 @@ class CloudController extends ChangeNotifier {
                 : '创建准备失败，尚未提交购买。请检查凭证权限、模板与网络后重试准备；已准备的共享 VPC、子网、安全组和公钥会保留。',
           ),
         );
+        if (purchaseSubmitted) await _scheduleRealPoll(id);
       }
     } finally {
       _realBusy.remove(id);
@@ -1142,7 +1173,14 @@ class CloudController extends ChangeNotifier {
   // If persistence fails after an API response, retain the returned resource ID
   // in memory. The previously persisted token enables recovery after restart.
   Future<void> _saveReal(CloudMachine job) => _serialize(() async {
-    final next = [for (final item in _jobs) item.id == job.id ? job : item];
+    // The user can dismiss or restore a card while the cloud query is in flight.
+    // Apply the result with the latest local visibility choice.
+    final next = [
+      for (final item in _jobs)
+        item.id == job.id
+            ? job.copyWith(creationDismissed: item.creationDismissed)
+            : item,
+    ];
     try {
       await _persist(_credentials, next);
     } catch (_) {
@@ -1188,12 +1226,16 @@ class CloudController extends ChangeNotifier {
 
   Future<void> refreshCloudMachine(String id) async {
     _requireInitialized();
-    if (_disposed || !_realBusy.add(id)) return;
+    if (_disposed) return;
+    final job = _requireJob(id);
+    if (!job.isReal ||
+        !job.createSubmitted ||
+        job.releaseConfirmed ||
+        !_realBusy.add(id)) {
+      return;
+    }
     _timers.remove(id)?.cancel();
     try {
-      final job = _requireJob(id);
-      if (!job.isReal || job.phase == CloudMachinePhase.released) return;
-      if (!job.createSubmitted) return;
       final result = await _callCloud(job.provider, {
         'action': job.instanceId.isEmpty
             ? '${job.provider.name}_recover'
@@ -1278,12 +1320,6 @@ class CloudController extends ChangeNotifier {
               : '',
         ),
       );
-      if (phase == CloudMachinePhase.creating ||
-          phase == CloudMachinePhase.releasing) {
-        _scheduleRealPoll(id);
-      } else {
-        _pollAttempts.remove(id);
-      }
     } catch (error) {
       if (!_disposed) {
         final job = _requireJob(id);
@@ -1305,6 +1341,21 @@ class CloudController extends ChangeNotifier {
         );
       }
     } finally {
+      if (!_disposed) {
+        final phase = _jobs.where((item) => item.id == id).firstOrNull?.phase;
+        if (phase == CloudMachinePhase.creating ||
+            phase == CloudMachinePhase.releasing ||
+            (phase == CloudMachinePhase.unknown &&
+                !job.releaseSubmitted &&
+                (job.phase == CloudMachinePhase.creating ||
+                    job.phase == CloudMachinePhase.unknown))) {
+          // Tags can become visible after the purchase response or the first
+          // lookup was lost. Keep using the saved token/ID for reads only.
+          await _scheduleRealPoll(id);
+        } else {
+          _pollAttempts.remove(id);
+        }
+      }
       _realBusy.remove(id);
     }
   }
@@ -1365,7 +1416,7 @@ class CloudController extends ChangeNotifier {
         ),
       );
       _pollAttempts.remove(id);
-      _scheduleRealPoll(id);
+      await _scheduleRealPoll(id);
     } catch (error) {
       if (!_disposed) {
         final job = _requireJob(id);
@@ -1387,20 +1438,19 @@ class CloudController extends ChangeNotifier {
     }
   }
 
-  void _scheduleRealPoll(String id) {
+  Future<void> _scheduleRealPoll(String id) async {
     if (_disposed) return;
     final count = (_pollAttempts[id] ?? 0) + 1;
     _pollAttempts[id] = count;
     if (count > 60) {
+      _pollAttempts.remove(id);
       final job = _requireJob(id);
-      unawaited(
-        _saveRealError(
-          job.copyWith(
-            phase: job.phase == CloudMachinePhase.releasing
-                ? CloudMachinePhase.releaseFailed
-                : CloudMachinePhase.unknown,
-            error: '等待云端状态超时，请手动刷新或到控制台核对，资源可能继续计费。',
-          ),
+      await _saveRealError(
+        job.copyWith(
+          phase: job.phase == CloudMachinePhase.releasing
+              ? CloudMachinePhase.releaseFailed
+              : CloudMachinePhase.unknown,
+          error: '等待云端状态超时，请手动刷新或到控制台核对，资源可能继续计费。',
         ),
       );
       return;

@@ -423,10 +423,14 @@ class CloudCredentialForm extends StatefulWidget {
   State<CloudCredentialForm> createState() => _CloudCredentialFormState();
 }
 
+enum _CredentialOperation { save, remove, restore }
+
 class _CloudCredentialFormState extends State<CloudCredentialForm> {
   final form = GlobalKey<FormState>();
   final keyId = TextEditingController(), secret = TextEditingController();
-  bool busy = false, removing = false, reveal = false;
+  _CredentialOperation? operation;
+  bool get busy => operation != null;
+  bool reveal = false;
   String? error, saved;
   @override
   void dispose() {
@@ -438,8 +442,7 @@ class _CloudCredentialFormState extends State<CloudCredentialForm> {
   Future<void> save() async {
     if (busy || !form.currentState!.validate()) return;
     setState(() {
-      busy = true;
-      removing = false;
+      operation = _CredentialOperation.save;
       error = null;
       saved = null;
     });
@@ -456,7 +459,7 @@ class _CloudCredentialFormState extends State<CloudCredentialForm> {
     } catch (e) {
       if (mounted) setState(() => error = readableError(e));
     } finally {
-      if (mounted) setState(() => busy = false);
+      if (mounted) setState(() => operation = null);
     }
   }
 
@@ -483,8 +486,7 @@ class _CloudCredentialFormState extends State<CloudCredentialForm> {
     );
     if (approved != true || !mounted) return;
     setState(() {
-      busy = true;
-      removing = true;
+      operation = _CredentialOperation.remove;
       error = null;
       saved = null;
     });
@@ -501,7 +503,23 @@ class _CloudCredentialFormState extends State<CloudCredentialForm> {
     } catch (e) {
       if (mounted) setState(() => error = readableError(e));
     } finally {
-      if (mounted) setState(() => busy = false);
+      if (mounted) setState(() => operation = null);
+    }
+  }
+
+  Future<void> restoreCards() async {
+    setState(() {
+      operation = _CredentialOperation.restore;
+      error = null;
+      saved = null;
+    });
+    try {
+      await widget.controller.restoreDismissedCreations(widget.provider);
+      if (mounted) setState(() => saved = '卡片已恢复，可到「机器管理」查询云端状态。');
+    } catch (e) {
+      if (mounted) setState(() => error = readableError(e));
+    } finally {
+      if (mounted) setState(() => operation = null);
     }
   }
 
@@ -523,6 +541,11 @@ class _CloudCredentialFormState extends State<CloudCredentialForm> {
     final colors = Theme.of(context).colorScheme;
     final credential = widget.controller.credentialFor(widget.provider);
     final canEnterCredential = credential?.onlineVerified != true;
+    final dismissedCount = widget.controller.jobs
+        .where(
+          (job) => job.provider == widget.provider && job.creationDismissed,
+        )
+        .length;
     return Container(
       padding: EdgeInsets.all(MediaQuery.sizeOf(context).width < 600 ? 20 : 28),
       decoration: BoxDecoration(
@@ -676,10 +699,16 @@ class _CloudCredentialFormState extends State<CloudCredentialForm> {
                         ? null
                         : save,
                     icon: Icon(
-                      busy ? LucideIcons.loaderCircle : LucideIcons.shieldCheck,
+                      operation == _CredentialOperation.save
+                          ? LucideIcons.loaderCircle
+                          : LucideIcons.shieldCheck,
                       size: 17,
                     ),
-                    label: Text(busy && !removing ? '正在验证并保存' : '联网验证并保存'),
+                    label: Text(
+                      operation == _CredentialOperation.save
+                          ? '正在验证并保存'
+                          : '联网验证并保存',
+                    ),
                   ),
                 if (credential != null)
                   OutlinedButton.icon(
@@ -692,7 +721,17 @@ class _CloudCredentialFormState extends State<CloudCredentialForm> {
                 if (credential != null)
                   TextButton(
                     onPressed: busy ? null : remove,
-                    child: Text(busy && removing ? '正在移除凭证' : '移除凭证'),
+                    child: Text(
+                      operation == _CredentialOperation.remove
+                          ? '正在移除凭证'
+                          : '移除凭证',
+                    ),
+                  ),
+                if (dismissedCount > 0)
+                  TextButton.icon(
+                    onPressed: busy ? null : restoreCards,
+                    icon: const Icon(LucideIcons.undo2, size: 16),
+                    label: Text('恢复已删除的机器卡片（$dismissedCount）'),
                   ),
               ],
             ),
@@ -1508,6 +1547,36 @@ class _CloudMachineCardState extends State<CloudMachineCard> {
     }
   }
 
+  Future<void> dismissCreation() async {
+    final machine = widget.machine;
+    final accepted = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        scrollable: true,
+        title: const Text('删除本地卡片？'),
+        content: SelectableText(
+          '创建结果仍待核实。请到${machine.provider.displayName}控制台核对以下服务器：\n'
+          '${machine.name}\n地域：${machine.template.regionLabel}（${machine.region}）\n\n'
+          '删除卡片只会将它从「机器管理」移除，云端已创建的资源仍可能计费。'
+          '查询到实例后，卡片会再次出现。你也可以在「公有云部署」中恢复卡片。',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('保留卡片'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('确认删除'),
+          ),
+        ],
+      ),
+    );
+    if (accepted == true && mounted) {
+      await act(() => widget.controller.dismissCloudCreation(machine.id));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
@@ -1749,6 +1818,13 @@ class _CloudMachineCardState extends State<CloudMachineCard> {
                             ? '删除失败机器'
                             : '删除预览记录',
                       ),
+                    ),
+                  if (m.canDismissCreation)
+                    OutlinedButton.icon(
+                      style: _actionStyle(foreground: colors.onSurfaceVariant),
+                      onPressed: busy ? null : dismissCreation,
+                      icon: const Icon(LucideIcons.trash2, size: 15),
+                      label: const Text('删除本地卡片'),
                     ),
                   if (widget.onRemoveConnection != null)
                     OutlinedButton.icon(

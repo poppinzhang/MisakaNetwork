@@ -2,6 +2,8 @@
 
 ## unstaged
 
+- 修复腾讯云、阿里云和火山引擎创建中断后，机器卡片长期停在「创建结果待核实」的问题。应用会按原购买记录有限次自动查询。一直查不到实例时，可确认删除本地卡片，之后可从该厂商的凭证页恢复。查询找回实例时卡片会自动显示。清理卡片仅影响本机列表，云端资源仍可能计费，原购买记录和凭证保护继续保留。
+
 ## 0.4.1 — 2026-11-15
 
 - **交付状态：统一版本 0.4.1+14 已公开正式发布。** [GitHub Release 0.4.1](https://github.com/poppinzhang/MisakaNetwork/releases/tag/0.4.1) 对应标签 `0.4.1`、提交 `210badfb9b56945425536cb48a05ec709ddebbfc`；正式 Actions [43636837211](https://github.com/poppinzhang/MisakaNetwork/actions/runs/43636837211) 完成五种 Sisters、五种 LastOrder（Android 使用 `release-keystore` 正式签名）的全量重建与校验，12 个资产已核验并标记 `Latest`（Release ID `445576563`，非草稿、非预发布）。Windows Server 2022 正式包作业非缓存实测通过 `internal/control`（90.883s，含重叠 I/O 命名管道标准输入与隔离 SCM 集成用例）、runtime 离线检查及 8 项真实 Sisters mTLS 冒烟；Flutter analyze 及测试（macOS 915 项通过/2 项跳过、Windows 910 项通过/2 项跳过）和 Android 锁依赖 runtime 测试（114 项通过/3 项跳过）均通过。安装包和摘要见 [0.4.1 发布记录](docs/releases/0.4.1.md)。

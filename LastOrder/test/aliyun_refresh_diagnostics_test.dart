@@ -58,6 +58,9 @@ void main() {
         h.helper.requests.where((r) => r['action'] == 'aliyun_create'),
         hasLength(1),
       );
+      h.helper.handler = delegate;
+      await tester.pump(const Duration(seconds: 5));
+      expect(h.c.jobs.single.phase, CloudMachinePhase.created);
     });
   }
 
@@ -232,6 +235,9 @@ void main() {
         );
         expect(h.c.jobs.single.phase, CloudMachinePhase.unknown);
         expect(h.c.visibleJobs, hasLength(1));
+        h.helper.handler = delegate;
+        await tester.pump(const Duration(seconds: 5));
+        expect(h.c.jobs.single.phase, CloudMachinePhase.created);
       },
     );
   }
@@ -257,6 +263,9 @@ void main() {
       h.store.secrets[CloudController.workspaceKey],
       isNot(contains(_pagination)),
     );
+    h.helper.handler = delegate;
+    await tester.pump(const Duration(seconds: 5));
+    expect(h.c.jobs.single.phase, CloudMachinePhase.created);
   });
 
   testWidgets('Volcengine query does not display Aliyun fixed reason', (
@@ -279,5 +288,8 @@ void main() {
       h.store.secrets[CloudController.workspaceKey],
       isNot(contains(_pagination)),
     );
+    h.helper.handler = delegate;
+    await tester.pump(const Duration(seconds: 5));
+    expect(h.c.jobs.single.phase, CloudMachinePhase.created);
   });
 }

@@ -5,9 +5,10 @@ import 'package:last_order/src/cloud_controller.dart';
 import 'package:last_order/src/cloud_models.dart';
 import 'package:last_order/src/cloud_ui.dart';
 import 'package:material_ui/material_ui.dart';
-import 'package:lucide_icons_flutter/lucide_icons.dart';
 
+import 'cloud_ui_test.dart' show goToPage, openCloudApp;
 import 'fakes.dart';
+import 'tencent_controller_test.dart' show Harness;
 
 // Deliberately synthetic resource identifiers and documentation-only addresses.
 final _template = CloudTemplate.tencent({
@@ -232,6 +233,7 @@ void main() {
       expect(find.text('部署完成'), findsNothing);
       expect(find.text('交互预览'), findsNothing);
       expect(find.text('删除预览记录'), findsNothing);
+      expect(find.text('删除本地卡片'), findsNothing);
       expect(find.textContaining('点击「部署 Sisters」'), findsOneWidget);
       expect(find.textContaining('ap-guangzhou'), findsNothing);
       expect(find.textContaining('ins-uitest'), findsNothing);
@@ -307,34 +309,69 @@ void main() {
       expect(find.textContaining('实例可用区'), findsNothing);
       expect(find.textContaining('尚未取得实例 ID'), findsNothing);
       expect(find.textContaining('公网地址：等待云端返回'), findsOneWidget);
+      if (phase == CloudMachinePhase.creating) {
+        expect(find.text('删除本地卡片'), findsNothing);
+      }
       expect(tester.takeException(), isNull);
     });
   }
 
   testWidgets(
-    'unknown creation offers reconciliation without deleting evidence',
+    'unknown purchase card can be queried, dismissed locally and restored from its provider',
     (tester) async {
-      final controller = await _controller();
-      await _frame(
+      final h = Harness()..failAction = 'tencent_create';
+      h.exists = false;
+      await h.init();
+      final job = await h.create();
+      await tester.pump();
+      expect(h.c.visibleJobs.single.phase, CloudMachinePhase.unknown);
+      h.c.dispose();
+      final c = await openCloudApp(
         tester,
-        SingleChildScrollView(
-          child: CloudMachineCard(
-            machine: _machine(
-              phase: CloudMachinePhase.unknown,
-              instanceId: '',
-              error: '创建结果尚未确认，请查询云端状态或到控制台核实。',
-            ),
-            controller: controller,
-          ),
-        ),
+        width: 390,
+        store: h.store,
+        helper: h.helper,
       );
+      await goToPage(tester, '机器管理');
       expect(find.text('创建结果待核实'), findsOneWidget);
       expect(find.text('释放云服务器'), findsNothing);
-      expect(find.byIcon(LucideIcons.trash2), findsNothing);
       await _tap(tester, find.text('查询云端状态'));
-      expect(controller.refreshes, ['ui-operation']);
-      expect(controller.releases, isEmpty);
-      expect(controller.creates, 0);
+      expect(find.textContaining('暂未查询到创建结果'), findsOneWidget);
+      await _tap(tester, find.text('删除本地卡片'));
+      final dialog = find.byType(AlertDialog);
+      for (final detail in [job.name, job.region, '腾讯云控制台', '仍可能计费', '恢复卡片']) {
+        expect(
+          find.descendant(of: dialog, matching: find.textContaining(detail)),
+          findsOneWidget,
+        );
+      }
+      await _tap(tester, find.text('保留卡片'));
+      expect(c.cloud.visibleJobs.single.id, job.id);
+      await _tap(tester, find.text('删除本地卡片'));
+      await _tap(tester, find.text('确认删除'));
+      expect(find.text(job.name), findsNothing);
+      expect(c.cloud.visibleJobs, isEmpty);
+
+      await goToPage(tester, '公有云部署');
+      await _tap(tester, find.byKey(const ValueKey('cloud-provider-aliyun')));
+      expect(find.textContaining('恢复已删除的机器卡片'), findsNothing);
+      await _tap(tester, find.byKey(const ValueKey('cloud-provider-tencent')));
+      await _tap(tester, find.text('恢复已删除的机器卡片（1）'));
+      expect(find.textContaining('恢复已删除的机器卡片'), findsNothing);
+      expect(find.textContaining('卡片已恢复'), findsOneWidget);
+      await goToPage(tester, '机器管理');
+      expect(find.text(job.name), findsOneWidget);
+      h.exists = true;
+      await _tap(tester, find.text('查询云端状态'));
+      expect(find.text('已创建 · 待部署'), findsOneWidget);
+      expect(find.text('删除本地卡片'), findsNothing);
+      final actions = h.helper.requests.map((request) => request['action']);
+      expect(
+        actions.where((action) => action == 'tencent_create'),
+        hasLength(1),
+      );
+      expect(actions, isNot(contains('tencent_release')));
+      expect(tester.takeException(), isNull);
     },
   );
   testWidgets(
