@@ -447,7 +447,7 @@ def run_task(params: dict[str, Any], engine: Any, emit: Callable[[dict], None]) 
     # arbitrary local file paths or extra background work enter the runtime.
     if set(options) - {"interval", "time_start", "wait_for_buy_button"}:
         raise BridgeError("invalid_request", "runtime_options 包含未支持的选项")
-    interval = bounded_number(options, "interval", 1000, 100, 60000)
+    interval = bounded_number(options, "interval", 500, 100, 60000)
     if int(interval) != interval:
         raise BridgeError("invalid_request", "interval 必须是整数")
     time_start = options.get("time_start", "")

@@ -19,6 +19,8 @@ import 'dispatch_dialog.dart';
 import 'models.dart';
 import 'login_dialog.dart';
 import 'payment_ui.dart';
+import 'sale_start_picker.dart';
+import 'task_edit_selection.dart';
 import 'services.dart';
 import 'task_messages.dart';
 import 'theme.dart';
@@ -1529,7 +1531,10 @@ class _ControlCenterState extends State<ControlCenter> {
               children: [
                 const Divider(height: 1),
                 const SizedBox(height: 12),
-                Row(
+                OverflowBar(
+                  alignment: MainAxisAlignment.spaceBetween,
+                  spacing: 8,
+                  overflowSpacing: 4,
                   children: [
                     FilledButton.tonalIcon(
                       onPressed: busy || c.currentMachines.isEmpty
@@ -1538,23 +1543,48 @@ class _ControlCenterState extends State<ControlCenter> {
                       icon: const Icon(LucideIcons.send, size: 16),
                       label: const Text('分发'),
                     ),
-                    const Spacer(),
-                    IconButton(
-                      tooltip: '删除任务',
-                      onPressed: busy
-                          ? null
-                          : () async {
-                              if (await confirm(
-                                '删除本地任务',
-                                '删除本地配置，不会停止远程运行的任务。停止任务请前往任务监控。',
-                              )) {
-                                await action(
-                                  () => c.removeTask(task),
-                                  success: '已删除任务',
-                                );
-                              }
-                            },
-                      icon: const Icon(LucideIcons.trash2, size: 18),
+                    Wrap(
+                      children: [
+                        if (c.canEditTask(task))
+                          IconButton(
+                            tooltip: '编辑任务',
+                            onPressed: busy || c.state.accounts.isEmpty
+                                ? null
+                                : () => showDialog<void>(
+                                    context: context,
+                                    builder: (_) =>
+                                        TaskDialog(controller: c, task: task),
+                                  ),
+                            icon: const Icon(LucideIcons.pencil, size: 18),
+                          ),
+                        IconButton(
+                          tooltip: '复制任务',
+                          onPressed: busy
+                              ? null
+                              : () => action(
+                                  () => c.copyTask(task),
+                                  success: '已在原任务后创建未分发副本',
+                                ),
+                          icon: const Icon(LucideIcons.copy, size: 18),
+                        ),
+                        IconButton(
+                          tooltip: '删除任务',
+                          onPressed: busy
+                              ? null
+                              : () async {
+                                  if (await confirm(
+                                    '删除本地任务',
+                                    '删除本地配置，不会停止远程运行的任务。停止任务请前往任务监控。',
+                                  )) {
+                                    await action(
+                                      () => c.removeTask(task),
+                                      success: '已删除任务',
+                                    );
+                                  }
+                                },
+                          icon: const Icon(LucideIcons.trash2, size: 18),
+                        ),
+                      ],
                     ),
                   ],
                 ),
@@ -2003,7 +2033,7 @@ class _ControlCenterState extends State<ControlCenter> {
     if (mounted && chosen != null && chosen.isNotEmpty) {
       await action(() async {
         final errors = await c.dispatch(
-          task,
+          saved,
           c.currentMachines.where((m) => chosen.contains(m.id)).toList(),
         );
         if (errors.isNotEmpty) {
@@ -2407,107 +2437,315 @@ class WorkDialog extends StatelessWidget {
 }
 
 class TaskDialog extends StatefulWidget {
-  const TaskDialog({super.key, required this.controller});
+  const TaskDialog({super.key, required this.controller, this.task});
   final AppController controller;
+  final TicketTask? task;
   @override
   State<TaskDialog> createState() => _TaskDialogState();
 }
 
 class _TaskDialogState extends State<TaskDialog> {
-  final name = TextEditingController(),
-      project = TextEditingController(),
-      date = TextEditingController(),
+  final project = TextEditingController(),
       buyer = TextEditingController(),
       tel = TextEditingController(),
-      startAt = TextEditingController(),
       requestInterval = TextEditingController(
         text: '$defaultRequestIntervalMs',
       );
   late String accountId = widget.controller.state.accounts.first.id;
+  TaskEditSelection? savedSelection;
+  Map? editTicket;
+  List editBuyers = [];
+  String editProjectId = '';
+  Set<String> editDates = {};
+  bool hasDefaultTickets = false;
   Map<String, dynamic>? purchase;
+  Set<String> calendarDates = {};
+  String? selectedDate;
   int ticketIndex = 0, addressIndex = 0;
   final Set<int> buyers = {};
   bool busy = false;
   String? error;
-  String suggestedStartAt = '';
+  String startAt = '';
+  bool customStartAt = false;
+  String get taskName {
+    if (widget.task case final task?) return task.name;
+    final name = purchase?['project_name'];
+    if (name is! String) return '抢票任务';
+    // Sisters accepts up to 200 Unicode code points without control characters.
+    final clean = name
+        .replaceAll(RegExp(r'[\x00-\x1f\x7f-\x9f\u2028\u2029]+'), ' ')
+        .trim();
+    return clean.isEmpty
+        ? '抢票任务'
+        : String.fromCharCodes(clean.runes.take(200)).trimRight();
+  }
+
   Account get account =>
       widget.controller.state.accounts.firstWhere((a) => a.id == accountId);
+
+  @override
+  void initState() {
+    super.initState();
+    final task = widget.task;
+    if (task != null) {
+      final accounts = widget.controller.state.accounts;
+      accountId = accounts.any((a) => a.id == task.accountId)
+          ? task.accountId
+          : accounts.firstOrNull?.id ?? '';
+      requestInterval.text = '${task.requestIntervalMs}';
+      startAt = task.startAt;
+      customStartAt = true;
+      unawaited(loadEdit());
+    }
+  }
+
   @override
   void dispose() {
-    for (final c in [
-      name,
-      project,
-      date,
-      buyer,
-      tel,
-      startAt,
-      requestInterval,
-    ]) {
+    for (final c in [project, buyer, tel, requestInterval]) {
       c.dispose();
     }
     super.dispose();
   }
 
-  /// Prefills the selected ticket's sale start unless the user typed another.
+  /// Follow the selected ticket until the user chooses a time or clears it.
   void suggestStartAt(Object? ticket) {
-    var suggestion = '';
+    if (customStartAt) return;
     try {
       final sale = ticket is Map ? ticket['sale_start'] : null;
-      suggestion = normalizeStartAt('${sale ?? ''}').replaceFirst('T', ' ');
+      startAt = normalizeStartAt('${sale ?? ''}');
     } on UserError {
-      // Upstream may report the sale start in another form; leave it to the user.
+      startAt = '';
     }
-    if (startAt.text.trim().isEmpty || startAt.text == suggestedStartAt) {
-      startAt.text = suggestion;
+  }
+
+  Future<void> chooseStartAt() async {
+    final selected = await showSaleStartPicker(context, startAt);
+    if (mounted && selected != null) setStartAt(selected);
+  }
+
+  void setStartAt(String value) => setState(() {
+    startAt = value;
+    customStartAt = true;
+  });
+
+  void resetProject() => setState(() {
+    purchase = null;
+    calendarDates = {};
+    selectedDate = null;
+    startAt = '';
+    customStartAt = false;
+    buyers.clear();
+    error = null;
+  });
+
+  Future<void> readTickets() async {
+    final choosingDate = calendarDates.isNotEmpty;
+    final initialContext = purchase;
+    final date = selectedDate;
+    final Map<String, dynamic> result;
+    if (choosingDate && date == '' && initialContext != null) {
+      result = initialContext;
+    } else {
+      final projectInput = initialContext?['project_id'] ?? project.text.trim();
+      if (projectInput == '') {
+        throw const UserError('请填写演出 ID 或会员购链接。');
+      }
+      await widget.controller.ensureAccountValid(account);
+      result = await widget.controller.runtime.call('purchase_context', {
+        'project_input': projectInput,
+        'cookies': await widget.controller.cookies(account),
+        if (choosingDate) 'selected_date': date,
+      });
     }
-    suggestedStartAt = suggestion;
+    if (!mounted) return;
+    final tickets = result['ticket_options'] as List? ?? [];
+    if (!choosingDate) {
+      final dates = (result['sales_dates'] as List? ?? [])
+          .whereType<String>()
+          .where((date) => date.isNotEmpty)
+          .toSet();
+      if (dates.isNotEmpty) {
+        setState(() {
+          purchase = result;
+          calendarDates = dates;
+          selectedDate = tickets.isEmpty ? null : '';
+        });
+        return;
+      }
+    }
+    if (tickets.isEmpty) {
+      throw UserError(choosingDate ? '该日期没有可选票档，请选择其他日期。' : '此演出没有可选票档。');
+    }
+    setState(() {
+      purchase = result;
+      calendarDates = {};
+      ticketIndex = 0;
+      addressIndex = 0;
+      buyers.clear();
+      suggestStartAt(tickets.first);
+    });
+  }
+
+  Future<void> loadEdit({
+    String? nextAccount,
+    String? day,
+    bool verifySource = false,
+  }) async {
+    if (busy) return;
+    final task = widget.task!;
+    if (purchase case final previous?) {
+      final options = previous['ticket_options'] as List;
+      final people = previous['buyers'] as List? ?? [];
+      editTicket = ticketIndex < 0 ? null : options[ticketIndex] as Map;
+      editBuyers = [for (final index in buyers) people[index]];
+    }
+    if (nextAccount != null) editBuyers = [];
+    final preferredDate =
+        day ?? selectedDate ?? task.summary?.selectedDate ?? '';
+    setState(() {
+      busy = true;
+      error = null;
+      purchase = null;
+      buyers.clear();
+      ticketIndex = -1;
+      addressIndex = -1;
+      if (nextAccount != null) accountId = nextAccount;
+      if (day == null) {
+        editDates = {};
+        hasDefaultTickets = false;
+      }
+      selectedDate = preferredDate;
+    });
+    try {
+      if (savedSelection == null) {
+        final config = await widget.controller.readTaskConfig(task);
+        if (!mounted) return;
+        savedSelection = TaskEditSelection(task, config);
+        editTicket = {
+          'id': config['sku_id'],
+          'screen_id': config['screen_id'],
+          'project_id': config['project_id'],
+          'link_id': config['link_id'],
+        };
+        if (nextAccount == null && accountId == task.accountId) {
+          editBuyers = config['buyer_info'] as List? ?? [];
+        }
+        buyer.text = config['buyer'] as String? ?? '';
+        tel.text = config['tel'] as String? ?? '';
+      }
+      final selection = savedSelection!;
+      if (editProjectId.isEmpty) editProjectId = selection.projectId;
+      if (editProjectId.isEmpty && selection.config['link_id'] == null) {
+        throw const UserError('原任务缺少演出编号，无法读取场次，请重新创建任务。');
+      }
+      if (editProjectId.isEmpty && !verifySource) return;
+      final input = editProjectId.isEmpty ? project.text.trim() : editProjectId;
+      if (input.isEmpty) throw const UserError('请填写原演出 ID 或会员购链接。');
+      if (accountId.isEmpty) throw const UserError('请先添加可用账号。');
+      final currentAccount = account;
+      await widget.controller.ensureAccountValid(currentAccount);
+      final cookies = await widget.controller.cookies(currentAccount);
+      Future<Map<String, dynamic>> fetch(Object projectId, String date) =>
+          widget.controller.runtime.call('purchase_context', {
+            'project_input': projectId,
+            'cookies': cookies,
+            if (date.isNotEmpty) 'selected_date': date,
+          });
+
+      Map<String, dynamic>? result;
+      var readDate = preferredDate;
+      if (day == null) {
+        final base = await fetch(input, '');
+        final rootId = '${base['project_id'] ?? ''}';
+        if (rootId.isEmpty ||
+            (editProjectId.isNotEmpty && rootId != editProjectId)) {
+          throw const UserError('读取的演出与原任务不符，请重新核对。');
+        }
+        if (verifySource && !selection.confirmsLinkedProject(base)) {
+          if (preferredDate.isNotEmpty) {
+            result = await fetch(rootId, preferredDate);
+          }
+          if (result == null ||
+              '${result['project_id']}' != rootId ||
+              !selection.confirmsLinkedProject(result)) {
+            throw const UserError('此演出没有原任务的关联票档，请核对原演出 ID 或链接。');
+          }
+        }
+        if (!mounted) return;
+        editProjectId = rootId;
+        editDates = (base['sales_dates'] as List? ?? [])
+            .whereType<String>()
+            .where((date) => date.isNotEmpty)
+            .toSet();
+        hasDefaultTickets = (base['ticket_options'] as List? ?? []).isNotEmpty;
+        if (editDates.isNotEmpty && !editDates.contains(preferredDate)) {
+          readDate = '';
+        }
+        if (readDate.isEmpty) {
+          result = base;
+          if (!hasDefaultTickets && editDates.isNotEmpty) {
+            selectedDate = null;
+            return;
+          }
+        }
+      }
+      final context = result ?? await fetch(editProjectId, readDate);
+      if (!mounted) return;
+      if ('${context['project_id'] ?? ''}' != editProjectId) {
+        throw const UserError('读取的场次与原演出不符，请重新读取。');
+      }
+      if ((context['selected_date'] ?? '') != readDate) {
+        throw const UserError('读取的场次日期与所选日期不符，请重新读取。');
+      }
+      selectedDate = readDate;
+      final tickets = context['ticket_options'] as List? ?? [];
+      if (tickets.isEmpty) {
+        throw UserError(
+          editDates.isEmpty ? '此演出没有可选票档。' : '该日期没有可选票档，请选择其他日期。',
+        );
+      }
+      final people = context['buyers'] as List? ?? [];
+      ticketIndex = readDate == preferredDate && editTicket != null
+          ? selection.ticketIndex(tickets, editProjectId, editTicket)
+          : -1;
+      buyers.addAll(TaskEditSelection.matchBuyers(people, editBuyers));
+      addressIndex = selection.addressIndex(
+        context['addresses'] as List? ?? [],
+        accountId,
+      );
+      purchase = context;
+    } catch (e) {
+      if (mounted) error = readableError(e);
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
   }
 
   Future<void> submit() async {
+    if (busy) return;
     setState(() {
       busy = true;
       error = null;
     });
     try {
-      if (purchase == null) {
-        if (project.text.trim().isEmpty) {
-          throw const UserError('请填写演出 ID 或会员购链接。');
-        }
-        await widget.controller.ensureAccountValid(account);
-        final result = await widget.controller.runtime.call(
-          'purchase_context',
-          {
-            'project_input': project.text.trim(),
-            'cookies': await widget.controller.cookies(account),
-            if (date.text.trim().isNotEmpty) 'selected_date': date.text.trim(),
-          },
-        );
-        if ((result['ticket_options'] as List? ?? []).isEmpty) {
-          throw const UserError('此演出没有可选票档，请检查演出或日期。');
-        }
-        if (mounted) {
-          setState(() {
-            purchase = result;
-            ticketIndex = 0;
-            buyers.clear();
-            if (name.text.trim().isEmpty) {
-              name.text = (result['project_name'] ?? '抢票任务').toString();
-            }
-            suggestStartAt((result['ticket_options'] as List).first);
-          });
-        }
+      if (widget.task == null &&
+          (purchase == null || calendarDates.isNotEmpty)) {
+        await readTickets();
       } else {
+        if (ticketIndex < 0) throw const UserError('请选择场次和票档。');
         if (buyers.isEmpty) {
           throw const UserError('请至少选择一位购票人；缺少购票人时，请先在哔哩哔哩补齐。');
         }
         final addresses = purchase!['addresses'] as List? ?? [];
+        if (widget.task != null && addressIndex < 0) {
+          throw const UserError('收货地址未确认，请核对地址后重新读取演出。');
+        }
         if (addresses.isEmpty || addressIndex >= addresses.length) {
           throw const UserError('请先在哔哩哔哩添加收货地址，再重新读取演出。当前运行时要求电子票也提供地址。');
         }
         if (buyer.text.trim().isEmpty || tel.text.trim().isEmpty) {
           throw const UserError('联系人和联系电话为必填项。');
         }
-        final start = normalizeStartAt(startAt.text);
         final interval = parseRequestIntervalMs(requestInterval.text);
         final config = await widget.controller.runtime.call('build_config', {
           'purchase_context': purchase,
@@ -2519,18 +2757,31 @@ class _TaskDialogState extends State<TaskDialog> {
             'tel': tel.text.trim(),
           },
         });
-        await widget.controller.addTask(
-          name.text,
-          account,
-          config,
-          startAt: start,
-          requestIntervalMs: interval,
-          summary: TaskSummary.fromSelection(
-            purchase!,
-            ticketIndex,
-            buyers.length,
-          ),
+        final summary = TaskSummary.fromSelection(
+          purchase!,
+          ticketIndex,
+          buyers.length,
         );
+        final task = widget.task;
+        if (task == null) {
+          await widget.controller.addTask(
+            taskName,
+            account,
+            config,
+            startAt: startAt,
+            requestIntervalMs: interval,
+            summary: summary,
+          );
+        } else {
+          await widget.controller.updateTask(
+            task,
+            account,
+            config,
+            startAt: startAt,
+            requestIntervalMs: interval,
+            summary: summary,
+          );
+        }
         if (mounted) Navigator.pop(context);
       }
     } catch (e) {
@@ -2545,12 +2796,32 @@ class _TaskDialogState extends State<TaskDialog> {
     final tickets = purchase?['ticket_options'] as List? ?? [];
     final people = purchase?['buyers'] as List? ?? [];
     final addresses = purchase?['addresses'] as List? ?? [];
+    final editing = widget.task != null;
+    final needsSource =
+        editing &&
+        editProjectId.isEmpty &&
+        savedSelection?.config['link_id'] != null;
+    final loadingEdit = editing && purchase == null;
     return WorkDialog(
-      title: '创建抢票任务',
+      title: editing ? '编辑抢票任务' : '创建抢票任务',
       busy: busy,
       error: error,
-      onSubmit: submit,
-      submitLabel: purchase == null ? '读取演出与购票人' : '保存任务',
+      onSubmit: loadingEdit
+          ? () => loadEdit(verifySource: needsSource)
+          : calendarDates.isNotEmpty && selectedDate == null
+          ? null
+          : submit,
+      submitLabel: editing
+          ? (needsSource
+                ? '核对原演出'
+                : loadingEdit
+                ? '重新读取演出'
+                : '保存修改')
+          : purchase == null
+          ? '读取演出与购票人'
+          : calendarDates.isNotEmpty
+          ? '读取场次'
+          : '保存任务',
       width: 650,
       children: [
         DropdownButtonFormField<String>(
@@ -2560,14 +2831,22 @@ class _TaskDialogState extends State<TaskDialog> {
             for (final a in widget.controller.state.accounts)
               DropdownMenuItem(value: a.id, child: Text(a.name)),
           ],
-          onChanged: busy || purchase != null
+          onChanged: busy || (!editing && purchase != null)
               ? null
-              : (v) => setState(() => accountId = v!),
+              : (v) {
+                  if (editing) {
+                    if (v != null && v != accountId) {
+                      unawaited(loadEdit(nextAccount: v));
+                    }
+                  } else {
+                    setState(() => accountId = v!);
+                  }
+                },
         ),
         Align(
           alignment: Alignment.centerLeft,
           child: TextButton.icon(
-            onPressed: busy
+            onPressed: busy || accountId.isEmpty
                 ? null
                 : () async {
                     await showDialog<void>(
@@ -2578,11 +2857,11 @@ class _TaskDialogState extends State<TaskDialog> {
                       ),
                     );
                     if (mounted) {
-                      setState(() {
-                        purchase = null;
-                        buyers.clear();
-                        error = null;
-                      });
+                      if (editing) {
+                        await loadEdit();
+                      } else {
+                        resetProject();
+                      }
                     }
                   },
             icon: const Icon(LucideIcons.scanLine, size: 16),
@@ -2590,9 +2869,40 @@ class _TaskDialogState extends State<TaskDialog> {
           ),
         ),
         const SizedBox(height: 16),
-        if (purchase == null) ...[
+        if (editing) ...[
+          Text('任务名称', style: Theme.of(context).textTheme.labelMedium),
+          Text(taskName, style: Theme.of(context).textTheme.titleMedium),
+          const SizedBox(height: 16),
+          if (needsSource) ...[
+            const Text('此关联票任务未记录原演出。请提供原演出链接或 ID，以便核对关联票档。'),
+            field(project, '原演出 ID 或会员购链接'),
+          ],
+          if (editDates.isNotEmpty) ...[
+            DropdownButtonFormField<String>(
+              initialValue:
+                  editDates.contains(selectedDate) ||
+                      hasDefaultTickets && selectedDate == ''
+                  ? selectedDate
+                  : null,
+              decoration: const InputDecoration(labelText: '场次日期'),
+              hint: const Text('请选择日期'),
+              items: [
+                if (hasDefaultTickets)
+                  const DropdownMenuItem(value: '', child: Text('默认场次')),
+                for (final date in editDates)
+                  DropdownMenuItem(value: date, child: Text(date)),
+              ],
+              onChanged: busy
+                  ? null
+                  : (day) {
+                      if (day != null) unawaited(loadEdit(day: day));
+                    },
+            ),
+            const SizedBox(height: 14),
+          ],
+        ],
+        if (!editing && purchase == null) ...[
           field(project, '演出 ID 或会员购链接'),
-          field(date, '日期（有日历场次时填写）', hint: 'YYYY-MM-DD'),
           Text(
             '将通过 biliTickerBuy 读取真实场次、票档和账号购票人。',
             style: TextStyle(
@@ -2600,10 +2910,33 @@ class _TaskDialogState extends State<TaskDialog> {
               fontSize: 12,
             ),
           ),
-        ] else ...[
-          field(name, '任务名称'),
+        ] else if (calendarDates.isNotEmpty) ...[
+          DropdownButtonFormField<String>(
+            initialValue: selectedDate,
+            decoration: const InputDecoration(labelText: '场次日期'),
+            hint: const Text('请选择日期'),
+            items: [
+              if (tickets.isNotEmpty)
+                const DropdownMenuItem(value: '', child: Text('默认场次')),
+              for (final date in calendarDates)
+                DropdownMenuItem(value: date, child: Text(date)),
+            ],
+            onChanged: busy
+                ? null
+                : (value) => setState(() {
+                    selectedDate = value;
+                    error = null;
+                  }),
+          ),
+        ] else if (purchase != null) ...[
+          if (!editing) ...[
+            Text('任务名称', style: Theme.of(context).textTheme.labelMedium),
+            Text(taskName, style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 16),
+          ],
           DropdownButtonFormField<int>(
-            initialValue: ticketIndex,
+            initialValue: ticketIndex < 0 ? null : ticketIndex,
+            hint: const Text('请选择场次和票档'),
             isExpanded: true,
             decoration: const InputDecoration(labelText: '场次 / 票档'),
             items: [
@@ -2627,9 +2960,36 @@ class _TaskDialogState extends State<TaskDialog> {
                   }),
           ),
           const SizedBox(height: 14),
-          field(startAt, '开售时间（北京时间）', hint: '2026-11-20 20:00:00'),
+          Text('开售时间（北京时间）', style: Theme.of(context).textTheme.labelMedium),
+          const SizedBox(height: 4),
+          Wrap(
+            spacing: 4,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              Tooltip(
+                message: '选择开售时间',
+                child: OutlinedButton.icon(
+                  onPressed: busy ? null : chooseStartAt,
+                  icon: const Icon(LucideIcons.calendarClock, size: 18),
+                  label: Text(
+                    startAt.isEmpty
+                        ? '分发后立即开始'
+                        : startAt.replaceFirst('T', ' '),
+                  ),
+                ),
+              ),
+              if (startAt.isNotEmpty)
+                IconButton(
+                  tooltip: '清除开售时间',
+                  onPressed: busy ? null : () => setStartAt(''),
+                  icon: const Icon(LucideIcons.x, size: 18),
+                ),
+            ],
+          ),
           Text(
-            '默认使用所选票档的起售时间，Sisters 按此倒计时后开始抢票；留空则分发后立即开始。',
+            editing
+                ? '沿用任务已保存的开售时间，可重新选择或清除。清除后，任务将在分发后立即开始。'
+                : '默认使用所选票档的起售时间。清除时间后，任务将在分发后立即开始。',
             style: TextStyle(
               color: Theme.of(context).colorScheme.onSurfaceVariant,
               fontSize: 12,
@@ -2639,11 +2999,11 @@ class _TaskDialogState extends State<TaskDialog> {
           field(
             requestInterval,
             '抢票请求间隔（毫秒）',
-            hint: '100–60000，默认 1000',
+            hint: '100–60000，默认 $defaultRequestIntervalMs',
             keyboardType: TextInputType.number,
           ),
           Text(
-            '100–60000 毫秒，默认 1000 毫秒。每轮下单最多尝试 40 次；实际请求时间还受网络和冷却等待影响。',
+            '100–60000 毫秒，默认 $defaultRequestIntervalMs 毫秒。每轮下单最多尝试 40 次；实际请求时间还受网络和冷却等待影响。',
             style: TextStyle(
               color: Theme.of(context).colorScheme.onSurfaceVariant,
               fontSize: 12,
@@ -2668,7 +3028,20 @@ class _TaskDialogState extends State<TaskDialog> {
                     ),
             ),
           const SizedBox(height: 12),
-          if (addresses.isNotEmpty) ...[
+          if (editing && addressIndex >= 0)
+            Text(
+              '收货地址：${addresses[addressIndex]['name'] ?? ''} '
+              '${addresses[addressIndex]['prov'] ?? ''}${addresses[addressIndex]['city'] ?? ''}'
+              '${addresses[addressIndex]['area'] ?? ''}',
+            ),
+          if (editing && addressIndex < 0)
+            Text(
+              accountId == widget.task!.accountId
+                  ? '未找到原收货地址，请在哔哩哔哩核对后重新读取演出。'
+                  : '请先在此账号设置默认收货地址，再重新读取演出。',
+              style: TextStyle(color: Theme.of(context).colorScheme.warning),
+            ),
+          if (!editing && addresses.isNotEmpty) ...[
             DropdownButtonFormField<int>(
               initialValue: addressIndex,
               isExpanded: true,
@@ -2687,7 +3060,7 @@ class _TaskDialogState extends State<TaskDialog> {
             ),
             const SizedBox(height: 14),
           ],
-          if (addresses.isEmpty)
+          if (!editing && addresses.isEmpty)
             Padding(
               padding: EdgeInsets.only(bottom: 14),
               child: Text(
@@ -2695,12 +3068,7 @@ class _TaskDialogState extends State<TaskDialog> {
                 style: TextStyle(color: Theme.of(context).colorScheme.warning),
               ),
             ),
-          field(buyer, '联系人（必填）'),
-          field(tel, '联系电话（必填）'),
-          TextButton(
-            onPressed: busy ? null : () => setState(() => purchase = null),
-            child: const Text('重新选择演出'),
-          ),
+          if (!editing) ...[field(buyer, '联系人（必填）'), field(tel, '联系电话（必填）')],
           Text(
             '任务保存后不会立即执行。请在任务列表中选择机器并分发。',
             style: TextStyle(
@@ -2709,6 +3077,15 @@ class _TaskDialogState extends State<TaskDialog> {
             ),
           ),
         ],
+        if (purchase != null)
+          TextButton(
+            onPressed: busy
+                ? null
+                : editing
+                ? () => loadEdit()
+                : resetProject,
+            child: Text(editing ? '重新读取演出' : '重新选择演出'),
+          ),
       ],
     );
   }

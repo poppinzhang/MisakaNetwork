@@ -597,7 +597,57 @@ void main() {
     expect(find.text('重新登录此账号'), findsOneWidget);
   });
   testWidgets(
-    'task wizard validates buyer selection then saves a complete configuration',
+    'calendar project can use its default tickets without a second lookup',
+    (tester) async {
+      final runtime = FakeRuntime()
+        ..responses['purchase_context'] = {
+          'project_name': '测试演出',
+          'sales_dates': ['2026-11-28'],
+          'ticket_options': [
+            {'display': '默认场次的票档'},
+          ],
+        };
+      final c = controller(runtime: runtime);
+      await c.initialize(poll: false);
+      await c.addAccount('测试账号', [
+        {'name': 'session', 'value': 'test'},
+      ], uid: '123');
+      addTearDown(c.dispose);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(body: TaskDialog(controller: c)),
+        ),
+      );
+      await tester.enterText(find.byType(TextField), '1234');
+      await tester.tap(find.text('读取演出与购票人'));
+      await tester.pumpAndSettle();
+      expect(find.text('默认场次'), findsOneWidget);
+      await tester.tap(find.text('读取场次'));
+      await tester.pumpAndSettle();
+      expect(find.text('默认场次的票档'), findsOneWidget);
+      expect(
+        runtime.calls.where((op) => op == 'purchase_context'),
+        hasLength(1),
+      );
+      expect(find.text('测试演出'), findsOneWidget);
+      await tester.ensureVisible(find.text('重新选择演出'));
+      await tester.tap(find.text('重新选择演出'));
+      await tester.pumpAndSettle();
+      runtime.responses['purchase_context'] = {
+        'project_name': '第二场演出',
+        'ticket_options': [
+          {'display': '普通票'},
+        ],
+      };
+      await tester.enterText(find.byType(TextField), '5678');
+      await tester.tap(find.text('读取演出与购票人'));
+      await tester.pumpAndSettle();
+      expect(find.text('第二场演出'), findsOneWidget);
+      expect(find.text('测试演出'), findsNothing);
+    },
+  );
+  testWidgets(
+    'task wizard retries another calendar date and saves the selected ticket',
     (tester) async {
       tester.view.physicalSize = const Size(1000, 1100);
       tester.view.devicePixelRatio = 1;
@@ -605,6 +655,10 @@ void main() {
       addTearDown(tester.view.resetDevicePixelRatio);
       final runtime = FakeRuntime();
       runtime.responses['purchase_context'] = {
+        'sales_dates': ['2026-11-27', '2026-11-28'],
+        'ticket_options': [],
+      };
+      final datedContext = {
         'project_name': '测试演出',
         'selected_date': '2026-11-28',
         'ticket_options': [
@@ -612,7 +666,7 @@ void main() {
             'display': '测试场次 / 票档',
             'screen': '周六晚场',
             'desc': '前排票',
-            'sale_start': '2026-11-20 20:00:00',
+            'sale_start': '2026-11-20 20:00:37',
           },
         ],
         'buyers': [
@@ -639,20 +693,88 @@ void main() {
       final project = find.byWidgetPredicate(
         (w) => w is TextField && w.decoration?.labelText == '演出 ID 或会员购链接',
       );
+      Map<String, dynamic> lastPurchaseRequest() =>
+          runtime.parameters[runtime.calls.lastIndexOf('purchase_context')];
       await tester.enterText(project, '1234');
       await tester.tap(find.text('读取演出与购票人'));
       await tester.pumpAndSettle();
-      final start = find.byWidgetPredicate(
-        (w) => w is TextField && w.decoration?.labelText == '开售时间（北京时间）',
+      expect(lastPurchaseRequest().containsKey('selected_date'), isFalse);
+      final datePicker = find.ancestor(
+        of: find.text('场次日期'),
+        matching: find.byType(DropdownButtonFormField<String>),
       );
+      expect(datePicker, findsOneWidget);
+      expect(find.byType(TextField), findsNothing);
+      await tester.tap(datePicker);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('2026-11-27').last);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('读取场次'));
+      await tester.pumpAndSettle();
+      expect(lastPurchaseRequest()['selected_date'], '2026-11-27');
+      expect(find.textContaining('没有可选票档'), findsOneWidget);
+      expect(find.text('保存任务'), findsNothing);
+      runtime.responses['purchase_context'] = datedContext;
+      await tester.tap(datePicker);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('2026-11-28').last);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('读取场次'));
+      await tester.pumpAndSettle();
+      expect(lastPurchaseRequest()['selected_date'], '2026-11-28');
+      expect(find.text('测试场次 / 票档'), findsOneWidget);
+      expect(find.text('任务名称'), findsOneWidget);
+      expect(find.text('测试演出'), findsOneWidget);
       expect(
-        tester.widget<TextField>(start).controller!.text,
-        '2026-11-20 20:00:00',
+        find.byWidgetPredicate(
+          (w) =>
+              w is TextField &&
+              ['任务名称', '开售时间（北京时间）'].contains(w.decoration?.labelText),
+        ),
+        findsNothing,
       );
+      expect(find.text('2026-11-20 20:00:37'), findsOneWidget);
+      final chooseStart = find.byTooltip('选择开售时间');
+      await tester.ensureVisible(chooseStart);
+      await tester.tap(chooseStart);
+      await tester.pumpAndSettle();
+      final calendar = find.byType(CalendarDatePicker);
+      expect(
+        tester.widget<CalendarDatePicker>(calendar).initialDate,
+        DateTime(2026, 11, 20),
+      );
+      await tester.tap(
+        find.descendant(of: calendar, matching: find.text('21')),
+      );
+      await tester.pumpAndSettle();
+      for (final (unit, value) in [('时', 21), ('分', 1), ('秒', 38)]) {
+        final field = find.byWidgetPredicate(
+          (w) =>
+              w is DropdownButtonFormField<int> &&
+              w.decoration.labelText == unit,
+        );
+        await tester.ensureVisible(field);
+        await tester.tap(field);
+        await tester.pumpAndSettle();
+        final option = find
+            .descendant(
+              of: find.byType(ListView),
+              matching: find.text(value.toString().padLeft(2, '0')),
+            )
+            .last;
+        await tester.ensureVisible(option);
+        await tester.pumpAndSettle();
+        expect(option.hitTestable(), findsOneWidget);
+        await tester.tap(option);
+        await tester.pumpAndSettle();
+      }
+      await tester.tap(find.text('确定'));
+      await tester.pumpAndSettle();
+      expect(find.text('2026-11-21 21:01:38'), findsOneWidget);
       final interval = find.byWidgetPredicate(
         (w) => w is TextField && w.decoration?.labelText == '抢票请求间隔（毫秒）',
       );
-      expect(tester.widget<TextField>(interval).controller!.text, '1000');
+      expect(tester.widget<TextField>(interval).controller!.text, '500');
       expect(
         tester.widget<TextField>(interval).keyboardType,
         TextInputType.number,
@@ -676,12 +798,6 @@ void main() {
         ),
         '13800000000',
       );
-      await tester.enterText(start, '20:00');
-      await tester.tap(find.text('保存任务'));
-      await tester.pumpAndSettle();
-      expect(find.textContaining('开售时间应为北京时间'), findsOneWidget);
-      expect(runtime.calls, isNot(contains('build_config')));
-      await tester.enterText(start, '2026-11-20 20:00');
       for (final value in ['', '99', '60001', '100.5', 'abc']) {
         await tester.ensureVisible(interval);
         await tester.enterText(interval, value);
@@ -696,7 +812,7 @@ void main() {
       await tester.tap(find.text('保存任务'));
       await tester.pumpAndSettle();
       expect(c.state.tasks.single.name, '测试演出');
-      expect(c.state.tasks.single.startAt, '2026-11-20T20:00:00');
+      expect(c.state.tasks.single.startAt, '2026-11-21T21:01:38');
       expect(c.state.tasks.single.requestIntervalMs, 750);
       final summary = c.state.tasks.single.summary!;
       expect(summary.projectName, '测试演出');

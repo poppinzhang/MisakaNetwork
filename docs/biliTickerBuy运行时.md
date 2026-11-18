@@ -36,6 +36,12 @@ Docker 限制针对上游应用的运行与服务入口，不禁止本项目为�
 - `runtime/vendor_bili.py` 的导入白名单不包含上游 Web UI、Docker 启动文件和更新器；`runtime/build.py` 不打包 Gradio。独立运行时与 Android 内嵌客户端均不得新增这些服务入口。
 - 自制 TLS 和通知模块仍可能作为核心源码的一部分出现在内嵌目录中，当前结论是调用路径未启用，并非相关缺陷已修复或代码已全部移除。默认值、导入副作用或调用方式变化后必须重新核查。
 
+### 默认请求间隔调整复核（2026-11-18，未发布）
+
+在固定版本 v2.15.18（`227ebf73f5af3eec0019984a7cbcb722977453e8`）中复核了 bridge 到 `BuyConfig` 和 `task/buy.py` 的参数传递。省略间隔时 bridge 传入 500 毫秒，用于同一轮请求之间的等待。创建订单仍采用 `standard` 策略、单请求批次和每轮最多 40 次。平台请求沿用验证证书链与域名的标准客户端，Cookie 在内存中传递，购票资料进入原订单请求，回报仅含白名单字段。第三方通知的凭证与地址均为空。导入清单和构建配置继续排除上游 Web UI、Docker 启动器和 Gradio 分享入口。
+
+离线回归覆盖缺省间隔与显式间隔传递、环境变量和配置覆盖、空通知渠道，以及标准客户端对不受信证书和错误域名的拒绝。桌面锁定依赖的运行时测试 108 项通过、9 项跳过，Android 锁定依赖 114 项通过、3 项跳过。验证范围为源码和模拟数据，发行包与真实业务仍待单独验证。
+
 ### 请求间隔与固定尝试上限复核（2026-11-13，未发布）
 
 本次接通任务请求间隔并将每轮尝试上限固定为 40；上游仍为 v2.15.18 / `227ebf73f5af3eec0019984a7cbcb722977453e8`，导入白名单、内嵌快照和依赖锁定未变。重新审查 `interface/auth.py`、`interface/search.py`、`interface/common.py`、`util/request/BiliRequest.py`、`task/buy.py`、配置与通知构造及 bridge 入口，未增加网络目标或敏感数据出口。扫码、身份校验与搜索使用默认验证的 requests；场次、购票人与地址查询以及标准下单路径使用 httpx，沿用 `Session.verify=True`，超时或协议错误重建同一客户端，不切换自制 TLS。环境代理与 CA 设置仍可能影响请求路径和信任边界。
@@ -133,7 +139,7 @@ Cookie 支持 `[{"name":"...","value":"..."}]`、`{"cookie":[...]}`、`{"cookies
 
 `selection` 包含从零起的 `ticket_index`、非空 `buyer_indices`、`address_index`，以及 `buyer`（联系人）、`tel`（联系电话），可选 `phone`。当前沿用上游校验：必须选择收货地址，即使活动提供电子票。场次、实名购票人或地址不完整会真实失败，不构造虚假的可执行配置。
 
-`runtime_options` 仅支持 `interval`（整数毫秒，100–60000，默认 1000）、`time_start`（北京时间 `YYYY-MM-DDTHH:MM:SS`，只接受完整日期时间；只写时分的写法会按主机时区补全日期，因此拒绝）和 `wait_for_buy_button`。源码未发布的任务创建支持填写间隔，Sisters 将 `request_interval_ms` 校验后转交为 `interval`，并可同时转交 `time_start`。每轮下单尝试上限由 bridge 固定为 `create_retry_limit=40`，该选项不在输入白名单内，即使传入 40 也会被拒绝；未调整上游快照中的默认值。每轮上限不代表任务累计尝试上限，请求之间的实际时间还受响应耗时、重新准备与冷却逻辑影响。每个任务采用单请求创建订单批次，禁用声音、外部通知、自动打开浏览器与随机日志。上游按北京时间（UTC+8）倒计时，与 Sisters 主机时区无关；LastOrder 在界面标注北京时间。
+`runtime_options` 仅支持 `interval`（整数毫秒，100–60000，未发布源码默认 500，0.4.1 默认 1000）、`time_start`（北京时间 `YYYY-MM-DDTHH:MM:SS`，只接受完整日期时间；只写时分的写法会按主机时区补全日期，因此拒绝）和 `wait_for_buy_button`。Sisters 将 `request_interval_ms` 校验后转交为 `interval`，并可同时转交 `time_start`。每轮下单尝试上限由 bridge 固定为 `create_retry_limit=40`，该选项不在输入白名单内，即使传入 40 也会被拒绝；未调整上游快照中的默认值。每轮上限不代表任务累计尝试上限，请求之间的实际时间还受响应耗时、重新准备与冷却逻辑影响。每个任务采用单请求创建订单批次，禁用声音、外部通知、自动打开浏览器与随机日志。上游按北京时间（UTC+8）倒计时，与 Sisters 主机时区无关；LastOrder 在界面标注北京时间。
 
 执行期间会输出 `{"type":"progress","status":"running","stage":"preparing","message":"抢票任务执行中","attempt_current":1,"attempt_total":40}`。`stage` 是稳定的协议代码，由上游阶段名翻译而来：`starting`（启动）、`waiting`（等待开票，可带 `countdown_seconds`）、`preparing`（订单准备）、`ordering`（创建订单）、`ordered`（抢票成功）、`page_timeout`（购票页校验超时）；其他上游阶段统一为 `working`。`status` 取 `running`、`cooldown`、`succeeded`、`duplicate_order`、`failed`、`cancelled`、`completed` 之一。消息与 stage 都不转发上游原文、HTTP 响应、代理信息或原始错误字符串。上游新增阶段名时测试会失败，提醒同步更新 bridge 与 Sisters 的词表。终态 `succeeded` 表示上游结构化状态确认创建订单；`duplicate_order` 表示检测到已有订单：上游在限购已有订单（100003）、存在未完成订单（100048）或重复订单（100079）时以 `completed` 停止，bridge 启动任务时把这三条停止规则改报为 `duplicate_order`。`completed` 表示结束但尚未确认创建订单，不能向用户展示抢票成功；`failed` / `cancelled` 返回 `ok:false`。一旦出现 `succeeded` 或 `duplicate_order`，之后的上游异常或取消只会停止任务，不再改变终态。
 

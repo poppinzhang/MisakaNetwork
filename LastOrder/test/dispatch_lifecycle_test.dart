@@ -94,6 +94,7 @@ void main() {
         await c.refresh();
         expect(c.activeDispatchCount(task), 0);
         expect(store.state.tasks.single.latestDispatch('a')!.finished, isTrue);
+        expect(c.canEditTask(task), isFalse);
         expect(c.isDispatchBlocked(task, 'a'), isFalse);
 
         expect(await c.dispatch(task, [machine('a')]), isEmpty);
@@ -224,6 +225,7 @@ void main() {
       gateway.loseResponse = true;
       final errors = await c.dispatch(task, [machine('a')]);
       expect(errors['节点 a'], contains('执行结果未确认'));
+      expect(c.canEditTask(task), isFalse);
       final latestId = c.state.tasks.single.latestDispatch('a')!.executionId;
       expect(latestId, isNot(task.id));
       // The service loses its most recent record; an older success remains.
@@ -256,6 +258,7 @@ void main() {
       final errors = await c.dispatch(task, [machine('a')]);
       expect(errors['节点 a'], '队列已满');
       expect(c.state.tasks.single.dispatches, isEmpty);
+      expect(c.canEditTask(task), isTrue);
       expect(c.activeDispatchCount(task), 0);
       gateway.beforeSubmit = null;
       expect(await c.dispatch(task, [machine('a')]), isEmpty);

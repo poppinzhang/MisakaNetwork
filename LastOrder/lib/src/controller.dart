@@ -122,6 +122,7 @@ class AppController extends ChangeNotifier {
   Future<void> _stateOperation = Future<void>.value();
   Future<void>? _refreshOperation;
   final Set<(String, String)> _dispatching = {};
+  final Set<String> _changingTasks = {};
 
   static bool _terminal(TaskState state) =>
       state == TaskState.TASK_STATE_SUCCEEDED ||
@@ -144,6 +145,21 @@ class AppController extends ChangeNotifier {
         state.tasks.where((t) => t.id == task.id).firstOrNull ?? task,
         machineId,
       );
+
+  bool _hasDispatch(TicketTask task) =>
+      task.dispatches.isNotEmpty ||
+      _dispatching.any((entry) => entry.$1 == task.id) ||
+      statuses.values.any(
+        (node) => node.tasks.any((remote) => remote.id == task.id),
+      );
+
+  bool canEditTask(TicketTask task) {
+    final current = state.tasks.where((t) => t.id == task.id).firstOrNull;
+    return current != null &&
+        current.configRevision == task.configRevision &&
+        !_changingTasks.contains(task.id) &&
+        !_hasDispatch(current);
+  }
 
   int activeDispatchCount(TicketTask task) {
     final current =
@@ -1002,9 +1018,6 @@ class AppController extends ChangeNotifier {
     return value;
   }
 
-  Map<String, dynamic> _configWithoutCookies(String value) =>
-      Map<String, dynamic>.from(_withoutCookies(jsonDecode(value)) as Map);
-
   Future<void> removeAccount(Account account) =>
       _forAccount(account.id, () async {
         final current = _requireAccount(account.id);
@@ -1024,6 +1037,66 @@ class AppController extends ChangeNotifier {
         _notify();
       });
 
+  TicketTask _requireTaskRevision(TicketTask snapshot) {
+    final current = _requireTask(snapshot.id);
+    if (current.configRevision != snapshot.configRevision) {
+      throw const UserError('任务配置已修改，请重新打开任务后再操作。');
+    }
+    return current;
+  }
+
+  void _requireUndispatched(TicketTask task) {
+    if (_hasDispatch(task)) {
+      throw const UserError('任务正在分发或已有分发记录，无法修改。');
+    }
+  }
+
+  Future<Map<String, dynamic>> _readStoredTaskConfig(TicketTask task) async {
+    final stored = await store.readSecret(task.configKey);
+    if (stored == null) throw const UserError('安全存储中没有任务配置，请重新创建任务。');
+    try {
+      final config = jsonDecode(stored);
+      if (config is Map<String, dynamic>) {
+        return Map<String, dynamic>.from(_withoutCookies(config) as Map);
+      }
+    } on FormatException {
+      // A JSON parser error can refer to sensitive source text.
+    }
+    throw const UserError('安全存储中的任务配置格式无效，请重新创建任务。');
+  }
+
+  TicketTask _requireStableTask(TicketTask snapshot) {
+    final current = _requireTaskRevision(snapshot);
+    if (_changingTasks.contains(current.id)) {
+      throw const UserError('任务正在修改或删除，请稍后重试。');
+    }
+    return current;
+  }
+
+  Future<Map<String, dynamic>> readTaskConfig(TicketTask task) async {
+    _requireUndispatched(_requireStableTask(task));
+    final config = await _readStoredTaskConfig(task);
+    _requireUndispatched(_requireStableTask(task));
+    return config;
+  }
+
+  Future<T> _changeTask<T>(
+    TicketTask task,
+    Future<T> Function(TicketTask) action,
+  ) async {
+    final current = _requireTaskRevision(task);
+    if (!_changingTasks.add(task.id)) {
+      throw const UserError('任务正在修改或删除，请稍后重试。');
+    }
+    _notify();
+    try {
+      return await action(current);
+    } finally {
+      _changingTasks.remove(task.id);
+      _notify();
+    }
+  }
+
   Future<TicketTask> addTask(
     String name,
     Account account,
@@ -1031,15 +1104,104 @@ class AppController extends ChangeNotifier {
     String startAt = '',
     int requestIntervalMs = defaultRequestIntervalMs,
     TaskSummary? summary,
-  }) => _forAccount(account.id, () async {
-    final current = _requireAccount(account.id);
+  }) async {
     if (name.trim().isEmpty) throw const UserError('请填写任务名称。');
-    final start = normalizeStartAt(startAt);
-    validateRequestIntervalMs(requestIntervalMs);
-    if (current.authStatus != AccountAuthStatus.valid) {
+    return _storeTask(
+      TicketTask(
+        id: const Uuid().v4(),
+        name: name.trim(),
+        accountId: account.id,
+        startAt: normalizeStartAt(startAt),
+        requestIntervalMs: requestIntervalMs,
+        summary: summary,
+      ),
+      config,
+    );
+  }
+
+  Future<TicketTask> copyTask(TicketTask source) async {
+    final current = _requireStableTask(source);
+    final config = await _readStoredTaskConfig(current);
+    final copy = TicketTask(
+      id: const Uuid().v4(),
+      name: current.name,
+      accountId: current.accountId,
+      startAt: current.startAt,
+      requestIntervalMs: current.requestIntervalMs,
+      summary: current.summary,
+    );
+    await _persistTaskConfig(copy, config, () {
+      // Dispatch may have updated the source's history while reading its
+      // secret. Only changes to the source configuration invalidate the copy.
+      final original = _requireStableTask(current);
+      final tasks = [...state.tasks];
+      tasks.insert(tasks.indexOf(original) + 1, copy);
+      return _next(tasks: tasks);
+    });
+    return copy;
+  }
+
+  Future<TicketTask> updateTask(
+    TicketTask original,
+    Account account,
+    Map<String, dynamic> config, {
+    required String startAt,
+    required int requestIntervalMs,
+    required TaskSummary summary,
+  }) => _changeTask(original, (current) async {
+    _requireUndispatched(current);
+    final projectId = current.summary?.projectId ?? '';
+    final stored = await _readStoredTaskConfig(current);
+    final oldProjectId =
+        projectId.isEmpty && (stored['link_id']?.toString() ?? '').isEmpty
+        ? stored['project_id']?.toString() ?? ''
+        : projectId;
+    final ticketProject = config['project_id']?.toString() ?? '';
+    final isLinked = (config['link_id']?.toString() ?? '').isNotEmpty;
+    if ((oldProjectId.isNotEmpty && summary.projectId != oldProjectId) ||
+        (!isLinked &&
+            ticketProject.isNotEmpty &&
+            ticketProject != summary.projectId)) {
+      throw const UserError('只能修改原演出的场次和票档。');
+    }
+    for (final key in ['buyer', 'tel']) {
+      if (stored.containsKey(key) && stored[key] != config[key]) {
+        throw const UserError('请保留原任务的联系人和联系电话。');
+      }
+    }
+    if (current.accountId == account.id) {
+      final oldAddress = stored['deliver_info'];
+      final newAddress = config['deliver_info'];
+      if (oldAddress is Map &&
+          oldAddress['addr_id'] != null &&
+          (newAddress is! Map ||
+              newAddress['addr_id']?.toString() !=
+                  oldAddress['addr_id'].toString())) {
+        throw const UserError('请核对原任务的收货地址。');
+      }
+    }
+    final updated = TicketTask(
+      id: current.id,
+      name: current.name,
+      accountId: account.id,
+      startAt: normalizeStartAt(startAt),
+      requestIntervalMs: requestIntervalMs,
+      summary: summary,
+      configRevision: current.configRevision + 1,
+    );
+    return _storeTask(updated, config, previous: current);
+  });
+
+  Future<TicketTask> _storeTask(
+    TicketTask task,
+    Map<String, dynamic> config, {
+    TicketTask? previous,
+  }) => _forAccount(task.accountId, () async {
+    final account = _requireAccount(task.accountId);
+    if (account.authStatus != AccountAuthStatus.valid) {
       throw const UserError('账号未处于有效登录状态，请先检查或重新登录。');
     }
-    final raw = await store.readSecret('account.${current.id}');
+    final raw = await store.readSecret('account.${account.id}');
     if (raw == null) throw const UserError('登录凭据不存在，请重新登录。');
     final clean = Map<String, dynamic>.from(_withoutCookies(config) as Map);
     final validation = await runtime.call('validate', {
@@ -1050,35 +1212,52 @@ class AppController extends ChangeNotifier {
         '任务配置无效：${(validation['errors'] as List? ?? []).join('；')}',
       );
     }
-    final task = TicketTask(
-      id: const Uuid().v4(),
-      name: name.trim(),
-      accountId: current.id,
-      startAt: start,
-      requestIntervalMs: requestIntervalMs,
-      summary: summary,
-    );
-    await store.writeSecret('task.${task.id}', jsonEncode(clean));
-    try {
-      await _save(() => _next(tasks: [...state.tasks, task]));
-    } catch (_) {
-      await store.deleteSecret('task.${task.id}');
-      rethrow;
+    await _persistTaskConfig(task, clean, () {
+      if (previous == null) return _next(tasks: [...state.tasks, task]);
+      _requireUndispatched(_requireTaskRevision(previous));
+      return _next(
+        tasks: [for (final t in state.tasks) t.id == task.id ? task : t],
+      );
+    });
+    if (previous != null) {
+      try {
+        await store.deleteSecret(previous.configKey);
+      } catch (_) {
+        // The committed revision is authoritative. The next edit overwrites
+        // this inactive slot, and task deletion verifies both slots are gone.
+      }
     }
     return task;
   });
 
-  Future<void> removeTask(TicketTask task) =>
-      _forAccount(task.accountId, () async {
-        await store.deleteSecret('task.${task.id}');
-        if (await store.readSecret('task.${task.id}') != null) {
+  Future<void> _persistTaskConfig(
+    TicketTask task,
+    Map<String, dynamic> config,
+    SavedState Function() buildState,
+  ) async {
+    try {
+      await store.writeSecret(task.configKey, jsonEncode(config));
+      await _save(buildState);
+    } catch (_) {
+      await store.deleteSecret(task.configKey);
+      rethrow;
+    }
+  }
+
+  Future<void> removeTask(TicketTask task) => _changeTask(
+    task,
+    (current) => _forAccount(current.accountId, () async {
+      for (final key in [current.inactiveConfigKey, current.configKey]) {
+        await store.deleteSecret(key);
+        if (await store.readSecret(key) != null) {
           throw const UserError('任务配置未能从安全存储删除，请检查权限后重试。');
         }
-        await _save(
-          () =>
-              _next(tasks: state.tasks.where((t) => t.id != task.id).toList()),
-        );
-      });
+      }
+      await _save(
+        () => _next(tasks: state.tasks.where((t) => t.id != task.id).toList()),
+      );
+    }),
+  );
 
   Future<Map<String, String>> dispatch(
     TicketTask task,
@@ -1086,7 +1265,10 @@ class AppController extends ChangeNotifier {
   ) async {
     if (machines.isEmpty) throw const UserError('请至少选择一台 Sisters。');
     final errors = <String, String>{};
-    final saved = _requireTask(task.id);
+    final saved = _requireTaskRevision(task);
+    if (_changingTasks.contains(task.id)) {
+      throw const UserError('任务正在修改或删除，请稍后重新分发。');
+    }
     final pending = <Machine>[];
     final revisions = {
       for (final machine in machines)
@@ -1115,25 +1297,21 @@ class AppController extends ChangeNotifier {
     try {
       final account = _requireAccount(saved.accountId);
       await ensureAccountValid(account);
-      final (cookie, config, revision) = await _forAccount(
-        account.id,
-        () async {
-          final current = _requireAccount(account.id);
-          if (current.authStatus != AccountAuthStatus.valid) {
-            throw const UserError('账号状态已变化，请重新检查后分发。');
-          }
-          final revision = _credentialRevisions[account.id] ?? 0;
-          final raw = await store.readSecret('account.${account.id}');
-          if (raw == null) throw const UserError('登录凭据不存在，请重新登录。');
-          final stored = await store.readSecret('task.${task.id}');
-          if (stored == null) throw const UserError('安全存储中没有任务配置，请重新创建任务。');
-          return (
-            jsonDecode(raw) as List<dynamic>,
-            jsonEncode(_configWithoutCookies(stored)),
-            revision,
-          );
-        },
-      );
+      final (
+        cookie,
+        config,
+        revision,
+      ) = await _forAccount(account.id, () async {
+        final current = _requireAccount(account.id);
+        if (current.authStatus != AccountAuthStatus.valid) {
+          throw const UserError('账号状态已变化，请重新检查后分发。');
+        }
+        final revision = _credentialRevisions[account.id] ?? 0;
+        final raw = await store.readSecret('account.${account.id}');
+        if (raw == null) throw const UserError('登录凭据不存在，请重新登录。');
+        final stored = await _readStoredTaskConfig(saved);
+        return (jsonDecode(raw) as List<dynamic>, jsonEncode(stored), revision);
+      });
       void requireUnchanged() {
         if (revision != (_credentialRevisions[account.id] ?? 0) ||
             _account(account.id)?.authStatus != AccountAuthStatus.valid) {

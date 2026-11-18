@@ -433,7 +433,7 @@ class BridgeTests(unittest.TestCase):
                 self.assertEqual(self.built_options, [])
 
     def test_run_interval_defaults_and_bounds_keep_fixed_attempt_limit(self):
-        for options, expected in ((None, 1000), ({"interval": 100}, 100), ({"interval": 1250}, 1250), ({"interval": 60000}, 60000)):
+        for options, expected in ((None, 500), ({"interval": 100}, 100), ({"interval": 1000}, 1000), ({"interval": 60000}, 60000)):
             with self.subTest(options=options):
                 code, _ = self.run_stream(lambda: iter([]), runtime_options=options)
                 self.assertEqual(code, 0)

@@ -19,7 +19,7 @@ message TaskRequest {
   // the agent's own time zone. Empty starts immediately after submission.
   string time_start = 5;
   // Ticket request interval in integer milliseconds, 100..60000.
-  // Zero uses the default of 1000 ms.
+  // Zero uses the default of 500 ms.
   int32 request_interval_ms = 6;
 }
 enum TaskState {

@@ -165,6 +165,7 @@ String normalizeStartAt(String value) {
 /// context, buyer details and credentials must stay in secret storage.
 class TaskSummary {
   const TaskSummary({
+    this.projectId = '',
     this.projectName = '',
     this.screenName = '',
     this.ticketName = '',
@@ -172,6 +173,8 @@ class TaskSummary {
     this.quantity = 0,
   });
 
+  /// The event that supplied the options, including linked merchandise tickets.
+  final String projectId;
   final String projectName, screenName, ticketName, selectedDate;
   final int quantity;
 
@@ -197,7 +200,13 @@ class TaskSummary {
 
     final screen = text(ticket['screen']);
     final description = text(ticket['desc']);
+    final source = purchase['project_id'];
+    final projectId = source is int ? source.toString() : text(source);
+    if (projectId.isNotEmpty && !RegExp(r'^[1-9][0-9]*$').hasMatch(projectId)) {
+      throw const UserError('演出编号异常，请重新读取演出后重试。');
+    }
     return TaskSummary(
+      projectId: projectId,
       projectName: text(purchase['project_name']),
       screenName: screen.isEmpty ? text(ticket['screen_name']) : screen,
       ticketName: description.isEmpty ? text(ticket['display']) : description,
@@ -207,6 +216,7 @@ class TaskSummary {
   }
 
   Map<String, dynamic> toJson() => {
+    if (projectId.isNotEmpty) 'projectId': projectId,
     'projectName': projectName,
     'screenName': screenName,
     'ticketName': ticketName,
@@ -223,10 +233,15 @@ class TaskSummary {
     }
 
     final quantity = j['quantity'] ?? 0;
-    if (quantity is! int || quantity < 0) {
+    final projectId = text('projectId');
+    if (quantity is! int ||
+        quantity < 0 ||
+        (projectId.isNotEmpty &&
+            !RegExp(r'^[1-9][0-9]*$').hasMatch(projectId))) {
       throw const FormatException('任务摘要格式无效。');
     }
     return TaskSummary(
+      projectId: projectId,
       projectName: text('projectName'),
       screenName: text('screenName'),
       ticketName: text('ticketName'),
@@ -236,7 +251,7 @@ class TaskSummary {
   }
 }
 
-const defaultRequestIntervalMs = 1000;
+const defaultRequestIntervalMs = 500;
 const minRequestIntervalMs = 100;
 const maxRequestIntervalMs = 60000;
 const requestIntervalError = '抢票请求间隔应为 100–60000 毫秒的整数。';
@@ -256,7 +271,8 @@ int parseRequestIntervalMs(String value) {
 }
 
 int _storedRequestIntervalMs(Object? value) {
-  if (value == null) return defaultRequestIntervalMs;
+  // Tasks saved before the interval field existed used a fixed 1000 ms.
+  if (value == null) return 1000;
   if (value is! int ||
       value < minRequestIntervalMs ||
       value > maxRequestIntervalMs) {
@@ -296,6 +312,7 @@ class TicketTask {
     required this.accountId,
     this.startAt = '',
     this.requestIntervalMs = defaultRequestIntervalMs,
+    this.configRevision = 0,
     List<String> dispatchedTo = const [],
     List<TaskDispatch> dispatches = const [],
     this.summary,
@@ -306,6 +323,7 @@ class TicketTask {
          ...dispatches,
        ]) {
     validateRequestIntervalMs(requestIntervalMs);
+    if (configRevision < 0) throw const FormatException('任务配置修订号无效。');
   }
   final String id, name, accountId;
 
@@ -313,6 +331,12 @@ class TicketTask {
   /// soon as a machine accepts the task.
   final String startAt;
   final int requestIntervalMs;
+  final int configRevision;
+
+  // Keep the previous secret readable until the new metadata commits atomically.
+  String get configKey => configRevision.isEven ? 'task.$id' : 'task.$id.alt';
+  String get inactiveConfigKey =>
+      configRevision.isEven ? 'task.$id.alt' : 'task.$id';
 
   final List<TaskDispatch> dispatches;
   List<String> get dispatchedTo =>
@@ -363,6 +387,7 @@ class TicketTask {
     accountId: accountId,
     startAt: startAt,
     requestIntervalMs: requestIntervalMs,
+    configRevision: configRevision,
     dispatches: next,
     summary: summary,
   );
@@ -372,6 +397,7 @@ class TicketTask {
     'accountId': accountId,
     'startAt': startAt,
     'requestIntervalMs': requestIntervalMs,
+    if (configRevision != 0) 'configRevision': configRevision,
     'dispatches': dispatches.map((d) => d.toJson()).toList(),
     if (summary != null) 'summary': summary!.toJson(),
   };
@@ -381,6 +407,11 @@ class TicketTask {
     accountId: j['accountId'] as String,
     startAt: j['startAt'] as String? ?? '',
     requestIntervalMs: _storedRequestIntervalMs(j['requestIntervalMs']),
+    configRevision: switch (j['configRevision']) {
+      null when !j.containsKey('configRevision') => 0,
+      int revision => revision,
+      _ => throw const FormatException('任务配置修订号无效。'),
+    },
     dispatchedTo: [
       for (final id in j['dispatchedTo'] as List? ?? const []) id as String,
     ],

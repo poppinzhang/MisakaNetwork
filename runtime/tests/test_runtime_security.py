@@ -99,7 +99,10 @@ class EmbeddedRuntimeSecurityTests(unittest.TestCase):
                 patch("requests.sessions.Session.request", side_effect=AssertionError("HTTP disabled")) as requests_call, \
                 patch("httpx.Client.request", side_effect=AssertionError("HTTP disabled")) as httpx_call, \
                 patch("task.buy.Buy", return_value=SimpleNamespace(stream=lambda: iter([]))) as buy:
-            result = bridge.run_task({"config": config, "cookies": {"session": "synthetic-cookie"}, "runtime_options": {"interval": 750}}, self.engine, output.append)
+            params = {"config": config, "cookies": {"session": "synthetic-cookie"}}
+            bridge.run_task(params, self.engine, output.append)
+            self.assertEqual(buy.call_args.kwargs["config"].interval, 500)
+            result = bridge.run_task({**params, "runtime_options": {"interval": 750}}, self.engine, output.append)
             actual = buy.call_args.kwargs["config"]
             self.assertIsInstance(actual, BuyConfig)
             self.assertEqual(actual.interval, 750)

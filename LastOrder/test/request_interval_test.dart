@@ -9,7 +9,7 @@ void main() {
   test(
     'request interval accepts decimal integer milliseconds within bounds',
     () {
-      for (final value in [100, 750, 1000, 60000]) {
+      for (final value in [100, 500, 750, 1000, 60000]) {
         expect(parseRequestIntervalMs(' $value '), value);
       }
       for (final value in [
@@ -98,7 +98,7 @@ void main() {
       await reloaded.initialize(poll: false);
       final tasks = reloaded.state.tasks;
       expect(await reloaded.dispatch(tasks.first, [machine('a')]), isEmpty);
-      expect(gateway.submitted['a']!.requestIntervalMs, 1000);
+      expect(gateway.submitted['a']!.requestIntervalMs, 500);
       expect(
         await reloaded.dispatch(tasks.last, [machine('a'), machine('b')]),
         isEmpty,
@@ -120,7 +120,7 @@ void main() {
     final account = await c.addAccount('测试', [
       {'name': 's', 'value': 'v'},
     ], uid: '123');
-    for (final value in [1000, 750]) {
+    for (final value in [500, 750]) {
       final task = await c.addTask('任务', account, {}, requestIntervalMs: value);
       final errors = await c.dispatch(task, [machine('a')]);
       expect(errors['节点 a'], contains('重新部署'));

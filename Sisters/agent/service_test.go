@@ -241,7 +241,7 @@ func TestTimeStartIsValidatedAndBoundToPayload(t *testing.T) {
 			Options runOptions `json:"runtime_options"`
 		} `json:"params"`
 	}
-	if json.Unmarshal(payload, &decoded) != nil || decoded.Params.Options.TimeStart != "2026-11-20T20:00:00" || decoded.Params.Options.Interval != 1000 {
+	if json.Unmarshal(payload, &decoded) != nil || decoded.Params.Options.TimeStart != "2026-11-20T20:00:00" || decoded.Params.Options.Interval != 500 {
 		t.Fatalf("time_start not forwarded: %s", payload)
 	}
 	if timedFingerprint == plainFingerprint {
@@ -272,7 +272,7 @@ func TestRequestIntervalIsValidatedAndForwarded(t *testing.T) {
 			}
 		})
 	}
-	for _, interval := range []int32{0, 100, 750, 1000, 60000} {
+	for _, interval := range []int32{0, 100, 500, 750, 1000, 60000} {
 		for _, start := range []string{"", "2026-11-20T20:00:00"} {
 			t.Run(fmt.Sprint(interval)+start, func(t *testing.T) {
 				r := request("task")
@@ -292,7 +292,7 @@ func TestRequestIntervalIsValidatedAndForwarded(t *testing.T) {
 				}
 				want := interval
 				if want == 0 {
-					want = 1000
+					want = 500
 				}
 				if decoded.Params.Options["interval"] != float64(want) {
 					t.Fatalf("interval not forwarded: %s", payload)
@@ -322,9 +322,9 @@ func TestRequestIntervalBoundToIdempotency(t *testing.T) {
 		t.Fatal(err)
 	}
 	explicitDefault := request("task")
-	explicitDefault.RequestIntervalMs = 1000
+	explicitDefault.RequestIntervalMs = 500
 	if _, err := s.SubmitTask(context.Background(), explicitDefault); err != nil {
-		t.Fatalf("default and explicit 1000 ms must be idempotent: %v", err)
+		t.Fatalf("default and explicit 500 ms must be idempotent: %v", err)
 	}
 	changed := request("task")
 	changed.RequestIntervalMs = 750

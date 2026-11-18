@@ -20,11 +20,19 @@ void main() {
       addTearDown(tester.view.resetViewInsets);
       addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
 
+      // Sisters accepts at most 200 Unicode code points and no control characters.
+      final projectName = '  特别演出\n\t${'🎫' * 201}  ';
+      final taskName = '特别演出 ${'🎫' * 195}';
       final runtime = FakeRuntime()
         ..responses['purchase_context'] = {
-          'project_name': '测试演出',
+          'project_name': projectName,
           'ticket_options': [
-            {'display': '测试场次 / 票档', 'screen': '晚场', 'desc': '普通票'},
+            {
+              'display': '测试场次 / 票档',
+              'screen': '晚场',
+              'desc': '普通票',
+              'sale_start': '2026-11-20 19:15:46',
+            },
           ],
           'buyers': [
             {'name': '测试购票人'},
@@ -61,11 +69,42 @@ void main() {
       );
       await tester.tap(find.text('新任务'));
       await tester.pumpAndSettle();
+      expect(find.byType(TextField), findsOneWidget);
       await tester.ensureVisible(input('演出 ID 或会员购链接'));
       await tester.enterText(input('演出 ID 或会员购链接'), '1234');
       await tester.tap(find.text('读取演出与购票人'));
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
+      expect(
+        runtime.parameters[runtime.calls.indexOf('purchase_context')]
+            .containsKey('selected_date'),
+        isFalse,
+      );
+      expect(find.text('场次日期'), findsNothing);
+      expect(find.text(taskName), findsOneWidget);
+      expect(find.text('2026-11-20 19:15:46'), findsOneWidget);
+      final chooseStart = find.byTooltip('选择开售时间');
+      await tester.ensureVisible(chooseStart);
+      await tester.tap(chooseStart);
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      final otherDay = find.descendant(
+        of: find.byType(CalendarDatePicker),
+        matching: find.text('21'),
+      );
+      await tester.ensureVisible(otherDay);
+      await tester.tap(otherDay);
+      await tester.pumpAndSettle();
+      expect(find.text('确定').hitTestable(), findsOneWidget);
+      expect(find.text('取消').hitTestable(), findsOneWidget);
+      await tester.tap(find.text('取消'));
+      await tester.pumpAndSettle();
+      expect(find.text('2026-11-20 19:15:46'), findsOneWidget);
+      final clearStart = find.byTooltip('清除开售时间');
+      await tester.ensureVisible(clearStart);
+      await tester.tap(clearStart);
+      await tester.pumpAndSettle();
+      expect(find.text('分发后立即开始'), findsOneWidget);
 
       await tester.ensureVisible(find.text('测试购票人'));
       await tester.tap(find.text('测试购票人'));
@@ -111,6 +150,8 @@ void main() {
       expect(find.byType(TaskDialog), findsNothing);
       expect(c.state.tasks.single.requestIntervalMs, 60000);
       expect(store.state.tasks.single.requestIntervalMs, 60000);
+      expect(store.state.tasks.single.name, taskName);
+      expect(store.state.tasks.single.startAt, isEmpty);
       expect(
         runtime.calls,
         containsAllInOrder(['purchase_context', 'build_config', 'validate']),

@@ -156,7 +156,7 @@ func validateRequest(req *pb.TaskRequest) ([]byte, [32]byte, error) {
 	}
 	interval := req.RequestIntervalMs
 	if interval == 0 {
-		interval = 1000
+		interval = 500
 	}
 	if interval < 100 || interval > 60000 {
 		return nil, [32]byte{}, errors.New("request_interval_ms must be between 100 and 60000 milliseconds")

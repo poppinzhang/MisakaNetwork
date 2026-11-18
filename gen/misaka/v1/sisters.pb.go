@@ -169,7 +169,7 @@ type TaskRequest struct {
 	// the agent's own time zone. Empty starts immediately after submission.
 	TimeStart string `protobuf:"bytes,5,opt,name=time_start,json=timeStart,proto3" json:"time_start,omitempty"`
 	// Ticket request interval in integer milliseconds, 100..60000.
-	// Zero uses the default of 1000 ms.
+	// Zero uses the default of 500 ms.
 	RequestIntervalMs int32 `protobuf:"varint,6,opt,name=request_interval_ms,json=requestIntervalMs,proto3" json:"request_interval_ms,omitempty"`
 	unknownFields     protoimpl.UnknownFields
 	sizeCache         protoimpl.SizeCache

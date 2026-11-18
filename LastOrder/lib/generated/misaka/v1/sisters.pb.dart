@@ -225,7 +225,7 @@ class TaskRequest extends $pb.GeneratedMessage {
   void clearTimeStart() => $_clearField(5);
 
   /// Ticket request interval in integer milliseconds, 100..60000.
-  /// Zero uses the default of 1000 ms.
+  /// Zero uses the default of 500 ms.
   @$pb.TagNumber(6)
   $core.int get requestIntervalMs => $_getIZ(5);
   @$pb.TagNumber(6)
