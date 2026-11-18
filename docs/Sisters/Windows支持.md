@@ -1,6 +1,6 @@
 # Windows Sisters（0.4.1）
 
-0.4.0 新增 Windows 10 及以上的 **x64 / amd64** Sisters 实现，不支持 Windows 7/8/8.1、32 位 Windows 或 Windows arm64；0.4.1 修复了 Win32-OpenSSH 上传与写入配置停滞并已[公开发布](https://github.com/poppinzhang/MisakaNetwork/releases/tag/0.4.1)。每份完整 LastOrder 携带 Linux/macOS arm64/x64 与 Windows x64 共五种同版本离线包；0.3.2 及更早安装包不包含 Windows Sisters。0.4.1 全平台预构建、正式 Tag 构建与 Windows 原生 CI 证据见 [0.4.1 发布记录](../releases/0.4.1.md)（0.4.0 交付记录见 [0.4.0 发布记录](../releases/0.4.0.md)）。
+0.4.0 新增 Windows 10 及以上的 **x64 / amd64** Sisters 实现，不支持 Windows 7/8/8.1、32 位 Windows 或 Windows arm64；0.4.1 修复了 Win32-OpenSSH 上传与写入配置停滞并已[公开发布](https://github.com/poppinzhang/MisakaNetwork/releases/tag/0.4.1)。0.4.2 按统一版本重新交付了包含该修复的 Windows Sisters，当前安装包见 [0.4.2 发布记录](../releases/0.4.2.md)。每份完整 LastOrder 携带 Linux/macOS arm64/x64 与 Windows x64 共五种同版本离线包；0.3.2 及更早安装包不包含 Windows Sisters。0.4.1 修复证据见 [0.4.1 发布记录](../releases/0.4.1.md)（0.4.0 交付记录见 [0.4.0 发布记录](../releases/0.4.0.md)）。
 
 ## 机器准备
 

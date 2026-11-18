@@ -4,7 +4,7 @@
 
 ## 0.4.2 — 2026-11-18
 
-- **交付状态：发布准备完成，待构建。** 源码版本、更新记录与 [0.4.2 发布记录](docs/releases/0.4.2.md) 已准备；尚未执行 GitHub Actions 全平台构建，也未创建公开 Release。不预写 CI 通过或真实业务验收。当前公开安装包仍是 [0.4.1](https://github.com/poppinzhang/MisakaNetwork/releases/tag/0.4.1)。
+- **交付状态：统一版本 0.4.2+15 已公开正式发布。** [GitHub Release 0.4.2](https://github.com/poppinzhang/MisakaNetwork/releases/tag/0.4.2) 对应标签 `0.4.2`、提交 `707e2a8dd6479cf515f527e9e173299dfa62e711`；正式 Actions [44328580763](https://github.com/poppinzhang/MisakaNetwork/actions/runs/44328580763) 完成五种 Sisters、五种 LastOrder（Android 使用 `release-keystore` 正式签名）的构建与校验，12 个资产已核验并标记 `Latest`（Release ID `450190894`，非草稿、非预发布）。第一次尝试中 Android 依赖下载返回 HTTP 429、macOS Intel 下载 Dart SDK 时域名解析失败、Windows 有 1 项 Flutter 测试未在限定让出次数内结束；同一标签重跑这三项后通过，macOS arm64 安装包与五种离线包沿用第一次成功结果。Windows Server 包作业实测通过 `internal/control`（94.932s）、runtime 离线检查及 8 项真实 Sisters mTLS 冒烟；Flutter analyze 及测试（macOS 947 项通过/2 项跳过、Windows 942 项通过/2 项跳过）和 Android 锁依赖 runtime 测试（114 项通过/3 项跳过）均通过。安装包和摘要见 [0.4.2 发布记录](docs/releases/0.4.2.md)。
 - 各组件、平台版本声明与构建号统一更新为 **0.4.2+15**（Sisters、control/helper、Python runtime、LastOrder、Windows PE 资源与测试基线同步更新），Android `arm64` / `amd64` 的 `versionCode` 递增为 `2015` / `4015`；五种 LastOrder 与五种 Sisters 目标须按本版本全部重新构建。内嵌 biliTickerBuy 继续固定为 `2.15.18`（`227ebf73f5af3eec0019984a7cbcb722977453e8`）。本版不改变上游版本、固定提交、依赖锁定、导入白名单或嵌入适配；运行时仅更新统一版本号，并把省略间隔时的默认等待从 1000 毫秒改为 500 毫秒。标准 HTTPS 验证、`standard` 下单策略、空通知配置与禁止 Web UI/Gradio 的约束不变。复核见[默认请求间隔调整复核](docs/biliTickerBuy运行时.md#默认请求间隔调整复核2026-11-18)。
 - 任务卡片新增「复制任务」。未分发和已分发的任务都可复制，原卡片后会出现同名的未分发副本，沿用原设置，可独立编辑和分发。
 - 「账号与任务」的未分发任务新增「编辑任务」，可修改使用的账号、同一演出的场次与票档、开售时间、抢票请求间隔和购票人。切换账号后需重新选择该账号的购票人。保存后更新原任务，已有分发记录的任务保留原配置。
@@ -12,7 +12,7 @@
 - 移除创建抢票任务时的日期输入框。输入演出 ID 或会员购链接后即可选择票档。演出有日历场次时，可从平台提供的日期中选择，也可使用已有的默认场次。
 - 修复腾讯云、阿里云和火山引擎创建中断后，机器卡片长期停在「创建结果待核实」的问题。应用会按原购买记录有限次自动查询。一直查不到实例时，可确认删除本地卡片，之后可从该厂商的凭证页恢复。查询找回实例时卡片会自动显示。清理卡片仅影响本机列表，云端资源仍可能计费，原购买记录和凭证保护继续保留。
 - 升级影响：安装 0.4.2 LastOrder 后，须在无活跃任务时将全部 Sisters（含 Linux/macOS/Windows）重新部署为 `0.4.2`，避免统一版本校验拒绝旧包。重部署会停止当前任务并清空远程任务记录。账号、任务配置、云资源记录与本地存储格式不变，无需重新登录或重建。已分发的任务不能直接改配置，可复制后编辑副本。新任务默认间隔为 500 毫秒，已保存任务保持原间隔。
-- 验证范围：本地 macOS 全量 Go race（10 个包）与宿主及 Windows x64 `go vet` 通过，Windows x64 测试程序仅交叉编译、未在本机执行；135 项脚本测试通过；`flutter analyze` 无问题，947 项 Flutter 测试通过、2 项可选测试跳过；runtime 在系统 Python 为 97 项通过、20 项跳过，桌面锁定依赖 108 项通过、9 项跳过，Android 锁定依赖 114 项通过、3 项跳过。许可检查、`release_ci.py preflight --ref refs/tags/0.4.2` 与 `git diff --check` 通过。全平台安装包、公开 Release、Windows 10 真机 SSH 部署与真实账号业务验收均未执行。详见 [0.4.2 发布记录](docs/releases/0.4.2.md)。
+- 验证范围：本地 macOS 全量 Go race（10 个包）与宿主及 Windows x64 `go vet` 通过，Windows x64 测试程序仅交叉编译、未在本机执行；135 项脚本测试通过；`flutter analyze` 无问题，947 项 Flutter 测试通过、2 项可选测试跳过；runtime 在系统 Python 为 97 项通过、20 项跳过，桌面锁定依赖 108 项通过、9 项跳过，Android 锁定依赖 114 项通过、3 项跳过。许可检查与 `git diff --check` 通过。正式 CI [44328580763](https://github.com/poppinzhang/MisakaNetwork/actions/runs/44328580763) 已公开 12 个资产。Windows 10 真机 SSH 部署、真实账号业务与真实云资源验收均未执行。详见 [0.4.2 发布记录](docs/releases/0.4.2.md)。
 
 ## 0.4.1 — 2026-11-15
 
