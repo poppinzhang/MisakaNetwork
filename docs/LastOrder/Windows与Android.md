@@ -1,6 +1,6 @@
-# LastOrder Windows 与 Android（0.4.2）
+# LastOrder Windows 与 Android（0.4.3）
 
-版本统一为 `0.4.2+15`，Sisters、部署 helper 与运行时版本同为 `0.4.2`；Python 桥接协议仍为 `1`。0.4.2 已[公开发布](https://github.com/poppinzhang/MisakaNetwork/releases/tag/0.4.2)，构建签名、自动化测试与验证边界见 [0.4.2 发布记录](../releases/0.4.2.md)。打包与 CI 通过不等同于真机 GUI 与真实业务已验收。
+源码版本统一为 `0.4.3+16`，Sisters、部署 helper 与运行时版本同为 `0.4.3`；Python 桥接协议仍为 `1`。0.4.3 发布准备完成、待构建，构建签名、自动化测试与验证边界见 [0.4.3 发布记录](../releases/0.4.3.md)；当前公开安装包仍为 [0.4.2 Release](https://github.com/poppinzhang/MisakaNetwork/releases/tag/0.4.2)。打包成功不等同于真机 GUI 与真实业务已验收。
 
 ## 平台与功能
 
@@ -39,7 +39,7 @@ Cookie 与任务秘密由 Android Keystore 支持的安全存储保护；显式�
 
 ## 升级与测试
 
-沿用 schema 2、`state-v2.json` 与 `v2.` 安全存储命名空间；0.1.1 数据在同一平台和同一应用身份下继续读取。0.1.0 仍不迁移，需重新配置。macOS 在 0.3.0 改为独立 `macos-vault-v1` 存储而不影响 Windows 与 Android。跨平台不自动复制账号、密钥和机器配置；首次安装需添加机器并登录。升级管理端后必须将所有目标 Sisters 重新部署为同一版本（当前源码为 0.4.2），避免 helper/runtime 版本校验拒绝旧包。重部署会停止当前任务。
+沿用 schema 2、`state-v2.json` 与 `v2.` 安全存储命名空间；0.1.1 数据在同一平台和同一应用身份下继续读取。0.1.0 仍不迁移，需重新配置。macOS 在 0.3.0 改为独立 `macos-vault-v1` 存储而不影响 Windows 与 Android。跨平台不自动复制账号、密钥和机器配置；首次安装需添加机器并登录。升级管理端后必须将所有目标 Sisters 重新部署为同一版本（当前源码为 0.4.3），避免 helper/runtime 版本校验拒绝旧包。重部署会停止当前任务。
 
 Android 测试签名与正式签名不能互相覆盖安装；改变签名需要卸载重装并重新登录、配置和部署，正式交付应保管稳定签名密钥。密钥、口令与构建主机信息不能进入源码或发布记录。
 

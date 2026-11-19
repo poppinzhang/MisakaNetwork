@@ -102,7 +102,7 @@ void main() {
     final deployments = _Deployments();
     final c = await _openMachines(tester, deployments);
     (c.gateway as FakeGateway).statusHandler = (_) async => AgentStatus(
-      version: '0.4.2',
+      version: '0.4.3',
       runtimeReady: true,
       platform: 'windows/amd64',
       maxConcurrency: 2,
