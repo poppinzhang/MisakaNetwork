@@ -1,6 +1,6 @@
 # LastOrder Windows 与 Android（0.4.3）
 
-源码版本统一为 `0.4.3+16`，Sisters、部署 helper 与运行时版本同为 `0.4.3`；Python 桥接协议仍为 `1`。0.4.3 发布准备完成、待构建，构建签名、自动化测试与验证边界见 [0.4.3 发布记录](../releases/0.4.3.md)；当前公开安装包仍为 [0.4.2 Release](https://github.com/poppinzhang/MisakaNetwork/releases/tag/0.4.2)。打包成功不等同于真机 GUI 与真实业务已验收。
+版本统一为 `0.4.3+16`，Sisters、部署 helper 与运行时版本同为 `0.4.3`；Python 桥接协议仍为 `1`。0.4.3 已[公开发布](https://github.com/poppinzhang/MisakaNetwork/releases/tag/0.4.3)，构建签名、自动化测试与验证边界见 [0.4.3 发布记录](../releases/0.4.3.md)。打包与 CI 通过不等同于真机 GUI 与真实业务已验收。
 
 ## 平台与功能
 

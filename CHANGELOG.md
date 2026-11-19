@@ -4,12 +4,12 @@
 
 ## 0.4.3 — 2026-11-19
 
-- **交付状态：发布准备完成，待构建。** 源码版本、更新记录与 [0.4.3 发布记录](docs/releases/0.4.3.md) 已准备；尚未执行 GitHub Actions 全平台构建，也未创建公开 Release。不预写 CI 通过或真实业务验收。当前公开安装包仍是 [0.4.2](https://github.com/poppinzhang/MisakaNetwork/releases/tag/0.4.2)。
+- **交付状态：统一版本 0.4.3+16 已公开正式发布。** [GitHub Release 0.4.3](https://github.com/poppinzhang/MisakaNetwork/releases/tag/0.4.3) 对应标签 `0.4.3`、提交 `33f957d59aea5cd9db36725efc1c31890dcfa469`；正式 Actions [44545174180](https://github.com/poppinzhang/MisakaNetwork/actions/runs/44545174180) 一次性完成五种 Sisters、五种 LastOrder（Android 使用 `release-keystore` 正式签名）的构建与校验，12 个资产已核验并标记 `Latest`（Release ID `451508241`，非草稿、非预发布）。Windows Server 包作业实测通过 `internal/control`（91.861s）、runtime 离线检查及 8 项真实 Sisters mTLS 冒烟；Flutter analyze 及测试（macOS 955 项通过/2 项跳过、Windows 950 项通过/2 项跳过）和 Android 锁依赖 runtime 测试（114 项通过/3 项跳过）均通过。安装包和摘要见 [0.4.3 发布记录](docs/releases/0.4.3.md)。
 - 各组件、平台版本声明与构建号统一更新为 **0.4.3+16**（Sisters、control/helper、Python runtime、LastOrder、Windows PE 资源与测试基线同步更新），Android `arm64` / `amd64` 的 `versionCode` 递增为 `2016` / `4016`；五种 LastOrder 与五种 Sisters 目标须按本版本全部重新构建。内嵌 biliTickerBuy 继续固定为 `2.15.18`（`227ebf73f5af3eec0019984a7cbcb722977453e8`）。本版不改变上游版本、固定提交、依赖锁定、导入白名单、嵌入适配或运行参数；运行时仅更新统一版本号。标准 HTTPS 验证、`standard` 下单策略、空通知配置与禁止 Web UI/Gradio 的约束不变。复核见 [0.4.3 统一版本复核](docs/biliTickerBuy运行时.md#043-统一版本复核2026-11-19)。
 - 创建和编辑抢票任务时，「购票人」列表会在姓名后标注证件类型，例如「张三（护照）」，方便区分同名的购票人。可显示身份证、护照、港澳居民来往内地通行证、台湾居民来往大陆通行证和外国人永久居留身份证；平台返回的类型无法识别时显示「证件类型未知」，不会猜测。本项只改变 LastOrder 的界面显示，提交给运行时的购票人信息、内嵌运行时和 Sisters 均不变。
 - 创建抢票任务时，如果「联系人」和「联系电话」都还空着，勾选购票人会自动填入这位购票人的姓名和电话。任一栏已有内容（包括先前自动填入的内容）时，再勾选其他购票人不会改动；取消勾选不会清空，两栏仍可随时修改。购票人没有电话或电话显示为部分隐藏（如 138****1234）时只填入姓名，电话需手动填写。编辑任务沿用原联系人，不会自动填写。本项只改变 LastOrder 创建界面的填写方式，提交给运行时的数据格式、内嵌运行时和 Sisters 均不变；尚未用真实账号核对平台返回的购票人电话是否完整。
 - 升级影响：安装 0.4.3 LastOrder 后，须在无活跃任务时将全部 Sisters（含 Linux/macOS/Windows）重新部署为 `0.4.3`，避免统一版本校验拒绝旧包。重部署会停止当前任务并清空远程任务记录。账号、任务配置、云资源记录与本地存储格式不变，无需重新登录或重建。
-- 验证范围：本地 macOS 全量 Go race（10 个包）与宿主及 Windows x64 `go vet` 通过，Windows x64 测试程序仅交叉编译、未在本机执行；135 项脚本测试通过；`flutter analyze` 无问题，955 项 Flutter 测试通过、2 项可选测试跳过；runtime 在系统 Python 为 97 项通过、20 项跳过，桌面锁定依赖 108 项通过、9 项跳过，Android 锁定依赖 114 项通过、3 项跳过。许可检查、`release_ci.py preflight --ref refs/tags/0.4.3` 与 `git diff --check` 通过。全平台安装包、公开 Release、Windows 10 真机 SSH 部署与真实账号业务验收均未执行。详见 [0.4.3 发布记录](docs/releases/0.4.3.md)。
+- 验证范围：本地 macOS 全量 Go race（10 个包）与宿主及 Windows x64 `go vet` 通过，Windows x64 测试程序仅交叉编译、未在本机执行；135 项脚本测试通过；`flutter analyze` 无问题，955 项 Flutter 测试通过、2 项可选测试跳过；runtime 在系统 Python 为 97 项通过、20 项跳过，桌面锁定依赖 108 项通过、9 项跳过，Android 锁定依赖 114 项通过、3 项跳过。许可检查与 `git diff --check` 通过。正式 CI [44545174180](https://github.com/poppinzhang/MisakaNetwork/actions/runs/44545174180) 已公开 12 个资产。Windows 10 真机 SSH 部署、真实账号业务（含真实购票人电话完整度）与真实云资源验收均未执行。详见 [0.4.3 发布记录](docs/releases/0.4.3.md)。
 
 ## 0.4.2 — 2026-11-18
 
