@@ -282,6 +282,23 @@ String buyerLabel(Object? buyer, int index) {
   return '$shown（${buyerIdTypeName(person['id_type'])}）';
 }
 
+/// Characters the platform may use to hide part of a value, as in
+/// `138****1234`.
+final maskedValue = RegExp(r'[*＊•●·…]|[xX]{3,}');
+
+/// The contact a checked buyer suggests: the record's trimmed name and phone.
+/// Missing values come back empty, as does a partly hidden phone, since no one
+/// can be reached on it; the user types those instead.
+({String name, String tel}) buyerContact(Object? buyer) {
+  final person = buyer is Map ? buyer : const {};
+  String text(Object? value) => value is String ? value.trim() : '';
+  final tel = text(person['tel']);
+  return (
+    name: text(person['name']),
+    tel: maskedValue.hasMatch(tel) ? '' : tel,
+  );
+}
+
 const defaultRequestIntervalMs = 500;
 const minRequestIntervalMs = 100;
 const maxRequestIntervalMs = 60000;

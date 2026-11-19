@@ -13,18 +13,21 @@ const originalBuyer = {
   'name': '原购票人',
   'personal_id': 'test-id-a',
   'id_type': 0,
+  'tel': '13800000013',
 };
 const newBuyer = {
   'id': 24,
   'name': '新购票人',
   'personal_id': 'test-id-b',
   'id_type': 1,
+  'tel': '13800000024',
 };
 const otherBuyer = {
   'id': 12,
   'name': '其他购票人',
   'personal_id': 'test-id-other',
   'id_type': 2,
+  'tel': '13800000012',
 };
 // Buyer rows show each document type after the name.
 const originalRow = '原购票人（身份证）';
@@ -395,6 +398,28 @@ void main() {
       expect(tester.takeException(), isNull);
     },
   );
+
+  testWidgets('editing never fills a missing contact from checked buyers', (
+    tester,
+  ) async {
+    final f = await openTasks(tester);
+    f.store.secrets['task.draft'] = jsonEncode({
+      ...savedConfig,
+      'buyer': '',
+      'tel': '',
+    });
+    final originalConfig = f.store.secrets['task.draft'];
+    await tapVisible(tester, editButton('draft'));
+    await tapVisible(tester, inEditor(find.text(otherRow)));
+    expect(buyerRow(tester, otherRow).value, isTrue);
+    await tapVisible(tester, inEditor(find.text('保存修改')));
+    // The contact fields stay hidden and blank instead of taking the buyer's
+    // name and phone, so the save stops before building a configuration.
+    expect(inEditor(find.text('联系人和联系电话为必填项。')), findsOneWidget);
+    expect(f.runtime.selections, isEmpty);
+    expect(f.store.secrets['task.draft'], originalConfig);
+    expect(tester.takeException(), isNull);
+  });
 
   testWidgets(
     'failed validation keeps the editable draft, closing discards changes',

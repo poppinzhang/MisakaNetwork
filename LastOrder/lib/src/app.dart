@@ -2528,6 +2528,21 @@ class _TaskDialogState extends State<TaskDialog> {
     customStartAt = true;
   });
 
+  /// Copies a newly checked buyer's name and phone into the contact while both
+  /// contact fields are blank. Once either has text, whether typed or filled
+  /// by an earlier buyer, later buyers leave the contact alone. Editing keeps
+  /// the task's original contact, so it never fills.
+  void fillBlankContact(Object? person) {
+    if (widget.task != null ||
+        buyer.text.trim().isNotEmpty ||
+        tel.text.trim().isNotEmpty) {
+      return;
+    }
+    final contact = buyerContact(person);
+    buyer.text = contact.name;
+    tel.text = contact.tel;
+  }
+
   void resetProject() => setState(() {
     purchase = null;
     calendarDates = {};
@@ -3023,9 +3038,14 @@ class _TaskDialogState extends State<TaskDialog> {
               value: buyers.contains(i),
               onChanged: busy
                   ? null
-                  : (v) => setState(
-                      () => v == true ? buyers.add(i) : buyers.remove(i),
-                    ),
+                  : (v) => setState(() {
+                      if (v == true) {
+                        buyers.add(i);
+                        fillBlankContact(people[i]);
+                      } else {
+                        buyers.remove(i);
+                      }
+                    }),
             ),
           const SizedBox(height: 12),
           if (editing && addressIndex >= 0)
