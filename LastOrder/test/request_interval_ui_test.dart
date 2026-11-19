@@ -35,7 +35,7 @@ void main() {
             },
           ],
           'buyers': [
-            {'name': '测试购票人'},
+            {'name': '测试购票人', 'id_type': 0},
           ],
           'addresses': [
             {'name': '测试地址', 'city': '测试城市'},
@@ -106,8 +106,8 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('分发后立即开始'), findsOneWidget);
 
-      await tester.ensureVisible(find.text('测试购票人'));
-      await tester.tap(find.text('测试购票人'));
+      await tester.ensureVisible(find.text('测试购票人（身份证）'));
+      await tester.tap(find.text('测试购票人（身份证）'));
       await tester.ensureVisible(input('联系人（必填）'));
       await tester.enterText(input('联系人（必填）'), '测试联系人');
       await tester.ensureVisible(input('联系电话（必填）'));

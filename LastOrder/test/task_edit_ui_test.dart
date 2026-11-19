@@ -8,8 +8,31 @@ import 'package:material_ui/material_ui.dart';
 
 import 'fakes.dart';
 
-const originalBuyer = {'id': 13, 'name': '原购票人', 'personal_id': 'test-id-a'};
-const newBuyer = {'id': 24, 'name': '新购票人', 'personal_id': 'test-id-b'};
+const originalBuyer = {
+  'id': 13,
+  'name': '原购票人',
+  'personal_id': 'test-id-a',
+  'id_type': 0,
+  'tel': '13800000013',
+};
+const newBuyer = {
+  'id': 24,
+  'name': '新购票人',
+  'personal_id': 'test-id-b',
+  'id_type': 1,
+  'tel': '13800000024',
+};
+const otherBuyer = {
+  'id': 12,
+  'name': '其他购票人',
+  'personal_id': 'test-id-other',
+  'id_type': 2,
+  'tel': '13800000012',
+};
+// Buyer rows show each document type after the name.
+const originalRow = '原购票人（身份证）';
+const newRow = '新购票人（护照）';
+const otherRow = '其他购票人（港澳居民来往内地通行证）';
 const contact = '合成联系人';
 const phone = '13800000000';
 const savedConfig = {
@@ -55,12 +78,7 @@ class EditRuntime extends FakeRuntime {
           (true, '2026-12-13') => [(203, 34, '加演')],
           _ => [(201, 32, '午场'), (202, 33, '晚场')],
         };
-        final people = uid == '101'
-            ? [
-                {'id': 12, 'name': '其他购票人', 'personal_id': 'test-id-other'},
-                originalBuyer,
-              ]
-            : [newBuyer];
+        final people = uid == '101' ? [otherBuyer, originalBuyer] : [newBuyer];
         lookups.add(uid);
         return {
           'project_id': projectId,
@@ -254,15 +272,15 @@ void main() {
       final f = await openTasks(tester, calendar: true);
       await tapVisible(tester, editButton('draft'));
       await choose<int>(tester, '场次 / 票档', '午场普通票');
-      await tapVisible(tester, inEditor(find.text('原购票人')));
-      await tapVisible(tester, inEditor(find.text('其他购票人')));
+      await tapVisible(tester, inEditor(find.text(originalRow)));
+      await tapVisible(tester, inEditor(find.text(otherRow)));
       await choose<String>(tester, '场次日期', '2026-12-14');
       expect(inEditor(find.textContaining('没有可选票档')), findsOneWidget);
       expect(inEditor(find.text('保存修改')), findsNothing);
       f.runtime.reverseLists = true;
       await choose<String>(tester, '场次日期', '2026-12-12');
-      expect(buyerRow(tester, '原购票人').value, isFalse);
-      expect(buyerRow(tester, '其他购票人').value, isTrue);
+      expect(buyerRow(tester, originalRow).value, isFalse);
+      expect(buyerRow(tester, otherRow).value, isTrue);
       await tapVisible(tester, inEditor(find.text('保存修改')));
       expect(f.store.state.tasks.first.summary!.screenName, '午场');
       expect(f.runtime.selections.single['buyer_indices'], [1]);
@@ -279,7 +297,7 @@ void main() {
       expect(inEditor(find.text('晚场普通票')), findsOneWidget);
       await choose<String>(tester, '场次日期', '2026-12-13');
       await choose<int>(tester, '场次 / 票档', '加演普通票');
-      expect(buyerRow(tester, '原购票人').value, isTrue);
+      expect(buyerRow(tester, originalRow).value, isTrue);
       await tapVisible(tester, inEditor(find.text('保存修改')));
       final task = f.store.state.tasks.first;
       expect(task.summary!.selectedDate, '2026-12-13');
@@ -310,7 +328,7 @@ void main() {
       await tapVisible(tester, find.text('核对原演出'));
       expect(inEditor(find.text('保存修改')), findsOneWidget);
       expect(inEditor(find.text('晚场普通票')), findsOneWidget);
-      expect(buyerRow(tester, '原购票人').value, isTrue);
+      expect(buyerRow(tester, originalRow).value, isTrue);
       expect(f.runtime.lookups, ['101', '101', '101']);
       expect(tester.takeException(), isNull);
     },
@@ -326,8 +344,8 @@ void main() {
       expect(find.text('编辑抢票任务'), findsOneWidget);
       expect(f.runtime.lookups, ['101']);
       expect(inEditor(find.text('晚场普通票')), findsOneWidget);
-      expect(buyerRow(tester, '原购票人').value, isTrue);
-      expect(buyerRow(tester, '其他购票人').value, isFalse);
+      expect(buyerRow(tester, originalRow).value, isTrue);
+      expect(buyerRow(tester, otherRow).value, isFalse);
       expect(inEditor(find.text('2026-12-01 21:13:52')), findsOneWidget);
       final interval = input('抢票请求间隔（毫秒）');
       expect(tester.widget<TextField>(interval).controller!.text, '725');
@@ -346,10 +364,10 @@ void main() {
 
       await choose<String>(tester, '使用账号', '账号乙');
       expect(f.runtime.lookups, ['101', '202']);
-      expect(inEditor(find.text('原购票人')), findsNothing);
-      expect(buyerRow(tester, '新购票人').value, isFalse);
+      expect(inEditor(find.textContaining('原购票人')), findsNothing);
+      expect(buyerRow(tester, newRow).value, isFalse);
       await choose<int>(tester, '场次 / 票档', '午场普通票');
-      await tapVisible(tester, inEditor(find.text('新购票人')));
+      await tapVisible(tester, inEditor(find.text(newRow)));
       await tapVisible(tester, inEditor(find.byTooltip('清除开售时间')));
       await tester.enterText(interval, '650');
       await tapVisible(tester, find.text('保存修改'));
@@ -381,6 +399,28 @@ void main() {
     },
   );
 
+  testWidgets('editing never fills a missing contact from checked buyers', (
+    tester,
+  ) async {
+    final f = await openTasks(tester);
+    f.store.secrets['task.draft'] = jsonEncode({
+      ...savedConfig,
+      'buyer': '',
+      'tel': '',
+    });
+    final originalConfig = f.store.secrets['task.draft'];
+    await tapVisible(tester, editButton('draft'));
+    await tapVisible(tester, inEditor(find.text(otherRow)));
+    expect(buyerRow(tester, otherRow).value, isTrue);
+    await tapVisible(tester, inEditor(find.text('保存修改')));
+    // The contact fields stay hidden and blank instead of taking the buyer's
+    // name and phone, so the save stops before building a configuration.
+    expect(inEditor(find.text('联系人和联系电话为必填项。')), findsOneWidget);
+    expect(f.runtime.selections, isEmpty);
+    expect(f.store.secrets['task.draft'], originalConfig);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets(
     'failed validation keeps the editable draft, closing discards changes',
     (tester) async {
@@ -403,7 +443,7 @@ void main() {
         tester.widget<TextField>(input('抢票请求间隔（毫秒）')).controller!.text,
         '725',
       );
-      expect(buyerRow(tester, '原购票人').value, isTrue);
+      expect(buyerRow(tester, originalRow).value, isTrue);
       expect(tester.takeException(), isNull);
     },
   );

@@ -69,7 +69,7 @@ class TaskEditSelection {
       final personalId = _id(selected['personal_id']);
       final completeIdentity =
           personalId.isNotEmpty &&
-          !RegExp(r'[*＊•●·…]|[xX]{3,}').hasMatch(personalId) &&
+          !maskedValue.hasMatch(personalId) &&
           selected['name'] is String &&
           (selected['name'] as String).trim().isNotEmpty;
       final index = _uniqueIndex(people, (person) {

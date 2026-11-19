@@ -670,7 +670,7 @@ void main() {
           },
         ],
         'buyers': [
-          {'name': '测试购票人'},
+          {'name': '测试购票人', 'id_type': 0},
         ],
         'addresses': [
           {'name': '测试地址', 'city': '测试城市'},
@@ -784,7 +784,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.textContaining('请至少选择一位购票人'), findsOneWidget);
       expect(runtime.calls, isNot(contains('build_config')));
-      await tester.tap(find.text('测试购票人'));
+      await tester.tap(find.text('测试购票人（身份证）'));
       await tester.pumpAndSettle();
       await tester.enterText(
         find.byWidgetPredicate(
