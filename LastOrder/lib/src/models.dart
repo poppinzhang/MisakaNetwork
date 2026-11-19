@@ -251,6 +251,37 @@ class TaskSummary {
   }
 }
 
+// Bilibili buyer `id_type` codes, named as in the preview of the pinned
+// biliTickerBuy revision. Display only: buyer records are passed on unchanged.
+const _buyerIdTypeNames = {
+  0: '身份证',
+  1: '护照',
+  2: '港澳居民来往内地通行证',
+  3: '台湾居民来往大陆通行证',
+  4: '外国人永久居留身份证',
+};
+
+/// Names a buyer's document type, so buyers who share a name can be told apart.
+/// Codes this app does not recognize are shown as unknown rather than guessed.
+String buyerIdTypeName(Object? idType) {
+  final code = switch (idType) {
+    int value => value,
+    String value => int.tryParse(value.trim(), radix: 10),
+    _ => null,
+  };
+  return _buyerIdTypeNames[code] ?? '证件类型未知';
+}
+
+/// A buyer choice such as `张三（护照）`.
+String buyerLabel(Object? buyer, int index) {
+  final person = buyer is Map ? buyer : const {};
+  final name = person['name'];
+  final shown = name is String && name.trim().isNotEmpty
+      ? name.trim()
+      : '购票人 ${index + 1}';
+  return '$shown（${buyerIdTypeName(person['id_type'])}）';
+}
+
 const defaultRequestIntervalMs = 500;
 const minRequestIntervalMs = 100;
 const maxRequestIntervalMs = 60000;

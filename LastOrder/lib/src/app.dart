@@ -3019,7 +3019,7 @@ class _TaskDialogState extends State<TaskDialog> {
           for (var i = 0; i < people.length; i++)
             CheckboxListTile(
               contentPadding: EdgeInsets.zero,
-              title: Text((people[i]['name'] ?? '购票人 ${i + 1}').toString()),
+              title: Text(buyerLabel(people[i], i)),
               value: buyers.contains(i),
               onChanged: busy
                   ? null

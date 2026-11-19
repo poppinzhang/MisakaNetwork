@@ -2,6 +2,8 @@
 
 ## unstaged
 
+- 创建和编辑抢票任务时，「购票人」列表会在姓名后标注证件类型，例如「张三（护照）」，方便区分同名的购票人。可显示身份证、护照、港澳居民来往内地通行证、台湾居民来往大陆通行证和外国人永久居留身份证；平台返回的类型无法识别时显示「证件类型未知」，不会猜测。本项只改变 LastOrder 的界面显示，提交给运行时的购票人信息、内嵌运行时和 Sisters 均不变。
+
 ## 0.4.2 — 2026-11-18
 
 - **交付状态：统一版本 0.4.2+15 已公开正式发布。** [GitHub Release 0.4.2](https://github.com/poppinzhang/MisakaNetwork/releases/tag/0.4.2) 对应标签 `0.4.2`、提交 `707e2a8dd6479cf515f527e9e173299dfa62e711`；正式 Actions [44328580763](https://github.com/poppinzhang/MisakaNetwork/actions/runs/44328580763) 完成五种 Sisters、五种 LastOrder（Android 使用 `release-keystore` 正式签名）的构建与校验，12 个资产已核验并标记 `Latest`（Release ID `450190894`，非草稿、非预发布）。第一次尝试中 Android 依赖下载返回 HTTP 429、macOS Intel 下载 Dart SDK 时域名解析失败、Windows 有 1 项 Flutter 测试未在限定让出次数内结束；同一标签重跑这三项后通过，macOS arm64 安装包与五种离线包沿用第一次成功结果。Windows Server 包作业实测通过 `internal/control`（94.932s）、runtime 离线检查及 8 项真实 Sisters mTLS 冒烟；Flutter analyze 及测试（macOS 947 项通过/2 项跳过、Windows 942 项通过/2 项跳过）和 Android 锁依赖 runtime 测试（114 项通过/3 项跳过）均通过。安装包和摘要见 [0.4.2 发布记录](docs/releases/0.4.2.md)。
