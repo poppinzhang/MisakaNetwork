@@ -77,7 +77,7 @@ func (s *Service) Close() {
 		s.cancel()
 		for _, t := range s.tasks {
 			if !terminal(t.status.State) {
-				s.update(t, pb.TaskState_TASK_STATE_CANCELLED, "服务停止，任务已取消")
+				s.update(t, pb.TaskState_TASK_STATE_CANCELLED, "服务关闭，任务已停止")
 			}
 			if t.cancel != nil {
 				t.cancel()
@@ -277,7 +277,7 @@ func (s *Service) CancelTask(_ context.Context, req *pb.TaskId) (*pb.TaskStatus,
 		clear(t.payload)
 		t.payload = nil
 	}
-	s.update(t, pb.TaskState_TASK_STATE_CANCELLED, "任务已取消")
+	s.update(t, pb.TaskState_TASK_STATE_CANCELLED, "任务已停止")
 	return snapshot(t), nil
 }
 
@@ -320,7 +320,7 @@ func (s *Service) worker() {
 		if confirmed || !terminal(t.status.State) {
 			switch {
 			case err != nil:
-				s.update(t, pb.TaskState_TASK_STATE_FAILED, "抢票工具执行失败，请检查运行环境或任务配置")
+				s.update(t, pb.TaskState_TASK_STATE_FAILED, "执行失败，请检查运行环境或任务配置")
 			case out.Status == "succeeded":
 				s.update(t, pb.TaskState_TASK_STATE_SUCCEEDED, "已下单，请到哔哩哔哩订单页确认并支付")
 				t.status.Payment = orderPayment(out, t.status.UpdatedUnixMs)
@@ -328,7 +328,7 @@ func (s *Service) worker() {
 				s.update(t, pb.TaskState_TASK_STATE_SUCCEEDED, "检测到已有订单，请到哔哩哔哩订单页确认并支付")
 				t.status.Payment = orderPayment(out, t.status.UpdatedUnixMs)
 			default:
-				s.update(t, pb.TaskState_TASK_STATE_FAILED, "抢票工具已结束，但未确认下单成功")
+				s.update(t, pb.TaskState_TASK_STATE_FAILED, "执行已结束，但未确认下单成功")
 			}
 		}
 		s.mu.Unlock()

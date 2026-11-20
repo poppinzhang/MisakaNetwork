@@ -49,7 +49,7 @@ void main() {
       expect(find.byIcon(LucideIcons.info), findsNothing);
       expect(find.byTooltip('关于 LastOrder'), findsOneWidget);
       if (size.width >= 1000) {
-        final status = find.text('mTLS 安全通信');
+        final status = find.text('双向加密通信');
         expect(status, findsOneWidget);
         final statusRow = tester
             .element(status)
@@ -62,7 +62,7 @@ void main() {
           10,
         );
       } else {
-        expect(find.text('mTLS 安全通信'), findsNothing);
+        expect(find.text('双向加密通信'), findsNothing);
         expect(tester.getBottomLeft(button).dy, lessThanOrEqualTo(78));
         final headerTitle = find.text('网络概览').first;
         expect(
@@ -161,7 +161,7 @@ void main() {
       await tester.pumpAndSettle();
 
       final version = find.text('LASTORDER  /  $appVersion');
-      final sync = find.byTooltip('立即同步');
+      final sync = find.byTooltip('立即刷新');
       expect(version.hitTestable(), findsOneWidget);
       expect(sync.hitTestable(), findsOneWidget);
       expect(tester.getTopLeft(version).dx, greaterThanOrEqualTo(0));

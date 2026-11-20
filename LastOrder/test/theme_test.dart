@@ -193,7 +193,7 @@ void main() {
     final theme = appTheme(tester);
     expect(theme.brightness, Brightness.dark);
     expect(theme.scaffoldBackgroundColor.computeLuminance(), lessThan(.1));
-    expectReadableText(tester, '让每个节点，协同工作', theme.scaffoldBackgroundColor);
+    expectReadableText(tester, '工作台概览', theme.scaffoldBackgroundColor);
     for (final entry in [
       ('机器管理', '还没有 Sisters'),
       ('账号与任务', '还没有登录账号'),

@@ -52,8 +52,8 @@ extension CloudProviderDetails on CloudProvider {
   };
   String get identityHint => switch (this) {
     CloudProvider.tencent => '使用 CAM 子用户的 API 密钥，无需填写 AppID。',
-    CloudProvider.aliyun => '使用 RAM 用户的 AccessKey，不是网页登录密码。',
-    CloudProvider.volcengine => '使用 IAM 用户的访问密钥，不支持火山方舟模型 API Key。',
+    CloudProvider.aliyun => '使用 RAM 用户的访问密钥，无需填写网页登录密码。',
+    CloudProvider.volcengine => '使用 IAM 用户的访问密钥，不是火山方舟的模型 API Key。',
   };
   String get docsUrl => switch (this) {
     CloudProvider.tencent =>
@@ -315,12 +315,12 @@ class CloudMachine {
       phase == CloudMachinePhase.releaseFailed ||
       phase == CloudMachinePhase.unknown;
   String get statusLabel => switch (phase) {
-    CloudMachinePhase.creating => '创建云服务器',
-    CloudMachinePhase.deploying => '部署 Sisters',
+    CloudMachinePhase.creating => '创建中',
+    CloudMachinePhase.deploying => '部署中',
     CloudMachinePhase.ready => '部署完成',
     CloudMachinePhase.createFailed => '创建失败',
     CloudMachinePhase.deployFailed => '部署失败',
-    CloudMachinePhase.releasing => '释放云服务器',
+    CloudMachinePhase.releasing => '释放中',
     CloudMachinePhase.released => '已释放',
     CloudMachinePhase.interrupted => isReal ? '操作已中断' : '预览已中断',
     CloudMachinePhase.created => '已创建 · 待部署',

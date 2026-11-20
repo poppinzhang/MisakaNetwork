@@ -75,8 +75,8 @@ Future<void> _submitMachine(
   await tester.pumpAndSettle();
   await tester.enterText(_field('机器名称'), name);
   await tester.enterText(_field('主机地址'), host);
-  await tester.enterText(_field('SSH 用户'), 'deploy-user');
-  await tester.enterText(_field('SSH 密码（仅用于本次部署）'), 'synthetic-password');
+  await tester.enterText(_field('SSH 用户名'), 'deploy-user');
+  await tester.enterText(_field('SSH 密码（与私钥二选一，不保存）'), 'synthetic-password');
   await tester.tap(find.text('安全部署'));
   await tester.pumpAndSettle();
 }
@@ -113,8 +113,8 @@ void main() {
     expect(find.textContaining('具有管理员权限的 SSH 账号'), findsOneWidget);
     await tester.enterText(_field('机器名称'), 'Windows 执行节点');
     await tester.enterText(_field('主机地址'), '192.0.2.20');
-    await tester.enterText(_field('SSH 用户'), 'deploy-user');
-    await tester.enterText(_field('SSH 密码（仅用于本次部署）'), 'synthetic-password');
+    await tester.enterText(_field('SSH 用户名'), 'deploy-user');
+    await tester.enterText(_field('SSH 密码（与私钥二选一，不保存）'), 'synthetic-password');
     await tester.tap(find.text('安全部署'));
     await tester.pumpAndSettle();
     deployments.calls.single.result.complete({
@@ -140,7 +140,7 @@ void main() {
     expect(find.byType(MachineDialog), findsNothing);
     expect(c.state.machines, hasLength(1));
     expect(deployments.calls, hasLength(1));
-    expect(find.text('部署 Sisters'), findsOneWidget);
+    expect(find.text('部署中'), findsOneWidget);
     expect(find.text('添加机器').hitTestable(), findsOneWidget);
     final first = c.state.machines.single;
     deployments.calls.single.progress?.call(
@@ -154,14 +154,14 @@ void main() {
     expect(find.byType(MachineDialog), findsNothing);
     expect(c.state.machines, hasLength(2));
     expect(deployments.calls, hasLength(2));
-    expect(find.text('部署 Sisters'), findsNWidgets(2));
+    expect(find.text('部署中'), findsNWidgets(2));
     expect(
       find.descendant(of: _card(first.id), matching: find.text('62%')),
       findsOneWidget,
     );
     deployments.calls.last.result.complete(_Deployments.credentials);
     await tester.pumpAndSettle();
-    expect(find.text('部署 Sisters'), findsOneWidget);
+    expect(find.text('部署中'), findsOneWidget);
     expect(find.text('62%'), findsOneWidget);
     expect(find.text('在线'), findsOneWidget);
     expect(tester.takeException(), isNull);
@@ -205,7 +205,7 @@ void main() {
     deployments.calls.last.result.complete(_Deployments.credentials);
     await tester.pumpAndSettle();
     expect(c.state.machines.single.canConnect, isTrue);
-    expect(find.text('部署 Sisters'), findsNothing);
+    expect(find.text('部署中'), findsNothing);
     expect(tester.takeException(), isNull);
   });
 
@@ -262,18 +262,18 @@ void main() {
       '192.0.2.10',
     );
     expect(
-      tester.widget<TextField>(_field('SSH 密码（仅用于本次部署）')).controller?.text,
+      tester.widget<TextField>(_field('SSH 密码（与私钥二选一，不保存）')).controller?.text,
       isEmpty,
     );
-    await tester.enterText(_field('SSH 用户'), 'deploy-user');
-    await tester.enterText(_field('SSH 密码（仅用于本次部署）'), 'new-synthetic-password');
+    await tester.enterText(_field('SSH 用户名'), 'deploy-user');
+    await tester.enterText(_field('SSH 密码（与私钥二选一，不保存）'), 'new-synthetic-password');
     await tester.tap(find.text('安全部署'));
     await tester.pumpAndSettle();
 
     expect(c.state.machines.single.id, id);
     expect(deployments.calls, hasLength(2));
     expect(find.byType(MachineDialog), findsNothing);
-    expect(find.text('部署 Sisters'), findsOneWidget);
+    expect(find.text('部署中'), findsOneWidget);
     expect(find.text('测试连接失败'), findsNothing);
     expect(tester.takeException(), isNull);
   });
@@ -306,7 +306,7 @@ void main() {
         expect(find.text('检查 Sisters 与内嵌运行时'), findsOneWidget);
         expect(card.left, greaterThanOrEqualTo(0));
         expect(card.right, lessThanOrEqualTo(layout.$1));
-        for (final label in ['部署 Sisters', '86%', '检查 Sisters 与内嵌运行时']) {
+        for (final label in ['部署中', '86%', '检查 Sisters 与内嵌运行时']) {
           final text = tester.getRect(find.text(label));
           expect(text.left, greaterThanOrEqualTo(card.left));
           expect(text.right, lessThanOrEqualTo(card.right));
@@ -335,6 +335,26 @@ void main() {
     final tile = tester.widget<CheckboxListTile>(find.byType(CheckboxListTile));
     expect(tile.onChanged, isNull);
     expect(tile.value, isFalse);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('machine dialog switches guidance between SSH deploy and manual connect', (
+    tester,
+  ) async {
+    final deployments = _Deployments();
+    await _openMachines(tester, deployments);
+    await tester.tap(find.text('添加机器'));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('点击「安全部署」后'), findsOneWidget);
+    expect(find.textContaining('请提供该节点已签发的 CA 证书'), findsNothing);
+
+    await tester.tap(find.text('连接已部署的 Sisters'));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('点击「安全部署」后'), findsNothing);
+    expect(find.textContaining('请提供该节点已签发的 CA 证书'), findsOneWidget);
+    expect(_field('证书主机名（SNI）'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 }

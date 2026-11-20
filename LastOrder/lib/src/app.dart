@@ -241,7 +241,7 @@ class _ControlCenterState extends State<ControlCenter> {
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context, false),
-              child: const Text('返回'),
+              child: const Text('取消'),
             ),
             FilledButton(
               onPressed: () => Navigator.pop(context, true),
@@ -411,7 +411,7 @@ class _ControlCenterState extends State<ControlCenter> {
                                       ),
                                       SizedBox(width: 8),
                                       Text(
-                                        'mTLS 安全通信',
+                                        '双向加密通信',
                                         style: TextStyle(
                                           color: colors.onSurfaceVariant,
                                           fontSize: 12,
@@ -464,7 +464,7 @@ class _ControlCenterState extends State<ControlCenter> {
                             ),
                             if (constraints.maxWidth > 700)
                               Text(
-                                'Sisters 每 5 秒同步',
+                                '每 5 秒自动刷新',
                                 style: TextStyle(
                                   color: colors.onSurfaceVariant,
                                   fontSize: 12,
@@ -473,7 +473,7 @@ class _ControlCenterState extends State<ControlCenter> {
                             const SizedBox(width: 14),
                             themeButton(),
                             IconButton(
-                              tooltip: '立即同步',
+                              tooltip: '立即刷新',
                               onPressed: c.polling ? null : () => c.refresh(),
                               icon: Icon(
                                 c.polling
@@ -676,7 +676,7 @@ class _ControlCenterState extends State<ControlCenter> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        heading('CONTROL CENTER', '让每个节点，协同工作', '从账号登录到远程执行，在一个工作台中管理。'),
+        heading('CONTROL CENTER', '工作台概览', '统一管理账号、任务与远程执行节点。'),
         LayoutBuilder(
           builder: (context, constraints) {
             final compact =
@@ -807,7 +807,7 @@ class _ControlCenterState extends State<ControlCenter> {
                 (
                   1,
                   '部署 Sisters',
-                  '录入 Windows、Linux 或 macOS 主机，通过 SSH 安装内置版本。',
+                  '添加已有 Windows、Linux 或 macOS 机器，或直接创建云服务器，一键安装 Sisters。',
                   1,
                 ),
                 (2, '添加账号与任务', '扫码登录，选择演出、票档和购票人。', 2),
@@ -859,7 +859,7 @@ class _ControlCenterState extends State<ControlCenter> {
     children: [
       heading(
         'SISTERS',
-        '连接你的执行节点',
+        '执行机器',
         '支持 Windows 10+ x64、Linux 与 macOS。',
         trailing: Wrap(
           spacing: 12,
@@ -933,7 +933,7 @@ class _ControlCenterState extends State<ControlCenter> {
     final error = deploymentError ?? c.connectionErrors[machine.id];
     final status = c.statuses[machine.id];
     final label = active
-        ? '正在部署 Sisters'
+        ? '部署中'
         : deploymentError != null
         ? '部署失败'
         : error != null
@@ -1000,7 +1000,7 @@ class _ControlCenterState extends State<ControlCenter> {
           if (!status.runtimeReady) ...[
             const SizedBox(height: 8),
             Text(
-              '运行时尚未就绪，请重新部署完整安装包。',
+              '抢票组件尚未就绪，请重新部署 Sisters。',
               style: TextStyle(color: colors.warning, fontSize: 12),
             ),
           ],
@@ -1081,7 +1081,7 @@ class _ControlCenterState extends State<ControlCenter> {
     final stackStatus = MediaQuery.textScalerOf(context).scale(14) > 18;
     final statusBadge = pill(
       deploying
-          ? '部署 Sisters'
+          ? '部署中'
           : deploymentError != null
           ? '部署失败'
           : error != null
@@ -1203,7 +1203,7 @@ class _ControlCenterState extends State<ControlCenter> {
                   Padding(
                     padding: const EdgeInsets.only(top: 8),
                     child: Text(
-                      '运行时尚未就绪，请重新部署完整安装包。',
+                      '抢票组件尚未就绪，请重新部署 Sisters。',
                       style: TextStyle(color: colors.warning),
                     ),
                   ),
@@ -1259,12 +1259,12 @@ class _ControlCenterState extends State<ControlCenter> {
                               ? null
                               : () async {
                                   if (await confirm(
-                                    '移除机器',
+                                    '移除连接',
                                     '仅移除本地连接。远程 Sisters 与已启动任务会继续运行。',
                                   )) {
                                     await action(
                                       () => c.removeMachine(m),
-                                      success: '已移除机器',
+                                      success: '已移除连接',
                                     );
                                   }
                                 },
@@ -1296,7 +1296,7 @@ class _ControlCenterState extends State<ControlCenter> {
           children: [
             Expanded(
               child: Text(
-                '估算进度',
+                '部署进度',
                 style: TextStyle(color: colors.onSurfaceVariant, fontSize: 12),
               ),
             ),
@@ -1331,7 +1331,7 @@ class _ControlCenterState extends State<ControlCenter> {
   Widget tasks() => Column(
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
-      heading('IDENTITY & TASKS', '准备每一次执行', '登录账号，选择演出与购票人，再将任务分发到 Sisters。'),
+      heading('IDENTITY & TASKS', '账号与抢票任务', '登录哔哩哔哩账号，配置演出场次并分发到执行机器。'),
       Row(
         children: [
           Text(
@@ -1488,7 +1488,7 @@ class _ControlCenterState extends State<ControlCenter> {
         ],
         taskDetail(
           LucideIcons.clock3,
-          '开抢',
+          '开售',
           task.startAt.isEmpty
               ? '分发后立即开始'
               : '${task.startAt.replaceFirst('T', ' ')}（北京时间）',
@@ -1515,7 +1515,9 @@ class _ControlCenterState extends State<ControlCenter> {
                 pill(
                   task.dispatchedTo.isEmpty
                       ? '未分发'
-                      : '未结束 ${c.activeDispatchCount(task)} 台',
+                      : c.activeDispatchCount(task) == 0
+                      ? '已结束'
+                      : '进行中 ${c.activeDispatchCount(task)} 台',
                   color: c.activeDispatchCount(task) == 0
                       ? colors.onSurfaceVariant
                       : colors.primary,
@@ -1563,7 +1565,7 @@ class _ControlCenterState extends State<ControlCenter> {
                               ? null
                               : () => action(
                                   () => c.copyTask(task),
-                                  success: '已在原任务后创建未分发副本',
+                                  success: '已复制任务，可直接编辑副本',
                                 ),
                           icon: const Icon(LucideIcons.copy, size: 18),
                         ),
@@ -1754,7 +1756,7 @@ class _ControlCenterState extends State<ControlCenter> {
                             : () async {
                                 if (await confirm(
                                   '移除账号',
-                                  '移除此账号在系统安全存储中保存的 Cookie。',
+                                  '将从本机移除该账号，并删除其加密保存的登录凭据。',
                                 )) {
                                   await action(
                                     () => c.removeAccount(account),
@@ -1788,8 +1790,8 @@ class _ControlCenterState extends State<ControlCenter> {
       children: [
         heading(
           'LIVE ACTIVITY',
-          '每一步执行，都有回响',
-          '展示 Sisters 返回的任务状态；连接失败时保留最后一次结果。',
+          '实时任务监控',
+          '查看各节点执行进度与订单入口；断连时保留最后一次状态。',
         ),
         Padding(
           padding: const EdgeInsets.only(bottom: 16),
@@ -1803,7 +1805,9 @@ class _ControlCenterState extends State<ControlCenter> {
                   : () => action(() async {
                       final count = await c.clearFinishedExecutions();
                       message(
-                        count == 0 ? '暂无可清除的已结束任务' : '已清除 $count 条执行记录，订单入口仍保留',
+                        count == 0
+                            ? '暂无可清除的已结束记录'
+                            : '已清除 $count 条记录（不影响任务配置与订单入口）',
                       );
                     }),
               child: const Padding(
@@ -1814,7 +1818,7 @@ class _ControlCenterState extends State<ControlCenter> {
                     Icon(LucideIcons.trash2, size: 16),
                     SizedBox(width: 8),
                     Flexible(
-                      child: Text('清除全部已结束任务', textAlign: TextAlign.center),
+                      child: Text('清除已结束记录', textAlign: TextAlign.center),
                     ),
                   ],
                 ),
@@ -1964,7 +1968,7 @@ class _ControlCenterState extends State<ControlCenter> {
                               ? null
                               : () => action(
                                   () => c.clearExecution(machine, status),
-                                  success: '已清除执行记录，订单入口仍保留',
+                                  success: '已清除该条记录（不影响任务配置与订单入口）',
                                 ),
                           icon: const Icon(LucideIcons.trash2, size: 14),
                           label: const Text('清除'),
@@ -2013,7 +2017,7 @@ class _ControlCenterState extends State<ControlCenter> {
       });
     } else if (result == true) {
       setState(() => page = 1);
-      message('已添加创建任务，可在机器列表查看进度。');
+      message('已开始创建云服务器，可在机器列表查看进度。');
     }
   }
 
@@ -2197,7 +2201,7 @@ class _MachineDialogState extends State<MachineDialog> {
         }
         if (username.text.trim().isEmpty ||
             (password.text.isEmpty && key.text.trim().isEmpty)) {
-          throw const UserError('请填写 SSH 用户和密码或私钥路径。');
+          throw const UserError('请填写 SSH 用户名，并提供密码或选择私钥文件。');
         }
         await widget.controller.startDeployment(
           name: name.text.trim(),
@@ -2264,12 +2268,12 @@ class _MachineDialogState extends State<MachineDialog> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               const Text(
-                '还没有云服务器？',
+                '需要临时云服务器？',
                 style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600),
               ),
               const SizedBox(height: 6),
               Text(
-                '选择云厂商和内置配置，衔接创建与部署流程。',
+                '使用腾讯云、阿里云或火山引擎按量创建服务器，并直接部署 Sisters。',
                 style: TextStyle(
                   fontSize: 12,
                   height: 1.6,
@@ -2285,7 +2289,7 @@ class _MachineDialogState extends State<MachineDialog> {
                       ? null
                       : () => Navigator.pop(context, 'cloud-create'),
                   icon: const Icon(LucideIcons.cloud, size: 18),
-                  label: const Text('云服务器创建'),
+                  label: const Text('创建云服务器'),
                 ),
               ),
             ],
@@ -2299,8 +2303,10 @@ class _MachineDialogState extends State<MachineDialog> {
         const SizedBox(height: 10),
       ],
       Text(
-        '点击安全部署后，可在机器列表查看进度并继续添加其他机器。'
-        '应用会自动记录并校验服务器身份。部署期间请保持应用运行。',
+        manual
+            ? '请提供该节点已签发的 CA 证书、客户端证书和私钥。'
+            : '点击「安全部署」后，可在机器列表查看进度并继续添加其他机器。'
+                  '应用会自动记录并校验服务器身份，部署期间请保持应用运行。',
         style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
       ),
       const SizedBox(height: 16),
@@ -2327,13 +2333,13 @@ class _MachineDialogState extends State<MachineDialog> {
             ),
           ),
         ),
-        field(username, 'SSH 用户'),
+        field(username, 'SSH 用户名'),
         field(sshPort, 'SSH 端口'),
-        field(password, 'SSH 密码（仅用于本次部署）', secret: true),
-        fileField(key, 'SSH 私钥（选择文件）'),
-        field(passphrase, 'SSH 私钥口令（加密私钥时填写）', secret: true),
+        field(password, 'SSH 密码（与私钥二选一，不保存）', secret: true),
+        fileField(key, 'SSH 私钥文件（与密码二选一）'),
+        field(passphrase, '私钥密码（仅加密私钥需填写）', secret: true),
         Text(
-          '安装内置的 Sisters 与 biliTickerBuy；重新部署会重启服务。',
+          '将安装内置版本的 Sisters 与抢票组件；重新部署会重启服务并中断正在执行的任务。',
           style: TextStyle(
             color: Theme.of(context).colorScheme.onSurfaceVariant,
             fontSize: 12,
@@ -2343,7 +2349,7 @@ class _MachineDialogState extends State<MachineDialog> {
         fileField(ca, 'CA 证书'),
         fileField(cert, '客户端证书'),
         fileField(privateKey, '客户端私钥'),
-        field(serverName, '证书服务端名称', hint: '留空使用主机地址'),
+        field(serverName, '证书主机名（SNI）', hint: '留空则默认使用主机地址'),
       ],
     ],
   );
@@ -2756,7 +2762,7 @@ class _TaskDialogState extends State<TaskDialog> {
           throw const UserError('收货地址未确认，请核对地址后重新读取演出。');
         }
         if (addresses.isEmpty || addressIndex >= addresses.length) {
-          throw const UserError('请先在哔哩哔哩添加收货地址，再重新读取演出。当前运行时要求电子票也提供地址。');
+          throw const UserError('请先在哔哩哔哩添加收货地址，再重新读取演出（电子票目前同样需要提供一个收货地址）。');
         }
         if (buyer.text.trim().isEmpty || tel.text.trim().isEmpty) {
           throw const UserError('联系人和联系电话为必填项。');
@@ -2889,7 +2895,7 @@ class _TaskDialogState extends State<TaskDialog> {
           Text(taskName, style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 16),
           if (needsSource) ...[
-            const Text('此关联票任务未记录原演出。请提供原演出链接或 ID，以便核对关联票档。'),
+            const Text('该旧任务未记录所属演出信息，请输入原演出 ID 或会员购链接以继续编辑。'),
             field(project, '原演出 ID 或会员购链接'),
           ],
           if (editDates.isNotEmpty) ...[
@@ -2919,7 +2925,7 @@ class _TaskDialogState extends State<TaskDialog> {
         if (!editing && purchase == null) ...[
           field(project, '演出 ID 或会员购链接'),
           Text(
-            '将通过 biliTickerBuy 读取真实场次、票档和账号购票人。',
+            '输入后将读取该演出的场次、票档及当前账号下的购票人。',
             style: TextStyle(
               color: Theme.of(context).colorScheme.onSurfaceVariant,
               fontSize: 12,
@@ -3003,8 +3009,8 @@ class _TaskDialogState extends State<TaskDialog> {
           ),
           Text(
             editing
-                ? '沿用任务已保存的开售时间，可重新选择或清除。清除后，任务将在分发后立即开始。'
-                : '默认使用所选票档的起售时间。清除时间后，任务将在分发后立即开始。',
+                ? '可重新选择或清除；清除后将在分发时立即开始。'
+                : '默认跟随所选票档的开售时间；清除后将在分发时立即开始。',
             style: TextStyle(
               color: Theme.of(context).colorScheme.onSurfaceVariant,
               fontSize: 12,
@@ -3018,7 +3024,7 @@ class _TaskDialogState extends State<TaskDialog> {
             keyboardType: TextInputType.number,
           ),
           Text(
-            '100–60000 毫秒，默认 $defaultRequestIntervalMs 毫秒。每轮下单最多尝试 40 次；实际请求时间还受网络和冷却等待影响。',
+            '范围 100–60000 毫秒。每轮下单最多尝试 40 次，实际间隔受网络与平台冷却影响。',
             style: TextStyle(
               color: Theme.of(context).colorScheme.onSurfaceVariant,
               fontSize: 12,
@@ -3084,7 +3090,7 @@ class _TaskDialogState extends State<TaskDialog> {
             Padding(
               padding: EdgeInsets.only(bottom: 14),
               child: Text(
-                '请先在哔哩哔哩添加收货地址，再重新读取。当前运行时要求电子票也提供地址。',
+                '请先在哔哩哔哩添加收货地址，再重新读取（电子票目前同样需要提供一个收货地址）。',
                 style: TextStyle(color: Theme.of(context).colorScheme.warning),
               ),
             ),

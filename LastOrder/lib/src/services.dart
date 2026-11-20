@@ -186,12 +186,26 @@ class MutualTlsCredentials extends ChannelCredentials {
 }
 
 String describeGrpcFailure(GrpcError error) {
-  if (error.code == StatusCode.alreadyExists) {
-    return '此任务已使用另一份配置或登录凭据提交到该 Sisters，原任务未更新。'
-        '请新建任务后分发；若原任务仍在运行，请先查看状态。';
-  }
   // Remote error details may contain account data; only expose the status code.
-  return 'Sisters 请求失败（${error.codeName}）：连接或任务不可用，请检查机器状态。';
+  return switch (error.code) {
+    StatusCode.alreadyExists =>
+      '该任务已使用旧配置或凭据提交过，原执行未变更。请先查看监控状态；如需以新配置执行，请复制任务后再分发。',
+    StatusCode.unavailable =>
+      '无法连接 Sisters（${error.codeName}），请检查节点是否在线及网络端口。',
+    StatusCode.deadlineExceeded =>
+      '请求 Sisters 超时（${error.codeName}），请检查网络连接。',
+    StatusCode.resourceExhausted =>
+      'Sisters 任务队列或历史已满（${error.codeName}），请稍后重试。',
+    StatusCode.failedPrecondition =>
+      'Sisters 抢票组件尚未就绪（${error.codeName}），请重新部署节点。',
+    StatusCode.unauthenticated || StatusCode.permissionDenied =>
+      'Sisters 安全认证失败（${error.codeName}），请检查证书或重新部署。',
+    StatusCode.invalidArgument =>
+      '提交的任务参数无效（${error.codeName}），请核对配置后重试。',
+    StatusCode.notFound =>
+      '未在 Sisters 上找到该任务记录（${error.codeName}），请刷新状态。',
+    _ => 'Sisters 请求失败（${error.codeName}），请检查机器状态后重试。',
+  };
 }
 
 /// Opens a mutual-TLS channel to [m] using its CA, certificate and key files.
@@ -331,7 +345,11 @@ class EmbeddedServices {
       }
       return decodeServiceResponse(decoded, bridge: method == 'runtime');
     } on TimeoutException {
-      throw const UserError('内置服务请求超时。部署可能仍在执行，请先检查机器状态再重试。');
+      throw UserError(
+        method == 'runtime'
+            ? '操作超时，请检查网络后重试。'
+            : '操作超时。如正在部署，远端可能仍在执行，请检查机器状态后再重试。',
+      );
     } on PlatformException {
       throw const UserError('内置服务执行失败，请检查应用安装与网络连接。');
     } on MissingPluginException {

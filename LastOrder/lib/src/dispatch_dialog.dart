@@ -182,8 +182,7 @@ class _DispatchDialogState extends State<DispatchDialog> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              '提交后将执行真实抢票任务。相同任务可分发到多台机器，请留意重复订单并及时支付。'
-              '上次执行确认结束后可重新分发，重新分发会启动新一轮执行；已下单时请先核对订单。',
+              '确认后将向所选机器发送抢票任务。同一任务可同时分发到多台机器，各机器独立执行，请留意重复下单并及时支付。',
             ),
             const SizedBox(height: 12),
             Text(
@@ -225,7 +224,7 @@ class _DispatchDialogState extends State<DispatchDialog> {
                     ),
                     if (!_blocked(machine) &&
                         _task.latestDispatch(machine.id) != null)
-                      const Text('上次执行已结束，可重新分发。'),
+                      const Text('上次执行已结束，重新分发将开始新一轮抢票（请先核对已有订单）。'),
                     const SizedBox(height: 6),
                     if (!_available(machine))
                       const Text('部署尚未完成，暂不可分发任务。')
@@ -264,7 +263,7 @@ class _DispatchDialogState extends State<DispatchDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(context),
-          child: const Text('返回'),
+          child: const Text('取消'),
         ),
         TextButton(
           onPressed: _busy ? null : () => _refresh(),
@@ -287,19 +286,30 @@ class _WorkloadDetails extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final uncertain = workload.statusUnknown || workload.stale;
     final warning = TextStyle(color: Theme.of(context).colorScheme.warning);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (workload.stale)
-          Text('连接失败，负载未更新；请刷新后核对。', style: warning)
-        else if (workload.statusUnknown)
-          Text('尚未获取服务器状态，负载未知。', style: warning),
-        if (workload.tasks.isEmpty)
-          Text(uncertain ? '暂无可确认的任务记录，不能确定服务器空闲。' : '当前负载：0 个任务')
-        else ...[
-          Text('${uncertain ? '最近已知负载' : '当前负载'}：${workload.tasks.length} 个任务'),
+        if (workload.tasks.isEmpty) ...[
+          if (workload.stale)
+            Text('连接失败，无法确认当前负载，请刷新后重试。', style: warning)
+          else if (workload.statusUnknown)
+            Text('尚未获取服务器状态，无法确认当前负载。', style: warning)
+          else
+            const Text('当前负载：0 个任务'),
+        ] else ...[
+          if (workload.stale)
+            Text(
+              '连接失败，以下为上次同步的负载（共 ${workload.tasks.length} 个任务）：',
+              style: warning,
+            )
+          else if (workload.statusUnknown)
+            Text(
+              '尚未获取服务器状态，以下为本地记录（共 ${workload.tasks.length} 个任务）：',
+              style: warning,
+            )
+          else
+            Text('当前负载：${workload.tasks.length} 个任务'),
           for (final task in workload.tasks)
             Text('${task.name} · ${_stateLabel(task.state)}'),
         ],

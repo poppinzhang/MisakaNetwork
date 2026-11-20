@@ -179,7 +179,7 @@ class _PaymentDialog extends StatelessWidget {
         content: SizedBox(
           width: 380,
           child: order == null
-              ? const Text('此订单的本地关联或节点记录已移除，请到平台订单中心核对。')
+              ? const Text('该订单的本地记录已移除，请前往哔哩哔哩订单页核对。')
               : Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -200,7 +200,7 @@ class _PaymentDialog extends StatelessWidget {
                     const Text('请使用对应支付 App 扫码，并核对订单与金额后确认付款。'),
                     const SizedBox(height: 8),
                     const Text(
-                      '此付款码不会自动刷新，也不查询付款状态。若二维码不可用、已付款或使用同一部手机，请打开订单详情核对；浏览器可能需要登录同一账号。',
+                      '此付款码不会自动刷新或同步支付状态。如二维码失效、不方便手机自扫或需确认支付结果，请点击「打开订单详情」（浏览器需登录同一账号）。',
                     ),
                   ],
                 ),

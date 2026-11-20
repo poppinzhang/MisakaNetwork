@@ -342,7 +342,7 @@ func deployWindows(c *ssh.Client, request Request, identity Identity, cert, key,
 	run := func(script string, input io.Reader) (string, error) { return runPowerShell(c, script, input) }
 	output, err := run(windowsPrepareScript(request.RemoteDirectory, releaseID), nil)
 	if err != nil {
-		return result, staged("无法准备 Windows 私有部署目录；请使用具有管理员权限的 OpenSSH 会话和支持 ACL 的本地磁盘，检查目录归属与重解析点；当前版本未变更")
+		return result, staged("无法准备部署目录（当前版本未受影响）。请确认使用管理员账号登录 OpenSSH、磁盘支持 NTFS 权限，且目标路径不含符号链接")
 	}
 	paths, err := parseWindowsPaths(output, releaseID)
 	if err != nil {

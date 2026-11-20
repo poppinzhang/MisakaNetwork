@@ -180,7 +180,7 @@ void main() {
       expect(h.purchasedZones, [preferred, alternative, third]);
       expect(h.controller.jobs.single.phase, CloudMachinePhase.createFailed);
       expect(h.controller.jobs.single.createSubmitted, isFalse);
-      expect(h.controller.jobs.single.error, contains('相同规格'));
+      expect(h.controller.jobs.single.error, contains('暂无该规格库存'));
       await h.restart();
       await h.controller.retryCloudPreparation(job.id);
       await tester.pump();

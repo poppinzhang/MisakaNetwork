@@ -558,7 +558,7 @@ class CloudController extends ChangeNotifier {
     _requireInitialized();
     final job = _requireJob(id);
     if (!job.canDismissCreation) {
-      throw const UserError('云服务器状态已更新，仅可删除尚未找到实例的待核实卡片。');
+      throw const UserError('云服务器状态已更新，仅可隐藏尚未找到实例的待核实卡片。');
     }
     await _saveCardVisibility([
       for (final item in _jobs)
@@ -605,7 +605,7 @@ class CloudController extends ChangeNotifier {
       ];
     } catch (_) {
       _tencentTemplates = [];
-      templateError = '腾讯云配置模板无法读取或格式无效，请联系管理员重新打包。';
+      templateError = '腾讯云预设模板无法读取或格式无效，请重新安装完整应用包。';
     }
     try {
       final loaded = volcengineTemplateLoader != null
@@ -623,7 +623,7 @@ class CloudController extends ChangeNotifier {
       ];
     } catch (_) {
       _volcengineTemplates = [];
-      volcengineTemplateError = '火山引擎配置模板无法读取或格式无效，请联系管理员重新打包。';
+      volcengineTemplateError = '火山引擎预设模板无法读取或格式无效，请重新安装完整应用包。';
     }
     try {
       final loaded = aliyunTemplateLoader != null
@@ -641,7 +641,7 @@ class CloudController extends ChangeNotifier {
       ];
     } catch (_) {
       _aliyunTemplates = [];
-      aliyunTemplateError = '阿里云配置模板无法读取或格式无效，请联系管理员重新打包。';
+      aliyunTemplateError = '阿里云预设模板无法读取或格式无效，请重新安装完整应用包。';
     }
   }
 
@@ -1374,7 +1374,7 @@ class CloudController extends ChangeNotifier {
                 : job.phase,
             error: reason == null
                 ? '无法确认云端状态，请检查网络与凭证权限后刷新；现有资源可能继续计费。'
-                : '无法确认云端状态。$reason。处理后请刷新查询；现有资源可能继续计费。',
+                : '无法确认云端状态（$reason），请稍后刷新或到控制台核对；现有资源可能继续计费。',
           ),
         );
       }
@@ -1595,7 +1595,7 @@ class CloudController extends ChangeNotifier {
 
   CloudMachine _requireJob(String id) =>
       _jobs.where((job) => job.id == id).firstOrNull ??
-      (throw const UserError('此预览记录已被删除。'));
+      (throw const UserError('未找到该云服务器记录，可能已被删除。'));
   void _requireInitialized() {
     if (!initialized) throw const UserError('公有云信息尚未就绪，请重新打开应用。');
   }
@@ -1836,17 +1836,15 @@ const _aliyunReleaseReasons = <String>{
 class _CloudPreparationError implements Exception {
   const _CloudPreparationError(this.stage, this.reason);
   final String stage, reason;
-  String get message =>
-      '创建准备失败，尚未提交购买。$stage：$reason。'
-      '处理后可重试准备；已准备的共享 VPC、子网、安全组和公钥会保留。';
+  String get message => '创建准备失败（尚未扣费购买）· $stage：$reason。';
 }
 
 class _CloudZoneError implements Exception {
   const _CloudZoneError({this.queryFailed = false});
   final bool queryFailed;
   String get message => queryFailed
-      ? '当前可用区无法购买，同地域其他可用区查询失败。尚未创建实例，请检查网络及查询机型的权限后重试准备。'
-      : '建议可用区及本次查询可售的同地域其他可用区均无法购买相同规格，尚未创建实例。可稍后重新选择模板创建；已准备的共享网络会保留。';
+      ? '当前可用区无法购买，同地域其他可用区查询失败。尚未创建实例，请检查网络及查询机型的权限后重试。'
+      : '当前地域所有可用区均暂无该规格库存，未创建服务器。请稍后重试或更换配置模板。';
 }
 
 class _CloudNetworkError implements Exception {

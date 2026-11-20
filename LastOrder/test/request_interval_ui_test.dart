@@ -95,7 +95,7 @@ void main() {
       await tester.ensureVisible(otherDay);
       await tester.tap(otherDay);
       await tester.pumpAndSettle();
-      expect(find.text('确定').hitTestable(), findsOneWidget);
+      expect(find.text('确认').hitTestable(), findsOneWidget);
       expect(find.text('取消').hitTestable(), findsOneWidget);
       await tester.tap(find.text('取消'));
       await tester.pumpAndSettle();

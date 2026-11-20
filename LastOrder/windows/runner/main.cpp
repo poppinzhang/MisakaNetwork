@@ -30,12 +30,15 @@ bool ProtectChildProcessLifetime() {
 int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
                       _In_ wchar_t *command_line, _In_ int show_command) {
   if (!::IsWindows10OrGreater()) {
-    ::MessageBox(nullptr, L"LastOrder requires Windows 10 or later.",
+    // Chinese UTF-16 literals via ASCII escapes to stay clean under MSVC /WX.
+    ::MessageBox(nullptr,
+                 L"LastOrder \u9700\u8981 Windows 10 \u6216\u66F4\u9AD8\u7248\u672C\u3002",
                  L"LastOrder", MB_OK | MB_ICONERROR);
     return EXIT_FAILURE;
   }
   if (!ProtectChildProcessLifetime()) {
-    ::MessageBox(nullptr, L"Unable to initialize protected helper processes.",
+    ::MessageBox(nullptr,
+                 L"\u65E0\u6CD5\u521D\u59CB\u5316\u5E94\u7528\u8FDB\u7A0B\u4FDD\u62A4\uFF0C\u8BF7\u91CD\u65B0\u542F\u52A8\u3002",
                  L"LastOrder", MB_OK | MB_ICONERROR);
     return EXIT_FAILURE;
   }
@@ -48,7 +51,8 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   // Initialize COM, so that it is available for use in the library and/or
   // plugins.
   if (FAILED(::CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED))) {
-    ::MessageBox(nullptr, L"Unable to initialize Windows application services.",
+    ::MessageBox(nullptr,
+                 L"\u65E0\u6CD5\u521D\u59CB\u5316 Windows \u5E94\u7528\u670D\u52A1\uFF0C\u8BF7\u91CD\u65B0\u542F\u52A8\u3002",
                  L"LastOrder", MB_OK | MB_ICONERROR);
     return EXIT_FAILURE;
   }

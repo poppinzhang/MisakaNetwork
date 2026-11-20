@@ -147,17 +147,17 @@ func (r executableRunner) invoke(ctx context.Context, input []byte, emit func(pr
 // stageMessages covers every stage code runtime/bridge.py emits.
 var stageMessages = map[string]string{
 	"starting":     "正在启动抢票工具",
-	"waiting":      "等待开票时间",
+	"waiting":      "等待开售时间",
 	"preparing":    "正在准备订单",
 	"ordering":     "正在尝试创建订单",
-	"ordered":      "抢票工具已报告下单成功，正在确认结果",
-	"page_timeout": "购票页长时间未开放购买，抢票工具已停止",
+	"ordered":      "已提交下单，正在确认结果",
+	"page_timeout": "购票页长时间未开放，任务已停止",
 }
 
 var statusMessages = map[string]string{
-	"succeeded":       "抢票工具已报告下单成功，正在确认结果",
-	"duplicate_order": "抢票工具检测到已有订单，正在确认结果",
-	"failed":          "抢票工具报告执行异常",
+	"succeeded":       "已提交下单，正在确认结果",
+	"duplicate_order": "检测到已有订单，正在确认结果",
+	"failed":          "执行异常，正在重试或退出",
 	"cooldown":        "请求过于频繁，正在等待冷却",
 }
 

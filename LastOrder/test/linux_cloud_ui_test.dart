@@ -74,10 +74,10 @@ void main() {
           await tester.tap(finder);
           await tester.pumpAndSettle();
         }
-        expect(find.textContaining('系统：Debian 13'), findsOneWidget);
-        expect(find.textContaining('SSH 登录：custom-user（密钥）'), findsOneWidget);
+        expect(find.textContaining('· Debian 13（'), findsOneWidget);
+        expect(find.textContaining('SSH 账号 custom-user（密钥登录）'), findsOneWidget);
         expect(
-          find.textContaining('glibc 2.39+、GTK 3.24 与 systemd'),
+          find.textContaining('TCP 22 与 20001（0.0.0.0/0）'),
           findsOneWidget,
         );
         expect(tester.takeException(), isNull);

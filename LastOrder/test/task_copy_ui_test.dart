@@ -31,7 +31,7 @@ void main() {
       expect(find.byType(AlertDialog), findsNothing);
       expect(onCard(copy.id, find.text(source.name)), findsOneWidget);
       expect(onCard(copy.id, find.text('未分发')), findsOneWidget);
-      expect(onCard(source.id, find.text('未结束 1 台')), findsOneWidget);
+      expect(onCard(source.id, find.text('进行中 1 台')), findsOneWidget);
       expect(editButton(source.id), findsNothing);
       expect(f.gateway.submitted, isEmpty);
       expect(f.runtime.lookups, isEmpty);

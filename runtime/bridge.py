@@ -534,11 +534,11 @@ def handle_request(request: Any, engine: Any, emit: Callable[[dict], None]) -> d
                 identity = verify_authentication(cookies)
                 if identity["status"] == "expired":
                     raise BridgeError("login_required", identity["message"])
-                raise BridgeError("search_unavailable", "暂时无法查询活动，请检查网络或稍后重试")
+                raise BridgeError("search_unavailable", "暂时无法查询演出，请检查网络或稍后重试")
             return {key: data[key] for key in ("keyword", "page", "pagesize", "total", "results") if key in data}
         project = params.get("project_input")
         if isinstance(project, bool) or not isinstance(project, (str, int)) or len(str(project)) > 4096:
-            raise BridgeError("invalid_request", "需要有效的活动编号或链接")
+            raise BridgeError("invalid_request", "需要有效的演出编号或链接")
         selected_date = params.get("selected_date")
         if selected_date is not None and (not isinstance(selected_date, str) or len(selected_date) > 20):
             raise BridgeError("invalid_request", "场次日期格式错误")
@@ -574,7 +574,7 @@ def process_request(request: Any, engine: Any, emit: Callable[[dict], None]) -> 
         return 1
     except Exception:
         # Exception text often embeds HTTP headers, credential values or local paths.
-        emit({"type": "result", "ok": False, "error": {"code": "runtime_error", "message": "biliTickerBuy 操作失败，请检查登录状态、活动信息与网络连接"}})
+        emit({"type": "result", "ok": False, "error": {"code": "runtime_error", "message": "biliTickerBuy 操作失败，请检查登录状态、演出信息与网络连接"}})
         return 1
 
 

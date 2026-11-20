@@ -223,7 +223,7 @@ void main() {
       await tester.tap(removeAccount('b'));
       await tester.pumpAndSettle();
       expect(find.text('移除账号'), findsOneWidget);
-      await tester.tap(find.text('返回'));
+      await tester.tap(find.text('取消'));
       await tester.pumpAndSettle();
       expect(fixture.controller.state.accounts.map((a) => a.id), [
         'a',

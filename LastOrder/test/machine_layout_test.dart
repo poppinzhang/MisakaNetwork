@@ -170,7 +170,7 @@ void main() {
       find.text(longName),
       find.text('$longHost:20001'),
       find.text(error),
-      find.text('运行时尚未就绪，请重新部署完整安装包。'),
+      find.text('抢票组件尚未就绪，请重新部署 Sisters。'),
       find.descendant(of: machineCard('b'), matching: find.text('重新部署')),
       find.descendant(of: machineCard('b'), matching: find.text('移除连接')),
     ]) {
@@ -217,7 +217,7 @@ void main() {
     await tester.tap(remove);
     await tester.pumpAndSettle();
     expect(find.text('仅移除本地连接。远程 Sisters 与已启动任务会继续运行。'), findsOneWidget);
-    await tester.tap(find.text('返回'));
+    await tester.tap(find.text('取消'));
     await tester.pumpAndSettle();
     expect(c.state.machines.map((m) => m.id), ['a', 'b', 'c']);
     await tester.tap(remove);

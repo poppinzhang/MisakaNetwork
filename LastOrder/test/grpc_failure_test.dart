@@ -187,25 +187,47 @@ void main() {
       const GrpcError.alreadyExists('private-cookie-and-config'),
     );
 
-    expect(message, contains('另一份配置或登录凭据'));
-    expect(message, contains('原任务未更新'));
-    expect(message, contains('请新建任务后分发'));
-    expect(message, contains('若原任务仍在运行，请先查看状态'));
+    expect(message, contains('旧配置或凭据'));
+    expect(message, contains('原执行未变更'));
+    expect(message, contains('复制任务后再分发'));
+    expect(message, contains('查看监控状态'));
     expect(message, isNot(contains('private-cookie-and-config')));
   });
 
   test(
-    'other RPC failures retain safe diagnostics and do not suggest new tasks',
+    'other RPC failures retain safe code-specific diagnostics without leaking details',
     () {
-      for (final error in [
-        const GrpcError.unavailable('private-network-detail'),
-        const GrpcError.unauthenticated('private-certificate-detail'),
-        const GrpcError.resourceExhausted('private-task-detail'),
-      ]) {
+      final cases = <(GrpcError, String)>[
+        (const GrpcError.unavailable('private-network-detail'), '无法连接 Sisters'),
+        (const GrpcError.deadlineExceeded('private-timeout'), '请求 Sisters 超时'),
+        (
+          const GrpcError.resourceExhausted('private-task-detail'),
+          '任务队列或历史已满',
+        ),
+        (
+          const GrpcError.failedPrecondition('private-runtime-detail'),
+          '抢票组件尚未就绪',
+        ),
+        (
+          const GrpcError.unauthenticated('private-certificate-detail'),
+          '安全认证失败',
+        ),
+        (
+          const GrpcError.permissionDenied('private-permission-detail'),
+          '安全认证失败',
+        ),
+        (
+          const GrpcError.invalidArgument('private-argument-detail'),
+          '提交的任务参数无效',
+        ),
+        (const GrpcError.notFound('private-not-found'), '未在 Sisters 上找到该任务记录'),
+        (const GrpcError.internal('private-internal-detail'), '请检查机器状态'),
+      ];
+      for (final (error, hint) in cases) {
         final message = describeGrpcFailure(error);
         expect(message, contains(error.codeName));
-        expect(message, contains('请检查机器状态'));
-        expect(message, isNot(contains('请新建任务')));
+        expect(message, contains(hint));
+        expect(message, isNot(contains('复制任务')));
         expect(message, isNot(contains('private-')));
       }
     },

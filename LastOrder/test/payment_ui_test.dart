@@ -238,7 +238,7 @@ void main() {
       await env.controller.refresh();
       await tester.pumpAndSettle();
       expect(find.byType(Image), findsNothing);
-      expect(find.textContaining('本地关联或节点记录已移除'), findsOneWidget);
+      expect(find.textContaining('该订单的本地记录已移除'), findsOneWidget);
       expect(tester.takeException(), isNull);
     },
   );

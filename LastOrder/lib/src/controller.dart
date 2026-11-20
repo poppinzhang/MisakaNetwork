@@ -964,7 +964,9 @@ class AppController extends ChangeNotifier {
     try {
       await _replaceAccount(next, retainOnFailure: true);
     } catch (_) {
-      accountMessages[account.id] = '$message 状态也未能保存。';
+      accountMessages[account.id] = message.endsWith('。')
+          ? '$message状态也未能保存。'
+          : '$message。状态也未能保存。';
     }
     _notify();
   }
@@ -1429,8 +1431,9 @@ class AppController extends ChangeNotifier {
                 errors[machine.name] = '任务未提交，但本地分发记录未能清理，请检查存储后重试。';
               }
             } else if (reserved && sent) {
-              errors[machine.name] =
-                  '${readableError(e)} 执行结果未确认，请刷新状态核对；不会自动重复提交。';
+              final detail = readableError(e);
+              final sep = detail.endsWith('。') ? '' : '。';
+              errors[machine.name] = '$detail$sep执行结果未确认，请刷新状态核对；不会自动重复提交。';
             }
           }
         }),
@@ -1493,7 +1496,7 @@ class AppController extends ChangeNotifier {
   String _cloudLogin(CloudMachine resource) {
     final username = resource.template.sshUsername;
     if (!RegExp(r'^[a-z_][a-z0-9_-]{0,31}$').hasMatch(username)) {
-      throw const UserError('云模板缺少有效的 SSH 登录用户，请联系管理员核对模板。');
+      throw const UserError('云预设模板缺少有效的 SSH 登录用户名，无法部署。');
     }
     return username;
   }
@@ -1562,7 +1565,7 @@ class AppController extends ChangeNotifier {
         if ((login.isNotEmpty && login != username) ||
             (login.isEmpty && !stoppedBeforeLogin)) {
           throw const UserError(
-            '旧连接使用其他或未记录的 SSH 账号，不能直接切换账号部署。请先停止旧账号下的 Sisters、核对任务，再移除本地连接并重新部署；不会自动停止或迁移旧服务。',
+            '当前连接使用的 SSH 账号与新模板不一致，无法直接覆盖部署。请先停止旧节点上的 Sisters，移除本机连接后再重新部署。',
           );
         }
       }
@@ -1640,7 +1643,7 @@ class AppController extends ChangeNotifier {
         ((request['password'] as String? ?? '').isEmpty &&
             (request['private_key_path'] as String? ?? '').isEmpty &&
             (request['private_key'] as String? ?? '').isEmpty)) {
-      throw const UserError('请填写 SSH 用户和密码或私钥。');
+      throw const UserError('请填写 SSH 用户名，并提供密码或私钥。');
     }
     final fingerprint =
         previous != null &&
@@ -1852,7 +1855,9 @@ class AppController extends ChangeNotifier {
         retainOnFailure: true,
       );
     } catch (_) {
-      failure = '$message 本地状态未能保存，重启后请检查机器。';
+      failure = message.endsWith('。')
+          ? '$message本地状态未能保存，重启后请检查机器。'
+          : '$message。本地状态未能保存，重启后请检查机器。';
     }
     deployments[id] = MachineDeployment(
       phase: DeploymentPhase.failed,

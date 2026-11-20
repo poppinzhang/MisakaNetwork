@@ -149,7 +149,7 @@ void main() {
         tester,
         find.byKey(const ValueKey('cloud-select-provider-tencent')),
       );
-      expect(find.textContaining('管理员尚未配置腾讯云模板'), findsOneWidget);
+      expect(find.textContaining('当前安装包未内置腾讯云配置模板'), findsOneWidget);
       expect(find.text('轻量起步'), findsNothing);
       expect(find.byKey(const ValueKey('cloud-preview-outcome')), findsNothing);
       expect(
@@ -196,20 +196,14 @@ void main() {
           find.byKey(const ValueKey('cloud-preview-outcome')),
           findsNothing,
         );
-        expect(find.textContaining('SSH 登录：ubuntu（密钥）'), findsOneWidget);
-        expect(find.textContaining('SSH TCP 22 来源：0.0.0.0/0'), findsOneWidget);
-        expect(
-          find.textContaining('Sisters TCP 20001 来源：0.0.0.0/0'),
-          findsOneWidget,
-        );
-        expect(find.textContaining('按小时后付费'), findsOneWidget);
+        expect(find.textContaining('SSH 账号 ubuntu（密钥登录）'), findsOneWidget);
+        expect(find.textContaining('TCP 22 与 20001（0.0.0.0/0）'), findsOneWidget);
+        expect(find.textContaining('按量计费'), findsWidgets);
         expect(find.textContaining('5 Mbps'), findsOneWidget);
-        expect(find.textContaining('建议可用区：ap-guangzhou-6'), findsOneWidget);
+        expect(find.textContaining('首选 ap-guangzhou-6'), findsOneWidget);
         expect(find.textContaining('同地域其他可用区'), findsOneWidget);
-        expect(find.textContaining('保持相同机型、镜像、系统盘和带宽'), findsOneWidget);
-        expect(find.textContaining('创建结果不确定时暂停尝试'), findsOneWidget);
         expect(find.textContaining('Sisters 需另行部署'), findsOneWidget);
-        expect(find.textContaining('自动创建并复用 VPC 和子网'), findsOneWidget);
+        expect(find.textContaining('自动创建或复用共享 VPC 与子网'), findsOneWidget);
         expect(controller.creates, 0);
         await _tap(tester, find.text('确认按量付费创建'));
         expect(controller.creates, 1);
@@ -233,8 +227,8 @@ void main() {
       expect(find.text('部署完成'), findsNothing);
       expect(find.text('交互预览'), findsNothing);
       expect(find.text('删除预览记录'), findsNothing);
-      expect(find.text('删除本地卡片'), findsNothing);
-      expect(find.textContaining('点击「部署 Sisters」'), findsOneWidget);
+      expect(find.text('隐藏此卡片'), findsNothing);
+      expect(find.textContaining('点击下方「部署 Sisters」'), findsOneWidget);
       expect(find.textContaining('ap-guangzhou'), findsNothing);
       expect(find.textContaining('ins-uitest'), findsNothing);
       expect(find.text('测试地域'), findsNothing);
@@ -248,10 +242,11 @@ void main() {
       );
       expect(find.textContaining('ap-guangzhou'), findsNothing);
       expect(find.textContaining('ins-uitest'), findsNothing);
-      expect(find.textContaining('公网地址：192.0.2.100'), findsNWidgets(2));
+      expect(find.textContaining('公网地址：192.0.2.100'), findsOneWidget);
+      expect(find.textContaining('公网 IP：192.0.2.100'), findsOneWidget);
       expect(find.textContaining('删除系统盘数据'), findsOneWidget);
-      expect(find.textContaining('VPC 和子网会保留'), findsOneWidget);
-      expect(find.textContaining('费用已停止'), findsOneWidget);
+      expect(find.textContaining('共享网络与 SSH 公钥会保留'), findsOneWidget);
+      expect(find.textContaining('控制台状态和账单为准'), findsOneWidget);
       await _tap(tester, find.text('保留服务器'));
       expect(controller.releases, isEmpty);
       await _tap(tester, find.text('释放云服务器'));
@@ -310,7 +305,7 @@ void main() {
       expect(find.textContaining('尚未取得实例 ID'), findsNothing);
       expect(find.textContaining('公网地址：等待云端返回'), findsOneWidget);
       if (phase == CloudMachinePhase.creating) {
-        expect(find.text('删除本地卡片'), findsNothing);
+        expect(find.text('隐藏此卡片'), findsNothing);
       }
       expect(tester.takeException(), isNull);
     });
@@ -337,7 +332,7 @@ void main() {
       expect(find.text('释放云服务器'), findsNothing);
       await _tap(tester, find.text('查询云端状态'));
       expect(find.textContaining('暂未查询到创建结果'), findsOneWidget);
-      await _tap(tester, find.text('删除本地卡片'));
+      await _tap(tester, find.text('隐藏此卡片'));
       final dialog = find.byType(AlertDialog);
       for (final detail in [job.name, job.region, '腾讯云控制台', '仍可能计费', '恢复卡片']) {
         expect(
@@ -347,24 +342,24 @@ void main() {
       }
       await _tap(tester, find.text('保留卡片'));
       expect(c.cloud.visibleJobs.single.id, job.id);
-      await _tap(tester, find.text('删除本地卡片'));
-      await _tap(tester, find.text('确认删除'));
+      await _tap(tester, find.text('隐藏此卡片'));
+      await _tap(tester, find.text('确认隐藏'));
       expect(find.text(job.name), findsNothing);
       expect(c.cloud.visibleJobs, isEmpty);
 
       await goToPage(tester, '公有云部署');
       await _tap(tester, find.byKey(const ValueKey('cloud-provider-aliyun')));
-      expect(find.textContaining('恢复已删除的机器卡片'), findsNothing);
+      expect(find.textContaining('恢复已隐藏的卡片'), findsNothing);
       await _tap(tester, find.byKey(const ValueKey('cloud-provider-tencent')));
-      await _tap(tester, find.text('恢复已删除的机器卡片（1）'));
-      expect(find.textContaining('恢复已删除的机器卡片'), findsNothing);
-      expect(find.textContaining('卡片已恢复'), findsOneWidget);
+      await _tap(tester, find.text('恢复已隐藏的卡片（1）'));
+      expect(find.textContaining('恢复已隐藏的卡片'), findsNothing);
+      expect(find.textContaining('已恢复隐藏的卡片'), findsOneWidget);
       await goToPage(tester, '机器管理');
       expect(find.text(job.name), findsOneWidget);
       h.exists = true;
       await _tap(tester, find.text('查询云端状态'));
       expect(find.text('已创建 · 待部署'), findsOneWidget);
-      expect(find.text('删除本地卡片'), findsNothing);
+      expect(find.text('隐藏此卡片'), findsNothing);
       final actions = h.helper.requests.map((request) => request['action']);
       expect(
         actions.where((action) => action == 'tencent_create'),
@@ -394,7 +389,7 @@ void main() {
       );
       expect(find.text('查询云端状态'), findsNothing);
       expect(find.text('释放云服务器'), findsNothing);
-      await _tap(tester, find.text('重试准备并创建'));
+      await _tap(tester, find.text('重试创建'));
       expect(controller.retries, ['ui-operation']);
       expect(controller.creates, 0);
     },
@@ -417,7 +412,7 @@ void main() {
         width: 390,
         textScale: 2,
       );
-      expect(find.textContaining('使用已保存的 SSH 密钥部署'), findsOneWidget);
+      expect(find.textContaining('点击下方「部署 Sisters」即可自动安装'), findsOneWidget);
       expect(find.text('部署 Sisters'), findsOneWidget);
       await _tap(
         tester,
@@ -602,7 +597,7 @@ void main() {
       );
       expect(find.text('已创建 · Sisters 已部署'), findsOneWidget);
       expect(find.text('已创建 · 待部署'), findsNothing);
-      expect(find.textContaining('查看连接状态并分发任务'), findsOneWidget);
+      expect(find.textContaining('可在「账号与任务」中选择此机器分发任务'), findsOneWidget);
       await _tap(tester, find.text('重新部署 Sisters'));
       expect(deploys, 1);
       expect(controller.creates, 0);

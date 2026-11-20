@@ -414,4 +414,17 @@ void main() {
       await restored.removeMachine(restored.jobs.single.id);
     },
   );
+  test('missing cloud machine reports a server-record error without preview jargon', () async {
+    final c = await readyController();
+    await expectLater(
+      c.refreshCloudMachine('missing-cloud-job'),
+      throwsA(
+        isA<UserError>().having(
+          (e) => e.message,
+          'message',
+          allOf(contains('未找到该云服务器记录'), isNot(contains('预览'))),
+        ),
+      ),
+    );
+  });
 }

@@ -50,7 +50,7 @@ void main() {
       tester,
       find.byKey(const ValueKey('cloud-select-provider-volcengine')),
     );
-    expect(find.textContaining('管理员尚未配置火山引擎模板'), findsOneWidget);
+    expect(find.textContaining('当前安装包未内置火山引擎配置模板'), findsOneWidget);
     expect(find.byKey(const ValueKey('cloud-preview-outcome')), findsNothing);
     expect(find.text('轻量起步'), findsNothing);
     expect(
@@ -84,12 +84,10 @@ void main() {
           find.byKey(const ValueKey('cloud-preview-outcome')),
           findsNothing,
         );
-        expect(find.textContaining('服务器与公网 IP 一同释放'), findsOneWidget);
-        expect(find.textContaining('确认两者均已释放后才移除记录'), findsOneWidget);
-        expect(find.textContaining('SSH 登录：root（密钥）'), findsOneWidget);
-        expect(find.textContaining('仅明确库存或容量不足时'), findsOneWidget);
-        expect(find.textContaining('保持相同机型、镜像、系统盘和带宽'), findsOneWidget);
-        expect(find.textContaining('创建结果不确定时暂停尝试'), findsOneWidget);
+        expect(find.textContaining('释放时同步删除系统盘与本次公网 IP'), findsOneWidget);
+        expect(find.textContaining('SSH 账号 root（密钥登录）'), findsOneWidget);
+        expect(find.textContaining('库存不足时自动尝试同地域其他可用区'), findsOneWidget);
+        expect(find.textContaining('TCP 22 与 20001（0.0.0.0/0）'), findsOneWidget);
         expect(find.textContaining('5 Mbps'), findsOneWidget);
         expect(find.text('确认按量付费创建'), findsOneWidget);
         expect(h.calls('create'), 0);
@@ -115,9 +113,9 @@ void main() {
         tester,
         find.byKey(ValueKey('cloud-release-${h.c.jobs.single.id}')),
       );
-      expect(find.textContaining('独立公网 IP 将随服务器一同释放'), findsOneWidget);
-      expect(find.textContaining('公网 IP 留存或结果未知时保留记录'), findsOneWidget);
-      expect(find.textContaining('共享安全组、SSH 公钥、VPC 和子网会保留'), findsOneWidget);
+      expect(find.textContaining('随实例创建的独立公网 IP 将一并释放'), findsOneWidget);
+      expect(find.textContaining('将保留记录供继续核对'), findsOneWidget);
+      expect(find.textContaining('共享网络与 SSH 公钥会保留'), findsOneWidget);
       await tap(tester, find.text('保留服务器'));
       expect(h.calls('release'), 0);
       expect(tester.takeException(), isNull);

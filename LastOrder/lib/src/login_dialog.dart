@@ -389,7 +389,7 @@ class _LoginDialogState extends State<LoginDialog> with WidgetsBindingObserver {
         value = jsonDecode(_cookie.text);
       } catch (_) {
         throw const UserError(
-          '请输入 JSON Cookie 数组，例如 [{"name":"…","value":"…"}]。',
+          '请输入 Cookie JSON 数组，例如 [{"name":"…","value":"…"}]。',
         );
       }
       if (value is! List) throw const UserError('Cookie 必须为 JSON 数组。');
@@ -469,9 +469,9 @@ class _LoginDialogState extends State<LoginDialog> with WidgetsBindingObserver {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               if (widget.account case final Account account) ...[
-                Text('请使用「${account.name}」原账号扫码。登录成功后更新 Cookie，保留已有任务与场次选择。'),
+                Text('请重新登录原账号「${account.name}」以更新凭据，已有任务配置保持不变。'),
                 const SizedBox(height: 8),
-                const Text('更新后不会自动启动任务；已分发到 Sisters 的执行不会被替换。'),
+                const Text('更新后不会自动启动任务，也不会影响已分发到 Sisters 的运行中任务。'),
                 const SizedBox(height: 12),
               ],
               SwitchListTile(
@@ -524,7 +524,7 @@ class _LoginDialogState extends State<LoginDialog> with WidgetsBindingObserver {
               ],
               const SizedBox(height: 12),
               Text(
-                '登录凭据不会写入普通配置文件。',
+                '登录凭据仅加密保存在本机系统安全存储中。',
                 style: TextStyle(
                   color: Theme.of(context).colorScheme.onSurfaceVariant,
                   fontSize: 12,

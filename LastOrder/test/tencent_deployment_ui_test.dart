@@ -159,7 +159,7 @@ void main() {
         expectUnifiedCard();
         expect(find.text('上传安装包'), findsOneWidget);
         expect(find.text('47%'), findsOneWidget);
-        expect(find.text('正在部署 Sisters'), findsOneWidget);
+        expect(find.text('部署中'), findsOneWidget);
         final remove = find.byKey(
           const ValueKey('cloud-remove-connection-$resourceId'),
         );
@@ -209,7 +209,7 @@ void main() {
         expect(find.text('linux/arm64'), findsOneWidget);
         expect(find.text('biliTickerBuy 2.15.18'), findsOneWidget);
         expect(find.text('并发上限 3'), findsOneWidget);
-        expect(find.text('运行时尚未就绪，请重新部署完整安装包。'), findsOneWidget);
+        expect(find.text('抢票组件尚未就绪，请重新部署 Sisters。'), findsOneWidget);
         h.gateway.statusHandler = (_) async => throw const UserError('模拟连接中断');
         await h.controller.refresh();
         await tester.pumpAndSettle();

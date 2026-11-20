@@ -77,7 +77,7 @@ Future<String?> showSaleStartPicker(BuildContext context, String startAt) {
                 selected.toIso8601String().split('.').first,
               );
             },
-            child: const Text('确定'),
+            child: const Text('确认'),
           ),
         ],
       ),

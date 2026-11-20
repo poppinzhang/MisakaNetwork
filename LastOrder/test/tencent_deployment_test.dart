@@ -261,7 +261,7 @@ void main() {
           isA<UserError>().having(
             (e) => e.message,
             'message',
-            contains('不能直接切换账号'),
+            contains('SSH 账号与新模板不一致'),
           ),
         ),
       );

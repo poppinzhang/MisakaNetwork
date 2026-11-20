@@ -10,7 +10,7 @@
       "diskGb": 20,
       "architecture": "x64",
       "os": "Ubuntu 24.04 LTS",
-      "regionLabel": "华东地区(上海)",
+      "regionLabel": "华东地区（上海）",
       "region": "ap-shanghai",
       "runInstances": {
         "Placement": {

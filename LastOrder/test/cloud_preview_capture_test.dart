@@ -104,7 +104,7 @@ void main() {
     expect(find.byKey(const ValueKey('cloud-key-id')), findsNothing);
     expect(find.byKey(const ValueKey('cloud-save-credential')), findsNothing);
     await capture('01b-credentials-verified-desktop');
-    await tester.tap(find.text('去创建云服务器'));
+    await tester.tap(find.text('创建云服务器'));
     await tester.pumpAndSettle();
     await capture('02-providers-desktop');
     await tester.tap(find.text('创建').first);
@@ -112,7 +112,7 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('cloud-template-test-aliyun')));
     await tester.pumpAndSettle();
     await capture('03-templates-desktop');
-    await tester.tap(find.byTooltip('关闭云服务器创建'));
+    await tester.tap(find.byTooltip('关闭创建云服务器'));
     await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('机器管理'));
     await tester.pumpAndSettle();

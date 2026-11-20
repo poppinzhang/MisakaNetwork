@@ -49,7 +49,7 @@ void main() {
       expect(failed.phase, CloudMachinePhase.unknown);
       expect(failed.instanceId, 'i-test1234');
       expect(failed.createSubmitted, isTrue);
-      expect(failed.error, '无法确认云端状态。$reason。处理后请刷新查询；现有资源可能继续计费。');
+      expect(failed.error, '无法确认云端状态（$reason），请稍后刷新或到控制台核对；现有资源可能继续计费。');
       final stored =
           jsonDecode(h.store.secrets[CloudController.workspaceKey]!) as Map;
       expect((stored['jobs'] as List).single['error'], failed.error);

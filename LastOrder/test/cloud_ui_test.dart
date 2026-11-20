@@ -124,6 +124,7 @@ void main() {
     (tester) async {
       await openCloudApp(tester);
       await goToPage(tester, '公有云部署');
+      expect(find.textContaining('腾讯云、阿里云和火山引擎'), findsOneWidget);
       for (final provider in CloudProvider.values) {
         await tapVisible(
           tester,
@@ -146,7 +147,7 @@ void main() {
         );
         expect(id.decoration!.labelText, provider.credentialIdLabel);
         expect(secret.decoration!.labelText, provider.credentialSecretLabel);
-        expect(find.textContaining('提交后联网验证，通过后才保存'), findsOneWidget);
+        expect(find.textContaining('需联网验证通过后才会保存'), findsOneWidget);
       }
       await tapVisible(
         tester,
@@ -193,8 +194,15 @@ void main() {
       for (final key in ['cloud-key-id', 'cloud-key-secret']) {
         expect(find.byKey(ValueKey(key)), findsNothing);
       }
-      await tapVisible(tester, find.text('去创建云服务器'));
+      await tapVisible(tester, find.text('创建云服务器'));
       expect(find.byType(CloudCreateDialog), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byType(CloudCreateDialog),
+          matching: find.textContaining('腾讯云、阿里云和火山引擎'),
+        ),
+        findsOneWidget,
+      );
       expect(find.text('创建'), findsOneWidget);
       expect(find.text('录入凭证'), findsNWidgets(2));
       expect(tester.takeException(), isNull);
@@ -233,7 +241,7 @@ void main() {
 
       // Open directly from the credential page, so the existing page and its
       // manually selected tab remain mounted underneath this dialog.
-      await tapVisible(tester, find.text('去创建云服务器'));
+      await tapVisible(tester, find.text('创建云服务器'));
       await tapVisible(tester, find.text('录入凭证').first);
       expect(find.byType(CloudCreateDialog), findsNothing);
       expect(find.text('腾讯云凭证'), findsOneWidget);
@@ -330,7 +338,7 @@ void main() {
         isFalse,
       );
       expect(find.text('移除凭证'), findsNothing);
-      expect(find.text('去创建云服务器'), findsNothing);
+      expect(find.text('创建云服务器'), findsNothing);
       expect(store.secrets[CloudController.workspaceKey], original);
       expect(c.cloud.credentials, isEmpty);
       expect(helper.requests, hasLength(priorRequests + 1));
@@ -404,7 +412,7 @@ void main() {
           tester,
           find.byKey(ValueKey('cloud-provider-${provider.name}')),
         );
-        expect(find.textContaining('如需更换凭证，请先移除当前凭证'), findsOneWidget);
+        expect(find.textContaining('如需更换请先移除当前凭证'), findsOneWidget);
         expect(find.byType(TextFormField), findsNothing);
         expect(
           find.byKey(const ValueKey('cloud-save-credential')),
@@ -413,7 +421,7 @@ void main() {
         expect(find.text('账号备注'), findsNothing);
         expect(c.cloud.credentials, hasLength(3));
         await tapVisible(tester, find.text('移除凭证'));
-        await tapVisible(tester, find.text('返回'));
+        await tapVisible(tester, find.text('取消'));
         expect(c.cloud.credentialFor(provider), isNotNull);
         expect(find.byType(TextFormField), findsNothing);
         await tapVisible(tester, find.text('移除凭证'));
@@ -545,7 +553,7 @@ void main() {
       expect(
         tester
             .widget<OutlinedButton>(
-              find.widgetWithText(OutlinedButton, '去创建云服务器'),
+              find.widgetWithText(OutlinedButton, '创建云服务器'),
             )
             .onPressed,
         isNull,
@@ -570,7 +578,7 @@ void main() {
         tester,
         find.byKey(const ValueKey('cloud-select-provider-aliyun')),
       );
-      expect(find.textContaining('管理员尚未配置阿里云模板'), findsOneWidget);
+      expect(find.textContaining('当前安装包未内置阿里云配置模板'), findsOneWidget);
       expect(find.byKey(const ValueKey('cloud-preview-outcome')), findsNothing);
       expect(find.text('轻量起步'), findsNothing);
       expect(
@@ -604,14 +612,14 @@ void main() {
         );
         expect(find.byType(CloudCredentialsPage), findsOneWidget);
         expect(tester.takeException(), isNull);
-        await tapVisible(tester, find.text('去创建云服务器'));
+        await tapVisible(tester, find.text('创建云服务器'));
         expect(find.byType(CloudCreateDialog), findsOneWidget);
         expect(tester.takeException(), isNull);
         await tapVisible(
           tester,
           find.byKey(const ValueKey('cloud-select-provider-aliyun')),
         );
-        expect(find.textContaining('管理员尚未配置阿里云模板'), findsOneWidget);
+        expect(find.textContaining('当前安装包未内置阿里云配置模板'), findsOneWidget);
         expect(
           tester
               .widget<FilledButton>(

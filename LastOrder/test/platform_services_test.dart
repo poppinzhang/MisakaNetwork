@@ -122,7 +122,23 @@ void main() {
     });
     await expectLater(
       services.call('helper', {}, timeout: const Duration(milliseconds: 1)),
-      throwsA(isA<UserError>()),
+      throwsA(
+        isA<UserError>().having(
+          (error) => error.message,
+          'message',
+          allOf(contains('操作超时'), contains('部署')),
+        ),
+      ),
+    );
+    await expectLater(
+      services.call('runtime', {}, timeout: const Duration(milliseconds: 1)),
+      throwsA(
+        isA<UserError>().having(
+          (error) => error.message,
+          'message',
+          allOf(contains('操作超时'), isNot(contains('部署'))),
+        ),
+      ),
     );
   });
   test(

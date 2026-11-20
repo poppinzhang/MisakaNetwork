@@ -50,7 +50,7 @@ void main() {
       tester,
       find.byKey(const ValueKey('cloud-select-provider-aliyun')),
     );
-    expect(find.textContaining('管理员尚未配置阿里云模板'), findsOneWidget);
+    expect(find.textContaining('当前安装包未内置阿里云配置模板'), findsOneWidget);
     expect(find.byKey(const ValueKey('cloud-preview-outcome')), findsNothing);
     expect(find.text('轻量起步'), findsNothing);
     expect(
@@ -84,11 +84,10 @@ void main() {
           find.byKey(const ValueKey('cloud-preview-outcome')),
           findsNothing,
         );
-        expect(find.textContaining('本次公网地址与系统盘随实例释放'), findsOneWidget);
-        expect(find.textContaining('SSH 登录：root（密钥）'), findsOneWidget);
-        expect(find.textContaining('仅明确库存或容量不足时'), findsOneWidget);
-        expect(find.textContaining('保持相同机型、镜像、系统盘和带宽'), findsOneWidget);
-        expect(find.textContaining('创建结果不确定时暂停尝试'), findsOneWidget);
+        expect(find.textContaining('释放时同步删除系统盘与本次公网 IP'), findsOneWidget);
+        expect(find.textContaining('SSH 账号 root（密钥登录）'), findsOneWidget);
+        expect(find.textContaining('库存不足时自动尝试同地域其他可用区'), findsOneWidget);
+        expect(find.textContaining('TCP 22 与 20001（0.0.0.0/0）'), findsOneWidget);
         expect(find.textContaining('5 Mbps'), findsOneWidget);
         expect(find.text('确认按量付费创建'), findsOneWidget);
         expect(
@@ -153,7 +152,7 @@ void main() {
       );
       expect(find.textContaining('阿里云控制台'), findsOneWidget);
       expect(find.textContaining('腾讯云控制台'), findsNothing);
-      expect(find.textContaining('共享安全组、SSH 公钥、VPC 和子网会保留'), findsOneWidget);
+      expect(find.textContaining('共享网络与 SSH 公钥会保留'), findsOneWidget);
       await tap(tester, find.text('保留服务器'));
       expect(
         h.helper.requests.where((r) => r['action'] == 'aliyun_release').length,

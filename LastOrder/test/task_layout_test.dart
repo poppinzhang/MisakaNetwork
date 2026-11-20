@@ -230,7 +230,7 @@ void main() {
           '2 张',
           '2026-12-01 20:00:00',
           '750 毫秒',
-          '未结束',
+          '进行中',
         ]) {
           expect(inside(card, value), findsWidgets);
         }
@@ -246,17 +246,17 @@ void main() {
     (tester) async {
       final fixture = await openTaskPage(tester, page: '账号与任务');
       final card = taskCard('task-a');
-      expect(inside(card, '未结束 2 台'), findsOneWidget);
+      expect(inside(card, '进行中 2 台'), findsOneWidget);
 
       fixture.gateway.snapshots['machine-a']!.tasks.first.state =
           TaskState.TASK_STATE_SUCCEEDED;
       await fixture.controller.refresh();
       await tester.pumpAndSettle();
-      expect(inside(card, '未结束 1 台'), findsOneWidget);
+      expect(inside(card, '进行中 1 台'), findsOneWidget);
 
       await fixture.controller.cancel(machine('machine-b'), 'task-a');
       await tester.pumpAndSettle();
-      expect(inside(card, '未结束 0 台'), findsOneWidget);
+      expect(inside(card, '已结束'), findsOneWidget);
       expect(inside(card, '分发'), findsOneWidget);
       expect(tester.takeException(), isNull);
     },
@@ -373,7 +373,7 @@ void main() {
     await tester.tap(remove);
     await tester.pumpAndSettle();
     expect(find.text('删除本地任务'), findsOneWidget);
-    await tester.tap(find.text('返回'));
+    await tester.tap(find.text('取消'));
     await tester.pumpAndSettle();
     expect(taskCard('task-b'), findsOneWidget);
     await tester.tap(remove);

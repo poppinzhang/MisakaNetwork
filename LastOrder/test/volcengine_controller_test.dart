@@ -356,7 +356,7 @@ void main() {
       await h.create(tester, refresh: false);
       expect(h.c.jobs.single.phase, CloudMachinePhase.createFailed);
       expect(h.c.jobs.single.createSubmitted, false);
-      expect(h.c.jobs.single.error, contains('相同规格'));
+      expect(h.c.jobs.single.error, contains('暂无该规格库存'));
       expect(h.calls('create'), 1);
       expect(h.calls('zones'), 1);
     },
@@ -530,7 +530,7 @@ void main() {
       expect(job.phase, CloudMachinePhase.createFailed);
       expect(job.createSubmitted, false);
       expect(job.error, contains('镜像、公钥与安全组检查：$reason'));
-      expect(job.error, contains('尚未提交购买'));
+      expect(job.error, contains('尚未扣费购买'));
       expect(h.calls('create'), 0);
       final saved =
           jsonDecode(h.store.secrets[CloudController.workspaceKey]!) as Map;

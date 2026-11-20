@@ -151,7 +151,7 @@ class _CloudCredentialsPageState extends State<CloudCredentialsPage> {
           ),
           const SizedBox(height: 8),
           Text(
-            '连接你的公有云',
+            '公有云配置',
             style: TextStyle(
               fontSize: 30,
               fontWeight: FontWeight.w700,
@@ -160,12 +160,12 @@ class _CloudCredentialsPageState extends State<CloudCredentialsPage> {
           ),
           const SizedBox(height: 8),
           Text(
-            '管理云凭证，为每一次创建做好准备。',
+            '管理云厂商访问密钥与本机 SSH 密钥，用于创建云服务器。',
             style: TextStyle(color: colors.onSurfaceVariant),
           ),
           const SizedBox(height: 24),
           const CloudNotice(
-            '凭证提交后联网验证，通过后才保存。每家云厂商仅保留一份凭证。腾讯云和火山引擎支持创建和释放按量计费服务器，费用由云厂商收取。',
+            '凭证需联网验证通过后才会保存，每家云厂商限存一份。支持创建和释放腾讯云、阿里云和火山引擎的按量计费服务器，费用由云厂商收取。',
             icon: LucideIcons.info,
           ),
           const SizedBox(height: 24),
@@ -482,7 +482,7 @@ class _CloudCredentialFormState extends State<CloudCredentialForm> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text('返回'),
+            child: const Text('取消'),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(context, true),
@@ -522,7 +522,7 @@ class _CloudCredentialFormState extends State<CloudCredentialForm> {
     });
     try {
       await widget.controller.restoreDismissedCreations(widget.provider);
-      if (mounted) setState(() => saved = '卡片已恢复，可到「机器管理」查询云端状态。');
+      if (mounted) setState(() => saved = '已恢复隐藏的卡片，可前往「机器管理」查询云端状态。');
     } catch (e) {
       if (mounted) setState(() => error = readableError(e));
     } finally {
@@ -601,25 +601,14 @@ class _CloudCredentialFormState extends State<CloudCredentialForm> {
             const SizedBox(height: 20),
             if (credential != null) ...[
               CloudNotice(
-                '已保存${widget.provider.displayName}凭证 · ${credential.maskedId}\n${credential.onlineVerified ? '联网验证通过。' : '待联网验证，请重新提交验证。'}${widget.provider.supportsResources ? '仍有未释放或待核实的云资源时，不能移除凭证。' : ''}',
+                '已保存${widget.provider.displayName}凭证 · ${credential.maskedId}\n'
+                '${credential.onlineVerified ? '联网验证通过。如需更换请先移除当前凭证；存在未释放或待核实云资源时不可移除。' : '待联网验证，请重新提交验证；验证失败时保留原记录。'}',
                 icon: credential.onlineVerified
                     ? LucideIcons.shieldCheck
                     : LucideIcons.info,
               ),
               const SizedBox(height: 20),
             ],
-            Text(
-              credential == null
-                  ? '每家云厂商只能保存一份凭证。'
-                  : credential.onlineVerified
-                  ? '如需更换凭证，请先移除当前凭证。'
-                  : '重新提交并通过联网验证后即可使用；验证失败时保留原记录。',
-              style: TextStyle(
-                color: colors.onSurfaceVariant,
-                fontSize: 12,
-                height: 1.6,
-              ),
-            ),
             if (canEnterCredential) ...[
               const SizedBox(height: 16),
               TextFormField(
@@ -662,12 +651,7 @@ class _CloudCredentialFormState extends State<CloudCredentialForm> {
               ),
               const SizedBox(height: 12),
               Text(
-                switch (widget.provider) {
-                  CloudProvider.tencent => '使用 CAM 子用户的 API 密钥，无需填写 AppID。',
-                  CloudProvider.aliyun => '使用 RAM 用户的访问密钥，无需填写网页登录密码。',
-                  CloudProvider.volcengine =>
-                    '使用 IAM 用户的访问密钥；不是火山方舟的模型 API Key。',
-                },
+                widget.provider.identityHint,
                 style: TextStyle(
                   color: colors.onSurfaceVariant,
                   fontSize: 12,
@@ -723,7 +707,7 @@ class _CloudCredentialFormState extends State<CloudCredentialForm> {
                         ? null
                         : widget.onCreate,
                     icon: const Icon(LucideIcons.plus, size: 16),
-                    label: const Text('去创建云服务器'),
+                    label: const Text('创建云服务器'),
                   ),
                 if (credential != null)
                   TextButton(
@@ -738,7 +722,7 @@ class _CloudCredentialFormState extends State<CloudCredentialForm> {
                   TextButton.icon(
                     onPressed: busy ? null : restoreCards,
                     icon: const Icon(LucideIcons.undo2, size: 16),
-                    label: Text('恢复已删除的机器卡片（$dismissedCount）'),
+                    label: Text('恢复已隐藏的卡片（$dismissedCount）'),
                   ),
               ],
             ),
@@ -823,7 +807,7 @@ class _CloudSshIdentityState extends State<CloudSshIdentity> {
                     Text(
                       c.sshReady
                           ? '已生成并安全保存 · RSA 2048\n云服务器将使用同一份公钥，私钥始终留在本机。'
-                          : c.keyError ?? '首次启动正在生成，后续会自动复用。',
+                          : c.keyError ?? '正在初始化本机 SSH 密钥，完成后将自动复用。',
                       style: TextStyle(
                         fontSize: 12,
                         height: 1.6,
@@ -961,7 +945,7 @@ class _CloudCreateDialogState extends State<CloudCreateDialog> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              provider == null ? '云服务器创建' : '选择一套内置配置',
+                              provider == null ? '创建云服务器' : '选择服务器配置',
                               style: const TextStyle(
                                 fontSize: 23,
                                 fontWeight: FontWeight.w700,
@@ -970,8 +954,8 @@ class _CloudCreateDialogState extends State<CloudCreateDialog> {
                             const SizedBox(height: 6),
                             Text(
                               provider == null
-                                  ? '选择云厂商，开启新的执行节点。'
-                                  : '${provider!.displayName} · ${provider!.productName}  /  02 配置选择',
+                                  ? '第 1 步 / 共 2 步 · 选择云厂商'
+                                  : '第 2 步 / 共 2 步 · ${provider!.displayName} ${provider!.productName}',
                               style: TextStyle(
                                 fontSize: 12,
                                 color: colors.onSurfaceVariant,
@@ -981,7 +965,7 @@ class _CloudCreateDialogState extends State<CloudCreateDialog> {
                         ),
                       ),
                       IconButton(
-                        tooltip: '关闭云服务器创建',
+                        tooltip: '关闭创建云服务器',
                         onPressed: busy ? null : () => Navigator.pop(context),
                         icon: const Icon(LucideIcons.x, size: 20),
                       ),
@@ -995,9 +979,9 @@ class _CloudCreateDialogState extends State<CloudCreateDialog> {
                         children: [
                           CloudNotice(
                             provider?.supportsResources == true
-                                ? '${provider!.displayName} · 创建真实的按量计费 ${provider!.productName}，每次创建一台。确认后开始云端创建并产生费用，关闭应用不会释放服务器。'
+                                ? '${provider!.displayName} · 创建按量计费 ${provider!.productName}，每次创建一台。确认后开始云端创建并产生费用，关闭应用不会释放服务器。'
                                 : provider == null
-                                ? '支持创建腾讯云和火山引擎的按量计费服务器，费用由云厂商收取。'
+                                ? '支持创建腾讯云、阿里云和火山引擎的按量计费服务器，费用由云厂商收取。'
                                 : '交互预览 · 不会创建、部署或释放真实资源，也不会产生费用。',
                             icon:
                                 provider == null || provider!.supportsResources
@@ -1038,7 +1022,7 @@ class _CloudCreateDialogState extends State<CloudCreateDialog> {
                           ] else ...[
                             Text(
                               provider?.supportsResources == true
-                                  ? '管理员配置模板'
+                                  ? '预设配置模板'
                                   : '示例模板',
                               style: TextStyle(
                                 color: colors.onSurfaceVariant,
@@ -1053,7 +1037,7 @@ class _CloudCreateDialogState extends State<CloudCreateDialog> {
                                     .isEmpty)
                               CloudNotice(
                                 widget.controller.templateErrorFor(provider!) ??
-                                    '管理员尚未配置${provider!.displayName}模板，请填写模板并重新打包应用。',
+                                    '当前安装包未内置${provider!.displayName}配置模板，无法创建。',
                                 error:
                                     widget.controller.templateErrorFor(
                                       provider!,
@@ -1111,7 +1095,7 @@ class _CloudCreateDialogState extends State<CloudCreateDialog> {
                             const SizedBox(height: 16),
                             Text(
                               provider?.supportsResources == true
-                                  ? '模板由管理员维护并随应用打包。LastOrder 会自动创建并复用 VPC 和子网；释放服务器时保留共享网络。库存、权限与实际价格以${provider!.displayName}为准。'
+                                  ? '应用内置预设模板，并自动创建或复用共享 VPC 与子网；释放服务器时共享网络会保留。库存、权限与实际价格以${provider!.displayName}为准。'
                                   : '模板参数为界面示例，地域、机型、网络与费用将在后续确定。',
                               style: TextStyle(
                                 fontSize: 12,
@@ -1263,17 +1247,10 @@ class _CloudCreateDialogState extends State<CloudCreateDialog> {
     final parameters = value['runInstances'] as Map;
     final eip = parameters['EipAddress'] as Map;
     return CloudNotice(
-      '本次创建：1 台 · 按量计费\n'
-      '地域：${value['region']} · 机型：${parameters['InstanceTypeId']}\n'
-      '建议可用区：${parameters['ZoneId']}\n'
-      '仅明确库存或容量不足时，依次尝试同地域其他可售可用区，保持相同机型、镜像、系统盘和带宽。创建结果不确定时暂停尝试并查询核实。\n'
-      '镜像 ${parameters['ImageId']} · ${template.diskGb} GB 系统盘\n'
-      '系统：${template.os} · 需满足 Linux glibc 2.39+、GTK 3.24 与 systemd 要求，管理员需核对镜像与登录账号。\n'
-      '独立公网 IP 按流量计费 · 带宽上限 ${eip['BandwidthMbps']} Mbps\n'
-      '服务器与公网 IP 一同释放；确认两者均已释放后才移除记录。系统盘随实例删除，共享网络保留。\n'
-      'SSH 登录：${template.sshUsername}（密钥）\n'
-      'SSH TCP 22 与 Sisters TCP 20001 来源：0.0.0.0/0\n'
-      '创建会产生云费用。创建完成后点击「部署 Sisters」；暂不提供费用查询。',
+      '创建配置：1 台 · 按量计费 · 地域 ${value['region']}（首选 ${parameters['ZoneId']}，库存不足时自动尝试同地域其他可用区）\n'
+      '实例规格：${parameters['InstanceTypeId']} · ${template.os}（${parameters['ImageId']}）· ${template.diskGb} GB 系统盘 · 独立公网 IP 按流量计费（上限 ${eip['BandwidthMbps']} Mbps）\n'
+      '访问与端口：SSH 账号 ${template.sshUsername}（密钥登录），安全组放行 TCP 22 与 20001（0.0.0.0/0）\n'
+      '释放与费用：释放时同步删除系统盘与本次公网 IP，共享网络与公钥保留；创建后开始计费，本应用不提供费用查询。',
     );
   }
 
@@ -1281,17 +1258,10 @@ class _CloudCreateDialogState extends State<CloudCreateDialog> {
     final value = template.aliyun!;
     final parameters = value['runInstances'] as Map;
     return CloudNotice(
-      '本次创建：1 台 · 按量计费\n'
-      '地域：${value['region']} · 机型：${parameters['InstanceType']}\n'
-      '建议可用区：${parameters['ZoneId']}\n'
-      '仅明确库存或容量不足时，依次尝试同地域其他可售可用区，保持相同机型、镜像、系统盘和带宽。创建结果不确定时暂停尝试并查询核实。\n'
-      '镜像 ${parameters['ImageId']} · ${template.diskGb} GB 系统盘\n'
-      '系统：${template.os} · 需满足 Linux glibc 2.39+、GTK 3.24 与 systemd 要求，管理员需核对镜像与登录账号。\n'
-      '公网按流量计费 · 出网带宽上限 ${parameters['InternetMaxBandwidthOut']} Mbps\n'
-      '本次公网地址与系统盘随实例释放，共享 VPC、交换机、安全组和公钥保留。\n'
-      'SSH 登录：${template.sshUsername}（密钥）\n'
-      'SSH TCP 22 与 Sisters TCP 20001 来源：0.0.0.0/0\n'
-      '创建会产生云费用。创建完成后点击「部署 Sisters」；暂不提供费用查询。',
+      '创建配置：1 台 · 按量计费 · 地域 ${value['region']}（首选 ${parameters['ZoneId']}，库存不足时自动尝试同地域其他可用区）\n'
+      '实例规格：${parameters['InstanceType']} · ${template.os}（${parameters['ImageId']}）· ${template.diskGb} GB 系统盘 · 公网按流量计费（上限 ${parameters['InternetMaxBandwidthOut']} Mbps）\n'
+      '访问与端口：SSH 账号 ${template.sshUsername}（密钥登录），安全组放行 TCP 22 与 20001（0.0.0.0/0）\n'
+      '释放与费用：释放时同步删除系统盘与本次公网 IP，共享网络与公钥保留；创建后开始计费，本应用不提供费用查询。',
     );
   }
 
@@ -1301,17 +1271,10 @@ class _CloudCreateDialogState extends State<CloudCreateDialog> {
     final placement = parameters['Placement'] as Map;
     final internet = parameters['InternetAccessible'] as Map;
     return CloudNotice(
-      '本次创建：1 台 · 按量计费（按小时后付费）\n'
-      '地域：${value['region']} · 机型：${parameters['InstanceType']}\n'
-      '建议可用区：${placement['Zone']}\n'
-      '建议可用区售罄时，将依次尝试同地域其他可用区，保持相同机型、镜像、系统盘和带宽。创建结果不确定时暂停尝试并查询核实。\n'
-      '镜像 ${parameters['ImageId']} · ${template.diskGb} GB 系统盘\n'
-      '系统：${template.os} · 需满足 Linux glibc 2.39+、GTK 3.24 与 systemd 要求，管理员需核对镜像与登录账号。\n'
-      '公网按流量计费 · 出网带宽上限 ${internet['InternetMaxBandwidthOut']} Mbps\n'
-      'SSH 登录：${template.sshUsername}（密钥）\n'
-      'SSH TCP ${TencentAccessPolicy.sshPort} 来源：${TencentAccessPolicy.ingressCidr}\n'
-      'Sisters TCP ${TencentAccessPolicy.sistersPort} 来源：${TencentAccessPolicy.ingressCidr}\n'
-      '创建会产生云费用。创建完成后，点击「部署 Sisters」即可部署；暂不提供费用查询。',
+      '创建配置：1 台 · 按量计费 · 地域 ${value['region']}（首选 ${placement['Zone']}，库存不足时自动尝试同地域其他可用区）\n'
+      '实例规格：${parameters['InstanceType']} · ${template.os}（${parameters['ImageId']}）· ${template.diskGb} GB 系统盘 · 公网按流量计费（上限 ${internet['InternetMaxBandwidthOut']} Mbps）\n'
+      '访问与端口：SSH 账号 ${template.sshUsername}（密钥登录），安全组放行 TCP ${TencentAccessPolicy.sshPort} 与 ${TencentAccessPolicy.sistersPort}（${TencentAccessPolicy.ingressCidr}）\n'
+      '释放与费用：释放时同步删除系统盘与本次公网 IP，共享网络与公钥保留；创建后开始计费，本应用不提供费用查询。',
     );
   }
 
@@ -1527,10 +1490,10 @@ class _CloudMachineCardState extends State<CloudMachineCard> {
         title: const Text('释放云服务器'),
         content: Text(
           widget.machine.isReal
-              ? '确认释放「${widget.machine.name}」？\n'
-                    '公网地址：${widget.machine.publicIp.isEmpty ? '等待云端返回' : widget.machine.publicIp}\n\n'
-                    '释放将结束此实例上的所有任务并删除系统盘数据，无法恢复。共享安全组、SSH 公钥、VPC 和子网会保留。\n\n'
-                    '${widget.machine.provider == CloudProvider.volcengine ? '本次创建的独立公网 IP 将随服务器一同释放。只有实例和该公网 IP 均确认释放后才移除记录；公网 IP 留存或结果未知时保留记录供核对。' : '提交后还需查询云端确认；确认按钮不代表费用已停止。额外绑定的磁盘、弹性公网 IP 等资源需在${widget.machine.provider.displayName}控制台另行核对。'}'
+              ? '确认释放「${widget.machine.name}」（公网 IP：${widget.machine.publicIp.isEmpty ? '等待云端返回' : widget.machine.publicIp}）？\n\n'
+                    '• 将立即中断该机器上的所有任务，并永久删除系统盘数据（共享网络与 SSH 公钥会保留）。\n'
+                    '• ${widget.machine.provider == CloudProvider.volcengine ? '随实例创建的独立公网 IP 将一并释放（如结果未确认，将保留记录供继续核对）。' : '额外绑定的磁盘或弹性公网 IP 需在${widget.machine.provider.displayName}控制台自行处理。'}\n'
+                    '• 提交后请以${widget.machine.provider.displayName}控制台状态和账单为准。'
               : '确认演示释放「${widget.machine.name}」？\n\n当前仅演示此流程，不操作云端资源。',
         ),
         actions: [
@@ -1560,12 +1523,12 @@ class _CloudMachineCardState extends State<CloudMachineCard> {
       context: context,
       builder: (context) => AlertDialog(
         scrollable: true,
-        title: const Text('删除本地卡片？'),
+        title: const Text('隐藏待核实卡片？'),
         content: SelectableText(
           '创建结果仍待核实。请到${machine.provider.displayName}控制台核对以下服务器：\n'
           '${machine.name}\n地域：${machine.template.regionLabel}（${machine.region}）\n\n'
-          '删除卡片只会将它从「机器管理」移除，云端已创建的资源仍可能计费。'
-          '查询到实例后，卡片会再次出现。你也可以在「公有云部署」中恢复卡片。',
+          '隐藏卡片只会将它从「机器管理」列表中移出，云端已创建的资源仍可能计费。'
+          '查询到实例后卡片会自动重新显示，你也可以随时在「公有云部署」中恢复卡片。',
         ),
         actions: [
           TextButton(
@@ -1574,7 +1537,7 @@ class _CloudMachineCardState extends State<CloudMachineCard> {
           ),
           FilledButton(
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('确认删除'),
+            child: const Text('确认隐藏'),
           ),
         ],
       ),
@@ -1704,12 +1667,12 @@ class _CloudMachineCardState extends State<CloudMachineCard> {
                     ? released
                           ? '云端已确认释放。请在${m.provider.displayName}控制台核对账单及额外关联资源。'
                           : widget.sistersReady
-                          ? 'Sisters 已部署，可在此查看连接状态并分发任务。云服务器仍按量计费。'
+                          ? 'Sisters 已就绪，可在「账号与任务」中选择此机器分发任务。云服务器正按量计费。'
                           : widget.sistersLinked
-                          ? 'Sisters 部署与连接状态见下方。云服务器仍按量计费。'
+                          ? 'Sisters 部署与连接状态见下方。云服务器正按量计费。'
                           : m.phase != CloudMachinePhase.created
                           ? '请先查询云端状态，确认服务器已运行后再部署 Sisters。云资源可能继续计费。'
-                          : '云服务器已创建，可能持续产生费用。点击「部署 Sisters」即可使用已保存的 SSH 密钥部署。'
+                          : '云服务器已创建并开始按量计费。点击下方「部署 Sisters」即可自动安装。'
                     : released
                     ? '释放流程已演示完成，没有操作真实云资源。'
                     : '创建与部署流程已演示完成。此预览节点不能执行抢票任务。',
@@ -1791,7 +1754,7 @@ class _CloudMachineCardState extends State<CloudMachineCard> {
                                   widget.controller.retryCloudPreparation(m.id),
                             ),
                       icon: const Icon(LucideIcons.refreshCw, size: 16),
-                      label: const Text('重试准备并创建'),
+                      label: const Text('重试创建'),
                     ),
                   if (!released &&
                       (m.isReal
@@ -1830,8 +1793,8 @@ class _CloudMachineCardState extends State<CloudMachineCard> {
                     OutlinedButton.icon(
                       style: _actionStyle(foreground: colors.onSurfaceVariant),
                       onPressed: busy ? null : dismissCreation,
-                      icon: const Icon(LucideIcons.trash2, size: 15),
-                      label: const Text('删除本地卡片'),
+                      icon: const Icon(LucideIcons.eyeOff, size: 15),
+                      label: const Text('隐藏此卡片'),
                     ),
                   if (widget.onRemoveConnection != null)
                     OutlinedButton.icon(

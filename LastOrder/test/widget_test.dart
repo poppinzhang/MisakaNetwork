@@ -20,7 +20,7 @@ void main() {
       addTearDown(c.dispose);
       await tester.pumpWidget(LastOrderApp(controller: c));
       await tester.pumpAndSettle();
-      expect(find.text('让每个节点，协同工作'), findsOneWidget);
+      expect(find.text('工作台概览'), findsOneWidget);
       await tester.tap(find.text('机器管理').first);
       await tester.pumpAndSettle();
       expect(find.text('还没有 Sisters'), findsOneWidget);
@@ -305,8 +305,8 @@ void main() {
     );
     await tester.enterText(labelled('机器名称'), '节点 x');
     await tester.enterText(labelled('主机地址'), 'node.example');
-    await tester.enterText(labelled('SSH 用户'), 'ticket');
-    await tester.enterText(labelled('SSH 密码（仅用于本次部署）'), 'secret');
+    await tester.enterText(labelled('SSH 用户名'), 'ticket');
+    await tester.enterText(labelled('SSH 密码（与私钥二选一，不保存）'), 'secret');
     await tester.tap(find.text('安全部署'));
     await tester.pumpAndSettle();
     expect(c.state.machines.single.name, '节点 x');
@@ -340,8 +340,8 @@ void main() {
     );
     await tester.enterText(labelled('机器名称'), '节点 a');
     await tester.enterText(labelled('主机地址'), 'other.example');
-    await tester.enterText(labelled('SSH 用户'), 'ticket');
-    await tester.enterText(labelled('SSH 密码（仅用于本次部署）'), 'secret');
+    await tester.enterText(labelled('SSH 用户名'), 'ticket');
+    await tester.enterText(labelled('SSH 密码（与私钥二选一，不保存）'), 'secret');
     await tester.tap(find.text('安全部署'));
     await tester.pumpAndSettle();
     expect(find.text('机器名称已存在，请使用不同的名称。'), findsOneWidget);
@@ -365,7 +365,7 @@ void main() {
     await tester.enterText(find.byType(TextField), 'not-json');
     await tester.tap(find.text('验证并保存'));
     await tester.pumpAndSettle();
-    expect(find.textContaining('请输入 JSON Cookie 数组'), findsOneWidget);
+    expect(find.textContaining('请输入 Cookie JSON 数组'), findsOneWidget);
     expect(c.state.accounts, isEmpty);
   });
   testWidgets('task creation requires a project before runtime call', (
@@ -768,7 +768,7 @@ void main() {
         await tester.tap(option);
         await tester.pumpAndSettle();
       }
-      await tester.tap(find.text('确定'));
+      await tester.tap(find.text('确认'));
       await tester.pumpAndSettle();
       expect(find.text('2026-11-21 21:01:38'), findsOneWidget);
       final interval = find.byWidgetPredicate(

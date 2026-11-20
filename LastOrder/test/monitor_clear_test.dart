@@ -107,7 +107,7 @@ void main() {
       final env = await _openMonitor(tester);
       var saves = 0;
       env.store.beforeSave = (_) async => saves++;
-      expect(find.text('清除全部已结束任务'), findsOneWidget);
+      expect(find.text('清除已结束记录'), findsOneWidget);
       expect(tester.widget<OutlinedButton>(_clearAll).onPressed, isNotNull);
       await tester.ensureVisible(_clearAll);
       await tester.tap(_clearAll);
@@ -125,7 +125,7 @@ void main() {
       expect(_inside(_card('a', 'running'), '停止'), findsOneWidget);
       expect(_inside(_card('a', 'queued'), '停止'), findsOneWidget);
       expect(tester.widget<OutlinedButton>(_clearAll).onPressed, isNull);
-      expect(find.text('已清除 4 条执行记录，订单入口仍保留'), findsOneWidget);
+      expect(find.text('已清除 4 条记录（不影响任务配置与订单入口）'), findsOneWidget);
       expect(
         find.byKey(const ValueKey('payment-order-10001:12345')),
         findsOneWidget,
@@ -180,12 +180,12 @@ void main() {
       env.store.beforeSave = (_) => saved.future;
       await tester.ensureVisible(_clearAll);
       final button = tester.getRect(_clearAll);
-      final label = tester.getRect(find.text('清除全部已结束任务'));
+      final label = tester.getRect(find.text('清除已结束记录'));
       expect(button.left, greaterThanOrEqualTo(16));
       expect(button.right, lessThanOrEqualTo(304));
       expect(label.left, greaterThanOrEqualTo(button.left));
       expect(label.right, lessThanOrEqualTo(button.right));
-      expect(label.height, greaterThan(30));
+      expect(label.height, greaterThan(20));
       await tester.tap(_clearAll);
       await tester.pump();
       expect(tester.widget<OutlinedButton>(_clearAll).onPressed, isNull);
@@ -196,7 +196,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(_card('a', 'task'), findsNothing);
       expect(_card('a', 'running'), findsOneWidget);
-      expect(find.text('已清除 4 条执行记录，订单入口仍保留'), findsOneWidget);
+      expect(find.text('已清除 4 条记录（不影响任务配置与订单入口）'), findsOneWidget);
       expect(tester.takeException(), isNull);
       await _finishMessage(tester);
     },
@@ -232,7 +232,7 @@ void main() {
       expect(_card('b', 'task'), findsOneWidget);
       expect(_card('a', 'stopped'), findsOneWidget);
       expect(find.byType(AlertDialog), findsNothing);
-      expect(find.text('已清除执行记录，订单入口仍保留'), findsOneWidget);
+      expect(find.text('已清除该条记录（不影响任务配置与订单入口）'), findsOneWidget);
       expect(
         find.byKey(const ValueKey('payment-order-10001:12345')),
         findsOneWidget,
@@ -289,7 +289,7 @@ void main() {
     expect(_card('a', 'task'), findsOneWidget);
     expect(tester.widget<TextButton>(_clear('a', 'task')).onPressed, isNotNull);
     expect(find.textContaining('写入失败'), findsOneWidget);
-    expect(find.text('已清除执行记录，订单入口仍保留'), findsNothing);
+    expect(find.text('已清除该条记录（不影响任务配置与订单入口）'), findsNothing);
 
     env.store.failSave = false;
     await _clearCard(tester, 'a', 'task');

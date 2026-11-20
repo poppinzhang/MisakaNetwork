@@ -70,11 +70,11 @@ func TestProgressTextUsesBridgeCodes(t *testing.T) {
 		p           progress
 		event, line string
 	}{
-		{progress{Status: "running", Stage: "waiting", CountdownSeconds: &seconds}, "等待开票时间", "等待开票时间，剩余 1 小时 2 分"},
+		{progress{Status: "running", Stage: "waiting", CountdownSeconds: &seconds}, "等待开售时间", "等待开售时间，剩余 1 小时 2 分"},
 		{progress{Status: "running", Stage: "ordering", AttemptCurrent: 3, AttemptTotal: 20}, "正在尝试创建订单", "正在尝试创建订单（第 3/20 次）"},
 		{progress{Status: "cooldown", Stage: "ordering", AttemptCurrent: 3, AttemptTotal: 20}, "请求过于频繁，正在等待冷却", "请求过于频繁，正在等待冷却"},
-		{progress{Status: "failed", Stage: "page_timeout"}, "购票页长时间未开放购买，抢票工具已停止", "购票页长时间未开放购买，抢票工具已停止"},
-		{progress{Status: "succeeded", Stage: "ordered", AttemptCurrent: 1, AttemptTotal: 20}, "抢票工具已报告下单成功，正在确认结果", "抢票工具已报告下单成功，正在确认结果"},
+		{progress{Status: "failed", Stage: "page_timeout"}, "购票页长时间未开放，任务已停止", "购票页长时间未开放，任务已停止"},
+		{progress{Status: "succeeded", Stage: "ordered", AttemptCurrent: 1, AttemptTotal: 20}, "已提交下单，正在确认结果", "已提交下单，正在确认结果"},
 		{progress{Status: "running", Stage: "working"}, "抢票任务执行中", "抢票任务执行中"},
 	} {
 		if event, line := progressText(tc.p); event != tc.event || line != tc.line {

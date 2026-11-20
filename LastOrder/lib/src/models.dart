@@ -559,7 +559,7 @@ class SavedState {
 String readableError(Object e) {
   if (e is FormatException) return e.message;
   if (e is UserError) return e.message;
-  return '操作失败，请检查连接、证书、运行时或本地存储后重试。';
+  return '操作失败，请检查网络或应用状态后重试。';
 }
 
 class UserError implements Exception {

@@ -311,11 +311,11 @@ void main() {
         },
       );
 
-      expect(_tileText('a', '最近已知负载：1 个任务'), findsOneWidget);
+      expect(_tileText('a', '连接失败，以下为上次同步的负载（共 1 个任务）：'), findsOneWidget);
       expect(_tileText('a', '最近一次任务 · 执行中（含等待开售）'), findsOneWidget);
+      expect(_tileText('b', '连接失败，以下为上次同步的负载（共 1 个任务）：'), findsOneWidget);
       expect(_tileText('b', '任务 local · 状态待确认'), findsOneWidget);
-      expect(_tileText('c', '暂无可确认的任务记录，不能确定服务器空闲。'), findsOneWidget);
-      expect(find.text('连接失败，负载未更新；请刷新后核对。'), findsNWidgets(3));
+      expect(_tileText('c', '连接失败，无法确认当前负载，请刷新后重试。'), findsOneWidget);
       expect(find.text('当前负载：0 个任务'), findsNothing);
       await _selectMachine(tester, 'b');
       await tester.tap(find.text('提交到 1 台机器'));
@@ -390,8 +390,10 @@ void main() {
         isNotNull,
       );
       expect(_tileText('a', '当前负载：0 个任务'), findsOneWidget);
-      expect(_tileText('a', '上次执行已结束，可重新分发。'), findsOneWidget);
-      expect(find.textContaining('已下单时请先核对订单'), findsOneWidget);
+      expect(
+        _tileText('a', '上次执行已结束，重新分发将开始新一轮抢票（请先核对已有订单）。'),
+        findsOneWidget,
+      );
       await _selectMachine(tester, 'a');
       await tester.tap(find.text('提交到 1 台机器'));
       await tester.pumpAndSettle();
@@ -431,7 +433,7 @@ void main() {
       );
       expect(_tileText('a', '当前负载：1 个任务'), findsOneWidget);
       expect(_tileText('a', '任务 new · 状态待确认'), findsOneWidget);
-      expect(find.text('上次执行已结束，可重新分发。'), findsNothing);
+      expect(find.textContaining('上次执行已结束'), findsNothing);
     },
   );
 
@@ -463,7 +465,10 @@ void main() {
         isNotNull,
       );
       expect(_tileText('a', '当前负载：0 个任务'), findsOneWidget);
-      expect(_tileText('a', '上次执行已结束，可重新分发。'), findsOneWidget);
+      expect(
+        _tileText('a', '上次执行已结束，重新分发将开始新一轮抢票（请先核对已有订单）。'),
+        findsOneWidget,
+      );
     },
   );
 
@@ -488,7 +493,7 @@ void main() {
         await tester.tap(find.text('提交到 1 台机器'));
         await tester.pump();
         expect(find.text('正在刷新服务器负载…'), findsOneWidget);
-        await tester.tap(find.text('返回'));
+        await tester.tap(find.text('取消'));
         // Finish while the dialog's reverse animation still keeps it mounted.
         await tester.pump(const Duration(milliseconds: 10));
         gate.complete();
@@ -518,7 +523,7 @@ void main() {
 
       expect(find.text('多任务风险'), findsOneWidget);
       expect(_riskText('部分服务器的负载状态未确认，无法排除多任务风险。'), findsOneWidget);
-      expect(_riskText('暂无可确认的任务记录，不能确定服务器空闲。'), findsOneWidget);
+      expect(_riskText('连接失败，无法确认当前负载，请刷新后重试。'), findsOneWidget);
       expect(result.returned, isFalse);
       expect(gateway.submitted, isEmpty);
       await tester.tap(find.text('返回选择'));

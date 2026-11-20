@@ -357,7 +357,7 @@ func TestCountdownUpdatesStatusLineWithoutEvents(t *testing.T) {
 	got := waitState(t, s, "timed", pb.TaskState_TASK_STATE_SUCCEEDED)
 	waiting := 0
 	for _, e := range got.Events {
-		if e.Message == "等待开票时间" {
+		if e.Message == "等待开售时间" {
 			waiting++
 		}
 	}
