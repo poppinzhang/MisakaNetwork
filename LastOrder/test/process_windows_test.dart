@@ -51,19 +51,20 @@ void main() {
       'misaka-tree-test-',
     );
     final pidFile = File(p.join(directory.path, 'child.pid'));
+    final pidPathLiteral = pidFile.path.replaceAll("'", "''");
     int? childPid;
     try {
       await expectLater(
         runJsonProcess(
           powershell,
-          script(r'''
-$request = [Console]::In.ReadToEnd() | ConvertFrom-Json;
-$child = Start-Process -FilePath (Get-Process -Id $PID).Path -ArgumentList @('-NoProfile', '-NonInteractive', '-Command', 'Start-Sleep -Seconds 60') -WindowStyle Hidden -PassThru;
-[System.IO.File]::WriteAllText($request.pid_file, $child.Id.ToString());
-Start-Sleep -Seconds 60;
+          script('''
+\$null = [Console]::In.ReadToEnd();
+\$child = [System.Diagnostics.Process]::Start('ping.exe', '-n 60 127.0.0.1');
+[System.IO.File]::WriteAllText('$pidPathLiteral', \$child.Id.ToString());
+[System.Threading.Thread]::Sleep(60000);
 '''),
           {'pid_file': pidFile.path},
-          timeout: const Duration(seconds: 3),
+          timeout: const Duration(seconds: 5),
         ),
         throwsA(isA<UserError>()),
       );

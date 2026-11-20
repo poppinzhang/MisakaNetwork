@@ -13,6 +13,7 @@
   - 简化并统一公有云配置、创建确认摘要、释放确认、待核实卡片「隐藏/恢复」、任务分发与监控清理等界面的说明与术语，移除面向用户的「管理员」「当前运行时」「真实」及底层技术术语；细化 gRPC 错误码中文诊断并提示使用「复制任务」；Windows 启动失败弹窗改为中文；Sisters 状态回报与运行时提示统一为「演出」「开售」「任务已停止」等表达（仅调整用户可见文案，不改变协议、上游 biliTickerBuy 版本或安全约束）。
   - 重写根目录 `README.md`，去除生硬口吻与开发者内部细节，按产品介绍、下载上手、支持平台、主要功能、使用须知和项目背景重新组织，保持与「关于」页面一致。
 - 新增图文并茂的 [新手使用指南](docs/使用指南.md)（含 11 张 LastOrder 界面实截与可选截图回归用例 `LastOrder/test/user_guide_capture_test.dart`），覆盖软件安装、本机/远程部署 Sisters、扫码与 Cookie 登录、创建与分发任务、核对订单付款，以及腾讯云、阿里云、火山引擎凭证配置与按量创建云服务器全流程，并在 `README.md` 顶部导航与快速上手提供入口。
+- 修复 Windows CI 高并发执行 Flutter 测试时，`process_windows_test.dart` 子进程树清理用例因首次加载 PowerShell `ConvertFrom-Json` / `Get-Process` 模块与二次启动 `powershell.exe` 超过 3 秒超时阈值而未写出子进程 PID 的问题，改用已加载的 .NET `Process.Start('ping.exe', ...)` 与 `File.WriteAllText` 直接启动并记录子进程。
 - 升级影响：安装 0.4.4 LastOrder 后，须在无活跃任务时将全部 Sisters（含 Linux/macOS/Windows）重新部署为 `0.4.4`，避免统一版本校验拒绝旧包。重部署会停止当前任务并清空远程任务记录。账号、任务配置、云资源记录与本地存储格式不变，无需重新登录或重建。
 - 验证范围：本地 macOS 全量 Go race（10 个包，含 `-count=1` 非缓存复跑）与宿主及 Windows x64 `go vet` 通过，Windows x64 测试程序仅交叉编译、未在本机执行；135 项脚本测试通过；`flutter analyze` 无问题，967 项 Flutter 测试通过、3 项可选测试跳过；runtime 在系统 Python 为 97 项通过、21 项跳过，桌面锁定依赖 109 项通过、9 项跳过，Android 锁定依赖 114 项通过、4 项跳过。许可检查、`release_ci.py preflight --ref refs/tags/0.4.4` 与 `git diff --check` 通过。全平台安装包、公开 Release、Windows 10 真机 SSH 部署与真实账号业务验收均未执行。详见 [0.4.4 发布记录](docs/releases/0.4.4.md)。
 
