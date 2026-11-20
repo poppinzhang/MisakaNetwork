@@ -490,95 +490,125 @@ void main() {
     },
   );
 
-  for (final pendingNetwork in [false, true]) {
-    test(
-      'old unverified credentials retain resource ownership protection (network: $pendingNetwork)',
-      () async {
-        final h = CredentialHarness();
-        await h.init();
-        await h.save(CloudProvider.tencent);
-        final existing = h.saved;
-        ((existing['credentials'] as List).single as Map).remove(
-          'onlineVerified',
-        );
-        if (pendingNetwork) {
-          existing['networks'] = [
-            {
-              'credentialId': 'TestAccessId1',
-              'region': 'ap-guangzhou',
-              'kind': 'vpc',
-              'zone': '',
-              'vpcId': '',
-              'subnetId': '',
-              'subnetCidr': '',
-              'pending': true,
-            },
-          ];
-        } else {
-          existing['jobs'] = [
-            CloudMachine(
-              id: 'existing-job',
-              name: '测试服务器',
-              provider: CloudProvider.tencent,
-              template: CloudTemplate.tencent(templateData()),
-              phase: CloudMachinePhase.created,
-              isReal: true,
-              region: 'ap-guangzhou',
-              credentialId: 'TestAccessId1',
-              instanceId: 'ins-fixture',
-              clientToken: 'fixture-token',
-              selectedZone: 'ap-guangzhou-6',
-            ).toJson(),
-          ];
-        }
-        final original = jsonEncode(existing);
-        h.store.secrets[CloudController.workspaceKey] = original;
-        final restored = CloudController(
-          store: h.store,
-          helper: h.helper,
-          templateLoader: () async => [],
-        );
-        addTearDown(restored.dispose);
-        await restored.initialize();
-        expect(
-          restored.credentialFor(CloudProvider.tencent)!.onlineVerified,
-          isFalse,
-        );
-        await expectLater(
-          restored.removeCredential(CloudProvider.tencent),
-          throwsA(
-            isA<UserError>().having(
-              (e) => e.toString(),
-              'retains ownership',
-              contains('未释放或待核实'),
-            ),
+  test(
+    'old unverified credentials retain ownership protection for visible cloud machines',
+    () async {
+      final h = CredentialHarness();
+      await h.init();
+      await h.save(CloudProvider.tencent);
+      final existing = h.saved;
+      ((existing['credentials'] as List).single as Map).remove(
+        'onlineVerified',
+      );
+      existing['jobs'] = [
+        CloudMachine(
+          id: 'existing-job',
+          name: '测试服务器',
+          provider: CloudProvider.tencent,
+          template: CloudTemplate.tencent(templateData()),
+          phase: CloudMachinePhase.created,
+          isReal: true,
+          region: 'ap-guangzhou',
+          credentialId: 'TestAccessId1',
+          instanceId: 'ins-fixture',
+          clientToken: 'fixture-token',
+          selectedZone: 'ap-guangzhou-6',
+        ).toJson(),
+      ];
+      final original = jsonEncode(existing);
+      h.store.secrets[CloudController.workspaceKey] = original;
+      final restored = CloudController(
+        store: h.store,
+        helper: h.helper,
+        templateLoader: () async => [],
+      );
+      addTearDown(restored.dispose);
+      await restored.initialize();
+      expect(
+        restored.credentialFor(CloudProvider.tencent)!.onlineVerified,
+        isFalse,
+      );
+      await expectLater(
+        restored.removeCredential(CloudProvider.tencent),
+        throwsA(
+          isA<UserError>().having(
+            (e) => e.toString(),
+            'retains ownership',
+            contains('未释放或待核实'),
           ),
-        );
-        await expectLater(
-          restored.saveCredential(
-            CloudProvider.tencent,
-            accessKeyId: 'DifferentAccessId',
-            accessKeySecret: 'DifferentSecret',
-          ),
-          throwsA(
-            isA<UserError>().having(
-              (e) => e.toString(),
-              'preserves original identity',
-              contains('再更换 SecretId'),
-            ),
-          ),
-        );
-        expect(h.store.secrets[CloudController.workspaceKey], original);
-        await restored.saveCredential(
+        ),
+      );
+      await expectLater(
+        restored.saveCredential(
           CloudProvider.tencent,
-          accessKeyId: 'TestAccessId1',
-          accessKeySecret: 'TestSecret1',
-        );
-        expect(
-          restored.credentialFor(CloudProvider.tencent)!.onlineVerified,
-          isTrue,
-        );
-      },
-    );
-  }
+          accessKeyId: 'DifferentAccessId',
+          accessKeySecret: 'DifferentSecret',
+        ),
+        throwsA(
+          isA<UserError>().having(
+            (e) => e.toString(),
+            'preserves original identity',
+            contains('再更换 SecretId'),
+          ),
+        ),
+      );
+      expect(h.store.secrets[CloudController.workspaceKey], original);
+      await restored.saveCredential(
+        CloudProvider.tencent,
+        accessKeyId: 'TestAccessId1',
+        accessKeySecret: 'TestSecret1',
+      );
+      expect(
+        restored.credentialFor(CloudProvider.tencent)!.onlineVerified,
+        isTrue,
+      );
+    },
+  );
+
+  test(
+    'pending network ledger alone does not block removing or replacing an unverified credential',
+    () async {
+      final h = CredentialHarness();
+      await h.init();
+      await h.save(CloudProvider.tencent);
+      final existing = h.saved;
+      ((existing['credentials'] as List).single as Map).remove(
+        'onlineVerified',
+      );
+      existing['networks'] = [
+        {
+          'credentialId': 'TestAccessId1',
+          'region': 'ap-guangzhou',
+          'kind': 'vpc',
+          'zone': '',
+          'vpcId': '',
+          'subnetId': '',
+          'subnetCidr': '',
+          'pending': true,
+        },
+      ];
+      h.store.secrets[CloudController.workspaceKey] = jsonEncode(existing);
+      final restored = CloudController(
+        store: h.store,
+        helper: h.helper,
+        templateLoader: () async => [],
+      );
+      addTearDown(restored.dispose);
+      await restored.initialize();
+      await restored.saveCredential(
+        CloudProvider.tencent,
+        accessKeyId: 'DifferentAccessId',
+        accessKeySecret: 'DifferentSecret',
+      );
+      expect(
+        restored.credentialFor(CloudProvider.tencent)!.onlineVerified,
+        isTrue,
+      );
+      await restored.removeCredential(CloudProvider.tencent);
+      expect(restored.credentialFor(CloudProvider.tencent), isNull);
+      final saved =
+          jsonDecode(h.store.secrets[CloudController.workspaceKey]!) as Map;
+      expect((saved['networks'] as List).single['pending'], isTrue);
+    },
+  );
 }

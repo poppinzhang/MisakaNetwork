@@ -166,7 +166,13 @@ class CloudController extends ChangeNotifier {
     _notify();
     if (!_disposed) await ensureSshIdentity();
     if (initialized && !_disposed) {
-      for (final job in _jobs.where((job) => job.isReal && !job.canRemove)) {
+      for (final job in _jobs.where(
+        (job) =>
+            job.isReal &&
+            !job.canRemove &&
+            (!job.creationDismissed ||
+                _credentials[job.provider]?.accessKeyId == job.credentialId),
+      )) {
         await _scheduleRealPoll(job.id);
       }
     }
@@ -358,8 +364,9 @@ class CloudController extends ChangeNotifier {
     ]) {
       if (check != null) throw UserError(check);
     }
+    final normalizedId = accessKeyId.trim();
     if (_hasResources(provider) &&
-        _credentials[provider]?.accessKeyId != accessKeyId.trim()) {
+        _credentials[provider]?.accessKeyId != normalizedId) {
       throw UserError('请先释放或核实该账号创建的云资源，再更换 ${provider.credentialIdLabel}。');
     }
     try {
@@ -368,7 +375,7 @@ class CloudController extends ChangeNotifier {
             'action': 'verify_cloud_credential',
             'cloud_credential': {
               'provider': provider.name,
-              'access_key_id': accessKeyId.trim(),
+              'access_key_id': normalizedId,
               'access_key_secret': accessKeySecret.trim(),
             },
           })
@@ -387,14 +394,32 @@ class CloudController extends ChangeNotifier {
     final next = Map<CloudProvider, _StoredCredential>.of(_credentials);
     next[provider] = _StoredCredential(
       provider: provider,
-      accessKeyId: accessKeyId.trim(),
+      accessKeyId: normalizedId,
       accessKeySecret: accessKeySecret.trim(),
       checkedAt: DateTime.now().toUtc(),
       onlineVerified: true,
     );
-    await _persist(next, _jobs);
+    final removedIds = <String>{
+      for (final job in _jobs)
+        if (job.provider == provider &&
+            job.creationDismissed &&
+            job.credentialId != normalizedId)
+          job.id,
+    };
+    final nextJobs = removedIds.isEmpty
+        ? _jobs
+        : [
+            for (final job in _jobs)
+              if (!removedIds.contains(job.id)) job,
+          ];
+    await _persist(next, nextJobs);
+    for (final id in removedIds) {
+      _timers.remove(id)?.cancel();
+      _pollAttempts.remove(id);
+    }
     _credentials.clear();
     _credentials.addAll(next);
+    _jobs = nextJobs;
     _notify();
   });
 
@@ -405,9 +430,24 @@ class CloudController extends ChangeNotifier {
     }
     final next = Map<CloudProvider, _StoredCredential>.of(_credentials)
       ..remove(provider);
-    await _persist(next, _jobs);
+    final removedIds = <String>{
+      for (final job in _jobs)
+        if (job.provider == provider && job.creationDismissed) job.id,
+    };
+    final nextJobs = removedIds.isEmpty
+        ? _jobs
+        : [
+            for (final job in _jobs)
+              if (!removedIds.contains(job.id)) job,
+          ];
+    await _persist(next, nextJobs);
+    for (final id in removedIds) {
+      _timers.remove(id)?.cancel();
+      _pollAttempts.remove(id);
+    }
     _credentials.clear();
     _credentials.addAll(next);
+    _jobs = nextJobs;
     _notify();
   });
 
@@ -605,17 +645,13 @@ class CloudController extends ChangeNotifier {
     }
   }
 
-  bool _hasResources(CloudProvider provider) =>
-      _jobs.any(
-        (job) => job.provider == provider && job.isReal && !job.canRemove,
-      ) ||
-      (provider.supportsResources &&
-          _networks.any(
-            (network) =>
-                network.provider == provider &&
-                network.credentialId == _credentials[provider]?.accessKeyId &&
-                network.pending,
-          ));
+  // Only real cloud machines still shown in the machine list that cannot be
+  // locally removed block credential removal or identity replacement.
+  // Dismissed cards and shared-network records remain persisted for recovery
+  // and idempotency without blocking removal once the machine list is clear.
+  bool _hasResources(CloudProvider provider) => visibleJobs.any(
+    (job) => job.provider == provider && job.isReal && !job.canRemove,
+  );
 
   Future<CloudMachine> startCloudCreation(
     CloudProvider provider,
@@ -1173,6 +1209,7 @@ class CloudController extends ChangeNotifier {
   // If persistence fails after an API response, retain the returned resource ID
   // in memory. The previously persisted token enables recovery after restart.
   Future<void> _saveReal(CloudMachine job) => _serialize(() async {
+    if (!_jobs.any((item) => item.id == job.id)) return;
     // The user can dismiss or restore a card while the cloud query is in flight.
     // Apply the result with the latest local visibility choice.
     final next = [
@@ -1322,7 +1359,8 @@ class CloudController extends ChangeNotifier {
       );
     } catch (error) {
       if (!_disposed) {
-        final job = _requireJob(id);
+        final job = _jobs.where((item) => item.id == id).firstOrNull;
+        if (job == null) return;
         final reason =
             job.provider == CloudProvider.aliyun && error is UserError
             ? _aliyunQueryReasons.lookup(error.message)
@@ -1419,7 +1457,8 @@ class CloudController extends ChangeNotifier {
       await _scheduleRealPoll(id);
     } catch (error) {
       if (!_disposed) {
-        final job = _requireJob(id);
+        final job = _jobs.where((item) => item.id == id).firstOrNull;
+        if (job == null) return;
         final reason =
             job.provider == CloudProvider.aliyun && error is UserError
             ? _aliyunReleaseReasons.lookup(error.message)
@@ -1440,11 +1479,15 @@ class CloudController extends ChangeNotifier {
 
   Future<void> _scheduleRealPoll(String id) async {
     if (_disposed) return;
+    final job = _jobs.where((item) => item.id == id).firstOrNull;
+    if (job == null) {
+      _pollAttempts.remove(id);
+      return;
+    }
     final count = (_pollAttempts[id] ?? 0) + 1;
     _pollAttempts[id] = count;
     if (count > 60) {
       _pollAttempts.remove(id);
-      final job = _requireJob(id);
       await _saveRealError(
         job.copyWith(
           phase: job.phase == CloudMachinePhase.releasing
@@ -1458,7 +1501,9 @@ class CloudController extends ChangeNotifier {
     _timers.remove(id)?.cancel();
     _timers[id] = Timer(cloudPollInterval, () {
       _timers.remove(id);
-      unawaited(refreshCloudMachine(id));
+      if (_jobs.any((item) => item.id == id)) {
+        unawaited(refreshCloudMachine(id));
+      }
     });
   }
 

@@ -399,9 +399,12 @@ void main() {
       expect(h.c.jobs.single.phase, CloudMachinePhase.createFailed);
       expect(h.calls('create'), 0);
       await h.c.removeMachine(id);
-      await expectLater(
-        h.c.removeCredential(CloudProvider.volcengine),
-        throwsA(isA<UserError>()),
+      await h.c.removeCredential(CloudProvider.volcengine);
+      expect(h.c.credentialFor(CloudProvider.volcengine), isNull);
+      await h.c.saveCredential(
+        CloudProvider.volcengine,
+        accessKeyId: 'FixtureAccessId',
+        accessKeySecret: 'FixtureSecret',
       );
       await h.c.saveCredential(
         CloudProvider.tencent,

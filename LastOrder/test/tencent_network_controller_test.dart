@@ -301,9 +301,10 @@ void main() {
         expect(h.instances, 1);
         expect(h.creates(kind), 1);
         await h.controller.removeMachine(other.id);
-        await expectLater(
-          h.controller.removeCredential(CloudProvider.tencent),
-          throwsA(isA<UserError>()),
+        await h.controller.removeCredential(CloudProvider.tencent);
+        expect(
+          h.networks.singleWhere((item) => item['kind'] == kind)['pending'],
+          isTrue,
         );
       },
     );
@@ -345,7 +346,7 @@ void main() {
     );
 
     networkTest(
-      '$kind unknown outcome survives job removal and restart and protects credentials',
+      '$kind unknown outcome survives job removal, credential removal and restart',
       (tester) async {
         final h = await harness();
         h.lostKind = kind;
@@ -353,17 +354,16 @@ void main() {
         final job = await h.start();
         await tester.pump();
         await h.controller.removeMachine(job.id);
-        await expectLater(
-          h.controller.removeCredential(CloudProvider.tencent),
-          throwsA(isA<UserError>()),
+        await h.controller.removeCredential(CloudProvider.tencent);
+        expect(h.controller.credentialFor(CloudProvider.tencent), isNull);
+        expect(
+          h.networks.singleWhere((item) => item['kind'] == kind)['pending'],
+          isTrue,
         );
-        await expectLater(
-          h.controller.saveCredential(
-            CloudProvider.tencent,
-            accessKeyId: 'OtherId',
-            accessKeySecret: 'OtherSecret',
-          ),
-          throwsA(isA<UserError>()),
+        await h.controller.saveCredential(
+          CloudProvider.tencent,
+          accessKeyId: 'TestAccessId',
+          accessKeySecret: 'TestSecret',
         );
         await h.restart();
         h.lostKind = null;

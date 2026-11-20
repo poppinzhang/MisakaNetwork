@@ -465,12 +465,19 @@ class _CloudCredentialFormState extends State<CloudCredentialForm> {
 
   Future<void> remove() async {
     if (busy) return;
+    final dismissedCount = widget.controller.jobs
+        .where(
+          (job) => job.provider == widget.provider && job.creationDismissed,
+        )
+        .length;
     final approved = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('移除云凭证'),
         content: Text(
-          '从本机移除${widget.provider.displayName}凭证。尚有未释放或状态待核实的云资源时不能移除。',
+          dismissedCount > 0
+              ? '从本机移除${widget.provider.displayName}凭证。已隐藏的 $dismissedCount 条待核实卡片记录也会一并清除，无法再恢复；云端可能已创建的资源仍需在${widget.provider.displayName}控制台核对。'
+              : '从本机移除${widget.provider.displayName}凭证。尚有未释放或状态待核实的云资源时不能移除。',
         ),
         actions: [
           TextButton(
