@@ -102,7 +102,8 @@
     {
       "path": "task/buy.py",
       "upstream_sha256": "bd6c259b73bc03814192e0c685c14583490b2c05cb94491824598686a02573f5",
-      "sha256": "bd6c259b73bc03814192e0c685c14583490b2c05cb94491824598686a02573f5"
+      "sha256": "11ef4a5a6f9b7bd36b6a3fdfe9a5341c893772e391be45939d9f159c8f55bada",
+      "patch": "Use the saved parent hot status for linked tickets whose child IDs cannot be refreshed as projects."
     },
     {
       "path": "task/buy_helpers.py",

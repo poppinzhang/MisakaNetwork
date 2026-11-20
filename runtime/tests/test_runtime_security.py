@@ -60,6 +60,51 @@ class EmbeddedRuntimeSecurityTests(unittest.TestCase):
         self.connect.assert_not_called()
         self.connect_ex.assert_not_called()
 
+    def test_linked_zero_price_ticket_reaches_order_without_refreshing_child_project(self):
+        from task import buy
+        from util.request.BiliRequest import BiliRequest
+
+        config = {
+            "detail": "synthetic-linked-ticket", "count": 1, "screen_id": 1,
+            "project_id": 2, "sku_id": 3, "link_id": 4, "pay_money": 0,
+            "buyer_info": [{"name": "synthetic-buyer", "personal_id": "synthetic-id"}],
+            "buyer": "synthetic-contact", "tel": "synthetic-phone",
+            "deliver_info": {"name": "synthetic-contact", "tel": "synthetic-phone",
+                             "addr_id": 1, "addr": "synthetic-address"},
+        }
+
+        def post(url, data, isJson):
+            self.assertTrue(isJson)
+            self.assertIn("project_id=2", url)
+            if "/order/prepare?" in url:
+                self.assertEqual(data["sku_id"], 3)
+                return SimpleNamespace(json=lambda: {
+                    "errno": 0, "data": {"token": "fixture-token", "ptoken": "fixture-ptoken"},
+                })
+            self.assertIn("/order/createV2?", url)
+            self.assertEqual(data["link_id"], 4)
+            self.assertEqual(data["pay_money"], 0)
+            return SimpleNamespace(json=lambda: {"errno": 0, "data": {"orderId": 12}})
+
+        request = {"op": "run", "params": {"config": config, "cookies": {"session": "synthetic"}}}
+        events = []
+        with (
+            patch.object(buy, "fetch_project_payload", side_effect=RuntimeError("child project unavailable")) as refresh,
+            patch.object(BiliRequest, "prewarm_h2_connection") as prewarm,
+            patch.object(BiliRequest, "post", side_effect=post) as send,
+            patch.object(BiliRequest, "get", return_value=SimpleNamespace(json=lambda: {"errno": 1})) as payment,
+        ):
+            status = bridge.process_request(request, self.engine, events.append)
+        refresh.assert_not_called()
+        prewarm.assert_called_once_with("https://show.bilibili.com/")
+        self.assertEqual(send.call_count, 2)
+        payment.assert_called_once_with("https://show.bilibili.com/api/ticket/order/getPayParam?order_id=12")
+        self.assertEqual(status, 0)
+        self.assertEqual(events[-1]["data"], {
+            "status": "succeeded", "order_id": "12",
+            "order_detail_url": "https://show.bilibili.com/platform/orderDetail.html?order_id=12",
+        })
+
     def test_ticket_config_environment_and_database_cannot_override_runtime_policy(self):
         from app_cmd.config.BuyConfig import BuyConfig
         from app_cmd.config.NotifierConfig import NotifierConfig

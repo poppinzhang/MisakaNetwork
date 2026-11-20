@@ -21,6 +21,21 @@ SINGLE_FILES = ("app_cmd/__init__.py", "app_version.py", "LICENSE", "assets/fail
 EXCLUDED = {"util/log/LogWeb.py", "util/log/TerminalRenderer.py"}
 
 
+PROJECT_REFRESH = """        payload = fetch_project_payload(
+            request=_request, project_id=int(tickets_info["project_id"])
+        )
+        if bool(payload["hotProject"]) and not is_hot_project:
+            is_hot_project = True
+            tickets_info["is_hot_project"] = True
+            logger.info("预热/复检：检测到 hotProject=True，已升级为 hot 抢票策略")
+        else:
+            logger.info("预热/复检完成。")
+"""
+LINKED_PROJECT_REFRESH = """        # Linked goods use a child item ID that project detail APIs reject.
+        # Keep the parent project's hot status captured in the ticket config.
+        if not tickets_info.get("link_id"):
+""" + "".join("    " + line for line in PROJECT_REFRESH.splitlines(keepends=True))
+
 def git(source: Path, *args: str) -> bytes:
     try:
         return subprocess.run(
@@ -90,6 +105,12 @@ def vendor(source: Path, destination: Path) -> None:
                 raise ValueError("Upstream cookie storage hook changed")
             content = text.replace(before, after).encode("utf-8")
             record["patch"] = "Use in-memory cookie storage when embedded."
+        elif relative == "task/buy.py":
+            text = content.decode("utf-8")
+            if text.count(PROJECT_REFRESH) != 1:
+                raise ValueError("Upstream project refresh hook changed")
+            content = text.replace(PROJECT_REFRESH, LINKED_PROJECT_REFRESH).encode("utf-8")
+            record["patch"] = "Use the saved parent hot status for linked tickets whose child IDs cannot be refreshed as projects."
         files[relative] = content
         record["sha256"] = hashlib.sha256(content).hexdigest()
         records.append(record)

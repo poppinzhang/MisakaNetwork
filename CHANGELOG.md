@@ -2,6 +2,8 @@
 
 ## unstaged
 
+- 修复关联商品票档在开始等待前因子项目详情查询失败而退出。关联票沿用建任务时记录的主项目状态，并继续预热连接。
+
 ## 0.4.3 — 2026-11-19
 
 - **交付状态：统一版本 0.4.3+16 已公开正式发布。** [GitHub Release 0.4.3](https://github.com/poppinzhang/MisakaNetwork/releases/tag/0.4.3) 对应标签 `0.4.3`、提交 `33f957d59aea5cd9db36725efc1c31890dcfa469`；正式 Actions [44545174180](https://github.com/poppinzhang/MisakaNetwork/actions/runs/44545174180) 一次性完成五种 Sisters、五种 LastOrder（Android 使用 `release-keystore` 正式签名）的构建与校验，12 个资产已核验并标记 `Latest`（Release ID `451508241`，非草稿、非预发布）。Windows Server 包作业实测通过 `internal/control`（91.861s）、runtime 离线检查及 8 项真实 Sisters mTLS 冒烟；Flutter analyze 及测试（macOS 955 项通过/2 项跳过、Windows 950 项通过/2 项跳过）和 Android 锁依赖 runtime 测试（114 项通过/3 项跳过）均通过。安装包和摘要见 [0.4.3 发布记录](docs/releases/0.4.3.md)。
