@@ -36,6 +36,14 @@ Docker 限制针对上游应用的运行与服务入口，不禁止本项目为�
 - `runtime/vendor_bili.py` 的导入白名单不包含上游 Web UI、Docker 启动文件和更新器；`runtime/build.py` 不打包 Gradio。独立运行时与 Android 内嵌客户端均不得新增这些服务入口。
 - 自制 TLS 和通知模块仍可能作为核心源码的一部分出现在内嵌目录中，当前结论是调用路径未启用，并非相关缺陷已修复或代码已全部移除。默认值、导入副作用或调用方式变化后必须重新核查。
 
+### 关联商品子项目复检适配复核（2026-11-20，未发布）
+
+本次在固定上游 v2.15.18（`227ebf73f5af3eec0019984a7cbcb722977453e8`）上为 `task/buy.py` 新增一项上游缺陷临时补丁：当任务配置存在 `link_id`（关联商品票档，其 `project_id` 为子项目 ID）时，`refresh_hot_and_warm()` 沿用建任务时记录的主项目 `is_hot_project`，跳过调用普通项目详情接口 `fetch_project_payload`，并继续执行原有 `_request.prewarm_h2_connection`。补丁同步记录在 `runtime/vendor_bili.py`（已将 `task/buy.py` 加入必需源文件并校验补丁锚点）、`runtime/vendor/biliTickerBuy/MANIFEST.json` 与 `scripts/third_party_licenses_manifest.json`；待上游修复后可在后续升级时移除。
+
+复核确认导入白名单、依赖锁定、`LICENSE`、`NOTICE.txt`、`standard` 下单策略、默认请求间隔（500 毫秒）、空第三方通知配置以及无上游 Docker/Web UI/Gradio 约束均未改变。该补丁仅减少对不支持子项目 ID 的详情接口调用，不新增网络目标、不削弱 HTTPS 证书链与域名验证，也不改变 Cookie、购票资料或支付信息的流向。
+
+离线回归覆盖 0 元关联票不触发子项目详情查询、保留连接预热并走完 `prepare` / `createV2` / 无付款码回退订单详情链路，以及 `vendor_bili.py` 对 `task/buy.py` 缺失与补丁锚点变更的拒绝。2026-11-20 源码复跑：桌面锁定依赖 `runtime/tests` 109 项通过/9 项跳过，Android 锁定依赖 `runtime/tests` 114 项通过/4 项跳过，系统 Python `runtime/tests` 97 项通过/21 项跳过，`scripts` 135 项测试（含补充许可清单校验）与 `go test -race ./...`、`go vet ./...` 均通过。结论限于源码、模拟数据和离线校验，尚未执行全平台重新打包发布或真实业务验收。
+
 ### 默认请求间隔调整复核（2026-11-18）
 
 在固定版本 v2.15.18（`227ebf73f5af3eec0019984a7cbcb722977453e8`）中复核了 bridge 到 `BuyConfig` 和 `task/buy.py` 的参数传递。省略间隔时 bridge 传入 500 毫秒，用于同一轮请求之间的等待。创建订单仍采用 `standard` 策略、单请求批次和每轮最多 40 次。平台请求沿用验证证书链与域名的标准客户端，Cookie 在内存中传递，购票资料进入原订单请求，回报仅含白名单字段。第三方通知的凭证与地址均为空。导入清单和构建配置继续排除上游 Web UI、Docker 启动器和 Gradio 分享入口。
@@ -155,10 +163,11 @@ Cookie 支持 `[{"name":"...","value":"..."}]`、`{"cookie":[...]}`、`{"cookies
 
 ## 嵌入与隐私隔离
 
-`runtime/vendor_bili.py` 只复制明确白名单中的 Python 文件、失败提示资源和许可证，不复制上游工作目录、账户文件、配置、缓存、日志、备份或构建产物。`vendor/biliTickerBuy/MANIFEST.json` 记录每个文件的原始与实际 SHA-256，以及两处嵌入适配：
+`runtime/vendor_bili.py` 只复制明确白名单中的 Python 文件、失败提示资源和许可证，不复制上游工作目录、账户文件、配置、缓存、日志、备份或构建产物。`vendor/biliTickerBuy/MANIFEST.json` 记录每个文件的原始与实际 SHA-256，以及嵌入适配：
 
 1. 将原引擎的可写目录重定向至每进程独立的临时目录，并关闭原始 Loguru 文件/控制台输出。
 2. 接口 Cookie 存储改为内存；启动时跳过自动 NTP 查询，`ping` 与配置校验不会请求平台。
+3. 关联商品（存在 `link_id`）使用子项目 ID 执行订单请求。作为上游缺陷的临时补丁，启动和复检时沿用任务配置中主项目的 `is_hot_project`，跳过对不支持子项目 ID 的普通详情接口的查询，仍执行原有的 HTTPS 预热；普通票档仍查询项目详情，待上游修复后可在升级时移除。此适配不新增网络目的地，也不改变 TLS 验证、数据传递、通知或启动入口。
 
 CLI 进程在删除临时目录之前关闭上游全局 `ConfigDB` 与 `main_request.cookieManager.db`。引擎导入中途失败时，同样从明确的上游模块与构造上下文释放已打开的数据库；一个句柄关闭失败不妨碍尝试关闭其余句柄。清理失败以非零退出码回报，不输出原始异常或临时路径，不追加第二条 result，不覆盖已确认订单结果；尚未输出结果时返回脱敏错误。此处理修复 Windows 不允许删除仍被打开文件而导致的正常请求退出失败。
 

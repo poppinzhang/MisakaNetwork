@@ -41,7 +41,7 @@ class VendorTests(unittest.TestCase):
                 "def get_exec_path() -> str:\n    return '.'\n"
                 "loguru_config(LOG_DIR, log_file_name, enable_console=True, file_colorize=False)\n"
             ),
-            "task/buy.py": "# purchase engine\n",
+            "task/buy.py": "# purchase engine\n" + vendor_bili.PROJECT_REFRESH,
             "cptoken/__init__.py": "# token helper\n",
             "util/log/LogWeb.py": "# excluded web logger\n",
             "util/log/TerminalRenderer.py": "# excluded terminal renderer\n",
@@ -104,7 +104,7 @@ class VendorTests(unittest.TestCase):
         self.assertEqual(manifest["revision"], self.revision)
         self.assertEqual(manifest["package_version"], "2.15.17")
         self.assertEqual(manifest["source"], "https://github.com/mikumifa/biliTickerBuy")
-        self.assertEqual((self.destination / "task/buy.py").read_text(), self.files["task/buy.py"])
+        self.assertEqual((self.destination / "task/buy.py").read_text(), "# purchase engine\n" + vendor_bili.LINKED_PROJECT_REFRESH)
         excluded = {
             "pyproject.toml", "util/log/LogWeb.py", "util/log/TerminalRenderer.py",
             "cookies.json", "config.json", "interface/cookies.json.bak", "other/private.py",
@@ -116,7 +116,7 @@ class VendorTests(unittest.TestCase):
         for relative, record in records.items():
             self.assertEqual(record["upstream_sha256"], hashlib.sha256(self.files[relative].encode()).hexdigest())
             self.assertEqual(record["sha256"], hashlib.sha256((self.destination / relative).read_bytes()).hexdigest())
-            if relative in {"util/__init__.py", "interface/common.py"}:
+            if relative in {"util/__init__.py", "interface/common.py", "task/buy.py"}:
                 self.assertIn("patch", record)
                 self.assertNotEqual(record["sha256"], record["upstream_sha256"])
             else:
@@ -143,12 +143,16 @@ class VendorTests(unittest.TestCase):
                     self.assert_rejected("metadata|Review the runtime integration")
 
     def test_missing_required_source_preserves_destination(self):
-        (self.source / "interface/common.py").unlink()
-        with patch.object(vendor_bili, "UPSTREAM_REVISION", self.commit()):
-            self.assert_rejected("missing required files")
+        for relative in ("interface/common.py", "task/buy.py"):
+            with self.subTest(missing=relative):
+                (self.source / relative).unlink()
+                with patch.object(vendor_bili, "UPSTREAM_REVISION", self.commit()):
+                    self.assert_rejected("missing required files")
+                self.write_source(relative, self.files[relative])
 
     def test_changed_patch_hooks_preserve_destination(self):
         cases = (
+            ("task/buy.py", "fetch_project_payload(", "fetch_changed_payload(", "project refresh hook"),
             ("util/__init__.py", "def get_exec_path() -> str:", "def get_exec_path():", "execution-directory hook"),
             ("util/__init__.py", "enable_console=True", "enable_console=False", "logging hook"),
             ("interface/common.py", "def _cookie_store_path", "def changed_cookie_store_path", "cookie storage hook"),
