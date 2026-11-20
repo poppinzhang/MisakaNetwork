@@ -9,7 +9,7 @@
     "runtime/requirements-build.lock": "d5e172626b796fba0858b9effe3c21a8938434e9f782304f50e54924eccdd557",
     "runtime/NOTICE.txt": "382fc6ee09b14cd2ae298d2e2067d771f4887a3d234b9fd7a872854821ee1f5b",
     "runtime/vendor/biliTickerBuy/LICENSE": "a033a88e2c3b88c2aa261c237fe3009380f0cf7dccf907c3f210c430e99eb970",
-    "runtime/vendor/biliTickerBuy/MANIFEST.json": "a7907b0c0047f7c60d9b50de336f4992450024e531fae0ce4df51758eecf3ec8",
+    "runtime/vendor/biliTickerBuy/MANIFEST.json": "fbb0398d991cd14dde3fc5ca52a41a29d8d45033c411af89d11c962043a3dde2",
     "LastOrder/android/settings.gradle.kts": "0dc60163828ddbb4cb9c1858ecd4f735ae17517b880c35de5640121e115bef1d",
     "scripts/license_sources/loguru-0.7.3-LICENSE.txt": "b35d026cc7aca9d5859a02eb87ddf7a386a24c986838651bd1f283f94e003327",
     "scripts/license_sources/chaquopy-17.1.0-LICENSE.txt": "345a9fdfeed355d37b18569ef277ba56eb0ab7c0b17a08a90163ce8d33d2b862"

@@ -21,6 +21,9 @@ SINGLE_FILES = ("app_cmd/__init__.py", "app_version.py", "LICENSE", "assets/fail
 EXCLUDED = {"util/log/LogWeb.py", "util/log/TerminalRenderer.py"}
 
 
+# Temporary upstream bugfix patch: skip regular project-detail refresh for linked
+# goods whose child item ID is rejected by project detail APIs. Remove once
+# upstream biliTickerBuy fixes linked-ticket refresh directly.
 PROJECT_REFRESH = """        payload = fetch_project_payload(
             request=_request, project_id=int(tickets_info["project_id"])
         )
@@ -67,7 +70,7 @@ def read_snapshot(source: Path) -> dict[str, bytes]:
         if mode not in {"100644", "100755"} or kind != "blob":
             raise ValueError("Upstream source files must be regular Git blobs")
         files[path] = git(source, "cat-file", "blob", object_id)
-    required = {*SINGLE_FILES, "pyproject.toml", "util/__init__.py", "interface/common.py"}
+    required = {*SINGLE_FILES, "pyproject.toml", "util/__init__.py", "interface/common.py", "task/buy.py"}
     if not required <= files.keys():
         raise ValueError("Pinned upstream source is missing required files")
     try:

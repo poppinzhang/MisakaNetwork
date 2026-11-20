@@ -143,9 +143,12 @@ class VendorTests(unittest.TestCase):
                     self.assert_rejected("metadata|Review the runtime integration")
 
     def test_missing_required_source_preserves_destination(self):
-        (self.source / "interface/common.py").unlink()
-        with patch.object(vendor_bili, "UPSTREAM_REVISION", self.commit()):
-            self.assert_rejected("missing required files")
+        for relative in ("interface/common.py", "task/buy.py"):
+            with self.subTest(missing=relative):
+                (self.source / relative).unlink()
+                with patch.object(vendor_bili, "UPSTREAM_REVISION", self.commit()):
+                    self.assert_rejected("missing required files")
+                self.write_source(relative, self.files[relative])
 
     def test_changed_patch_hooks_preserve_destination(self):
         cases = (
