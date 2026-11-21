@@ -33,22 +33,22 @@ type task struct {
 // written to disk or included in status, events or error messages.
 type Service struct {
 	pb.UnimplementedSistersServer
-	mu          sync.Mutex
-	cond        *sync.Cond
-	config      Config
-	runner      runner
-	ctx         context.Context
-	cancel      context.CancelFunc
-	closed      bool
-	tasks       map[string]*task
-	order       []string
-	queue       []*task
-	workers     sync.WaitGroup
-	started     int64
-	probeMu     sync.Mutex
-	probeAt     time.Time
-	ready       bool
-	biliVersion string
+	mu        sync.Mutex
+	cond      *sync.Cond
+	config    Config
+	runner    runner
+	ctx       context.Context
+	cancel    context.CancelFunc
+	closed    bool
+	tasks     map[string]*task
+	order     []string
+	queue     []*task
+	workers   sync.WaitGroup
+	started   int64
+	probeMu   sync.Mutex
+	probeAt   time.Time
+	ready     bool
+	probeInfo runtimeInfo
 }
 
 func New(c Config) (*Service, error) {
@@ -94,27 +94,32 @@ func (s *Service) Close() {
 	s.workers.Wait()
 }
 
-func (s *Service) readiness(ctx context.Context) (bool, string) {
+func (s *Service) readiness(ctx context.Context) (bool, runtimeInfo) {
 	s.probeMu.Lock()
 	defer s.probeMu.Unlock()
 	if time.Since(s.probeAt) < 2*time.Second {
-		return s.ready, s.biliVersion
+		return s.ready, s.probeInfo
 	}
-	version, err := s.runner.probe(ctx)
+	info, err := s.runner.probe(ctx)
 	s.ready = err == nil
-	s.biliVersion = version
+	s.probeInfo = info
 	s.probeAt = time.Now()
-	return s.ready, s.biliVersion
+	return s.ready, s.probeInfo
 }
 
 func (s *Service) GetStatus(ctx context.Context, _ *pb.Empty) (*pb.AgentStatus, error) {
-	ready, version := s.readiness(ctx)
+	ready, info := s.readiness(ctx)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
 		return nil, status.Error(codes.Unavailable, "agent is shutting down")
 	}
-	out := &pb.AgentStatus{Version: Version, BiliVersion: version, Platform: runtime.GOOS + "/" + runtime.GOARCH, StartedUnixMs: s.started, MaxConcurrency: int32(s.config.MaxConcurrency), RuntimeReady: ready, SupportsTimeStart: true, SupportsRequestInterval: true}
+	scheduled := ready && info.SupportsStartDelay
+	out := &pb.AgentStatus{
+		Version: Version, BiliVersion: info.BiliVersion, Platform: runtime.GOOS + "/" + runtime.GOARCH,
+		StartedUnixMs: s.started, MaxConcurrency: int32(s.config.MaxConcurrency), RuntimeReady: ready,
+		SupportsTimeStart: scheduled, SupportsRequestInterval: true, SupportsStartDelay: scheduled,
+	}
 	for _, id := range s.order {
 		out.Tasks = append(out.Tasks, snapshot(s.tasks[id]))
 	}
@@ -127,8 +132,9 @@ var taskID = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$`)
 const timeStartLayout = "2006-01-02T15:04:05"
 
 type runOptions struct {
-	TimeStart string `json:"time_start,omitempty"`
-	Interval  int32  `json:"interval"`
+	TimeStart    string `json:"time_start,omitempty"`
+	StartDelayMs *int32 `json:"start_delay_ms,omitempty"`
+	Interval     int32  `json:"interval"`
 }
 type runParams struct {
 	Cookies json.RawMessage `json:"cookies"`
@@ -161,6 +167,9 @@ func validateRequest(req *pb.TaskRequest) ([]byte, [32]byte, error) {
 	if interval < 100 || interval > 60000 {
 		return nil, [32]byte{}, errors.New("request_interval_ms must be between 100 and 60000 milliseconds")
 	}
+	if delay := req.GetStartDelayMs(); delay < 0 || delay > 60000 {
+		return nil, [32]byte{}, errors.New("start_delay_ms must be between 0 and 60000 milliseconds")
+	}
 	params := runParams{Cookies: json.RawMessage(cookie), Config: json.RawMessage(config), Options: runOptions{Interval: interval}}
 	if req.TimeStart != "" {
 		// Parse alone also accepts fractional seconds, which the runtime rejects.
@@ -168,6 +177,10 @@ func validateRequest(req *pb.TaskRequest) ([]byte, [32]byte, error) {
 			return nil, [32]byte{}, errors.New("time_start must be YYYY-MM-DDTHH:MM:SS in Beijing time")
 		}
 		params.Options.TimeStart = req.TimeStart
+		params.Options.StartDelayMs = req.StartDelayMs
+		if params.Options.StartDelayMs == nil {
+			params.Options.StartDelayMs = proto.Int32(30)
+		}
 	}
 	payload, err := json.Marshal(struct {
 		Op     string    `json:"op"`
@@ -206,9 +219,12 @@ func (s *Service) SubmitTask(ctx context.Context, req *pb.TaskRequest) (*pb.Task
 		return snapshot(old), nil
 	}
 	s.mu.Unlock()
-	ready, _ := s.readiness(ctx)
+	ready, info := s.readiness(ctx)
 	if !ready {
 		return nil, status.Error(codes.FailedPrecondition, "runtime is not ready")
+	}
+	if req.TimeStart != "" && !info.SupportsStartDelay {
+		return nil, status.Error(codes.FailedPrecondition, "redeploy Sisters with a runtime that supports scheduled task clocks and start delays")
 	}
 	if ctx.Err() != nil {
 		return nil, status.FromContextError(ctx.Err()).Err()

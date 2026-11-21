@@ -137,7 +137,9 @@ type cancellationResultRunner struct {
 	err     error
 }
 
-func (r *cancellationResultRunner) probe(context.Context) (string, error) { return "2.15.18", nil }
+func (r *cancellationResultRunner) probe(context.Context) (runtimeInfo, error) {
+	return runtimeInfo{BiliVersion: "2.15.18"}, nil
+}
 func (r *cancellationResultRunner) run(ctx context.Context, _ []byte, emit func(progress)) (result, error) {
 	// A success-looking progress update is deliberately insufficient.
 	emit(progress{Status: "succeeded", Stage: "ordered"})

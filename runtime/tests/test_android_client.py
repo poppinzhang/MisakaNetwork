@@ -31,6 +31,7 @@ DEPENDENCIES = ("requests", "httpx", "httpcore", "h2", "loguru", "tinydb", "ntpl
 class AndroidClientIntegrationTests(unittest.TestCase):
     def setUp(self):
         import httpx
+        import ntplib
         import requests
 
         self.stack = contextlib.ExitStack()
@@ -41,6 +42,7 @@ class AndroidClientIntegrationTests(unittest.TestCase):
         self.stack.enter_context(patch.dict(sys.modules, {"PIL": None, "qrcode.image.pil": None, "brotli": None, "brotlicffi": None, "zstandard": None}))
         self.connect = self.stack.enter_context(patch.object(socket.socket, "connect", side_effect=AssertionError("network forbidden")))
         self.connect_ex = self.stack.enter_context(patch.object(socket.socket, "connect_ex", side_effect=AssertionError("network forbidden")))
+        self.ntp = self.stack.enter_context(patch.object(ntplib.NTPClient, "request", side_effect=AssertionError("NTP forbidden")))
         self.calls = []
         self.states = []
         self.resources = []
@@ -130,6 +132,7 @@ class AndroidClientIntegrationTests(unittest.TestCase):
             self.assertTrue(database.db.storage._handle.closed)
         self.connect.assert_not_called()
         self.connect_ex.assert_not_called()
+        self.ntp.assert_not_called()
         return result
 
     def test_complete_client_flow_uses_real_engine_without_native_optional_dependencies(self):

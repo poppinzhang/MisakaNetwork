@@ -1493,6 +1493,8 @@ class _ControlCenterState extends State<ControlCenter> {
               ? '分发后立即开始'
               : '${task.startAt.replaceFirst('T', ' ')}（北京时间）',
         ),
+        if (task.startAt.isNotEmpty)
+          taskDetail(LucideIcons.timer, '开抢额外延迟', '${task.startDelayMs} 毫秒'),
         taskDetail(LucideIcons.timer, '请求间隔', '${task.requestIntervalMs} 毫秒'),
       ],
     );
@@ -2454,6 +2456,7 @@ class _TaskDialogState extends State<TaskDialog> {
   final project = TextEditingController(),
       buyer = TextEditingController(),
       tel = TextEditingController(),
+      startDelay = TextEditingController(text: '$defaultStartDelayMs'),
       requestInterval = TextEditingController(
         text: '$defaultRequestIntervalMs',
       );
@@ -2499,6 +2502,7 @@ class _TaskDialogState extends State<TaskDialog> {
           ? task.accountId
           : accounts.firstOrNull?.id ?? '';
       requestInterval.text = '${task.requestIntervalMs}';
+      startDelay.text = '${task.startDelayMs}';
       startAt = task.startAt;
       customStartAt = true;
       unawaited(loadEdit());
@@ -2507,7 +2511,7 @@ class _TaskDialogState extends State<TaskDialog> {
 
   @override
   void dispose() {
-    for (final c in [project, buyer, tel, requestInterval]) {
+    for (final c in [project, buyer, tel, startDelay, requestInterval]) {
       c.dispose();
     }
     super.dispose();
@@ -2533,6 +2537,16 @@ class _TaskDialogState extends State<TaskDialog> {
     startAt = value;
     customStartAt = true;
   });
+
+  int delayForTask() {
+    try {
+      return parseStartDelayMs(startDelay.text);
+    } on UserError {
+      if (startAt.isNotEmpty) rethrow;
+      // Clearing the schedule hides the input; discard an unfinished edit.
+      return widget.task?.startDelayMs ?? defaultStartDelayMs;
+    }
+  }
 
   /// Copies a newly checked buyer's name and phone into the contact while both
   /// contact fields are blank. Once either has text, whether typed or filled
@@ -2768,6 +2782,7 @@ class _TaskDialogState extends State<TaskDialog> {
           throw const UserError('联系人和联系电话为必填项。');
         }
         final interval = parseRequestIntervalMs(requestInterval.text);
+        final delay = delayForTask();
         final config = await widget.controller.runtime.call('build_config', {
           'purchase_context': purchase,
           'selection': {
@@ -2790,6 +2805,7 @@ class _TaskDialogState extends State<TaskDialog> {
             account,
             config,
             startAt: startAt,
+            startDelayMs: delay,
             requestIntervalMs: interval,
             summary: summary,
           );
@@ -2799,6 +2815,7 @@ class _TaskDialogState extends State<TaskDialog> {
             account,
             config,
             startAt: startAt,
+            startDelayMs: delay,
             requestIntervalMs: interval,
             summary: summary,
           );
@@ -3016,6 +3033,22 @@ class _TaskDialogState extends State<TaskDialog> {
               fontSize: 12,
             ),
           ),
+          if (startAt.isNotEmpty) ...[
+            const SizedBox(height: 20),
+            field(
+              startDelay,
+              '开抢额外延迟（毫秒）',
+              hint: '0–60000，默认 $defaultStartDelayMs',
+              keyboardType: TextInputType.number,
+            ),
+            Text(
+              '开售后再等待 0–60000 毫秒。填 0 表示到点开抢。',
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+                fontSize: 12,
+              ),
+            ),
+          ],
           const SizedBox(height: 20),
           field(
             requestInterval,

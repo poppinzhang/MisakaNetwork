@@ -31,6 +31,7 @@ class VendorTests(unittest.TestCase):
             "pyproject.toml": '[project]\nversion = "2.15.17"\n',
             "app_cmd/__init__.py": "# command package\n",
             "app_cmd/config/BuyConfig.py": "# configuration\n",
+            "app_cmd/config/NotifierConfig.py": "# release notifications\n",
             "app_version.py": "# version helper\n",
             "LICENSE": "synthetic license\n",
             "assets/fail_messages.json": "[]\n",
@@ -42,6 +43,9 @@ class VendorTests(unittest.TestCase):
                 "loguru_config(LOG_DIR, log_file_name, enable_console=True, file_colorize=False)\n"
             ),
             "task/buy.py": "# purchase engine\n" + vendor_bili.PROJECT_REFRESH,
+            "task/buy_helpers.py": "# release countdown\n",
+            "util/Constant.py": "# constants\n",
+            "util/TimeUtil.py": "\n".join(before for before, _ in vendor_bili.CLOCK_REPLACEMENTS),
             "cptoken/__init__.py": "# token helper\n",
             "util/log/LogWeb.py": "# excluded web logger\n",
             "util/log/TerminalRenderer.py": "# excluded terminal renderer\n",
@@ -59,6 +63,15 @@ class VendorTests(unittest.TestCase):
         self.pinned_revision = patch.object(vendor_bili, "UPSTREAM_REVISION", self.revision)
         self.pinned_revision.start()
         self.addCleanup(self.pinned_revision.stop)
+        # A later commit contains both the wanted clock code and an unrelated
+        # notification update. Only the six clock blobs may cross the branch.
+        self.write_source("app_cmd/config/NotifierConfig.py", "# unrelated notification change\n")
+        self.files["task/buy_helpers.py"] = "# per-task clock\n"
+        self.write_source("task/buy_helpers.py", self.files["task/buy_helpers.py"])
+        self.clock_revision = self.commit()
+        clock_pin = patch.object(vendor_bili, "CLOCK_REVISION", self.clock_revision)
+        clock_pin.start()
+        self.addCleanup(clock_pin.stop)
 
     def write_source(self, relative, content):
         target = self.source / relative
@@ -114,9 +127,10 @@ class VendorTests(unittest.TestCase):
         actual = {path.relative_to(self.destination).as_posix() for path in self.destination.rglob("*") if path.is_file()}
         self.assertEqual(actual, set(records) | {"MANIFEST.json"})
         for relative, record in records.items():
+            self.assertEqual(record.get("source_revision"), self.clock_revision if relative in vendor_bili.CLOCK_FILES else None)
             self.assertEqual(record["upstream_sha256"], hashlib.sha256(self.files[relative].encode()).hexdigest())
             self.assertEqual(record["sha256"], hashlib.sha256((self.destination / relative).read_bytes()).hexdigest())
-            if relative in {"util/__init__.py", "interface/common.py", "task/buy.py"}:
+            if relative in {"util/__init__.py", "interface/common.py", "task/buy.py", "util/TimeUtil.py"}:
                 self.assertIn("patch", record)
                 self.assertNotEqual(record["sha256"], record["upstream_sha256"])
             else:
@@ -129,6 +143,13 @@ class VendorTests(unittest.TestCase):
     def test_missing_commit_preserves_destination(self):
         with patch.object(vendor_bili, "UPSTREAM_REVISION", "0" * 40):
             self.assert_rejected("pinned upstream Git revision")
+        with patch.object(vendor_bili, "CLOCK_REVISION", "0" * 40):
+            self.assert_rejected("pinned upstream Git revision")
+
+    def test_missing_clock_file_preserves_destination(self):
+        (self.source / "task/buy_helpers.py").unlink()
+        with patch.object(vendor_bili, "CLOCK_REVISION", self.commit()):
+            self.assert_rejected("clock backport is missing")
 
     def test_package_version_mismatch_preserves_destination(self):
         self.write_source("pyproject.toml", '[project]\nversion="2.15.18"\n')
@@ -156,13 +177,15 @@ class VendorTests(unittest.TestCase):
             ("util/__init__.py", "def get_exec_path() -> str:", "def get_exec_path():", "execution-directory hook"),
             ("util/__init__.py", "enable_console=True", "enable_console=False", "logging hook"),
             ("interface/common.py", "def _cookie_store_path", "def changed_cookie_store_path", "cookie storage hook"),
+            ("util/TimeUtil.py", "BTB_NTP_SERVERS", "changed_setting", "task clock hook"),
         )
         for relative, before, after, message in cases:
             with self.subTest(hook=message):
                 for path in {case[0] for case in cases}:
                     self.write_source(path, self.files[path])
                 self.write_source(relative, self.files[relative].replace(before, after))
-                with patch.object(vendor_bili, "UPSTREAM_REVISION", self.commit()):
+                revision = "CLOCK_REVISION" if relative in vendor_bili.CLOCK_FILES else "UPSTREAM_REVISION"
+                with patch.object(vendor_bili, revision, self.commit()):
                     self.assert_rejected(message)
 
     def test_committed_source_symlink_preserves_destination(self):

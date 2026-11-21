@@ -57,6 +57,7 @@ void main() {
       name: '演出',
       accountId: account.id,
       startAt: '2030-01-01T12:34:56',
+      startDelayMs: 0,
       requestIntervalMs: 725,
       summary: summary,
       configRevision: 1,
@@ -96,6 +97,7 @@ void main() {
     expect(copy.name, source.name);
     expect(copy.accountId, source.accountId);
     expect(copy.startAt, source.startAt);
+    expect(copy.startDelayMs, 0);
     expect(copy.requestIntervalMs, source.requestIntervalMs);
     expect(copy.summary!.toJson(), summary.toJson());
     expect(copy.dispatches, isEmpty);
@@ -137,7 +139,11 @@ void main() {
       expect(c.canEditTask(copy), isTrue);
       expect(gateway.submitted, isEmpty);
       response.complete(
-        AgentStatus(supportsTimeStart: true, supportsRequestInterval: true),
+        AgentStatus(
+          supportsTimeStart: true,
+          supportsStartDelay: true,
+          supportsRequestInterval: true,
+        ),
       );
       expect(await sending, isEmpty);
       expect(gateway.submitted[node.id]!.id, source.id);

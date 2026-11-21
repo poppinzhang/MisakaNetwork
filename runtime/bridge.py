@@ -445,7 +445,7 @@ def run_task(params: dict[str, Any], engine: Any, emit: Callable[[dict], None]) 
     options = dict(require_object(params.get("runtime_options", {}), "runtime_options"))
     # Accept only this explicit set; no credentials, notification channels,
     # arbitrary local file paths or extra background work enter the runtime.
-    if set(options) - {"interval", "time_start", "wait_for_buy_button"}:
+    if set(options) - {"interval", "time_start", "start_delay_ms", "wait_for_buy_button"}:
         raise BridgeError("invalid_request", "runtime_options 包含未支持的选项")
     interval = bounded_number(options, "interval", 500, 100, 60000)
     if int(interval) != interval:
@@ -455,6 +455,9 @@ def run_task(params: dict[str, Any], engine: Any, emit: Callable[[dict], None]) 
         raise BridgeError("invalid_request", "开始时间或购买按钮选项格式错误")
     if time_start and not valid_time_start(time_start):
         raise BridgeError("invalid_request", "开始时间必须是北京时间 YYYY-MM-DDTHH:MM:SS")
+    start_delay_ms = options.get("start_delay_ms", 30)
+    if type(start_delay_ms) is not int or not 0 <= start_delay_ms <= 60000:
+        raise BridgeError("invalid_request", "额外延迟必须是 0 至 60000 之间的整数毫秒")
     runtime = engine.build_runtime_options(
         interval=int(interval), create_retry_limit=CREATE_RETRY_LIMIT,
         time_start=time_start, wait_for_buy_button=options.get("wait_for_buy_button", False),
@@ -465,7 +468,10 @@ def run_task(params: dict[str, Any], engine: Any, emit: Callable[[dict], None]) 
     from task.buy import Buy
     from task.buy_helpers import CREATE_ORDER_TERMINAL_RULES
     report_existing_orders(CREATE_ORDER_TERMINAL_RULES)
-    job = Buy(config=BuyConfig.from_runtime_options(json.dumps(validation.normalized_config, ensure_ascii=False), runtime))
+    buy_config = BuyConfig.from_runtime_options(json.dumps(validation.normalized_config, ensure_ascii=False), runtime)
+    buy_config.start_delay_ms = start_delay_ms
+    buy_config.use_local_time = not bool(time_start)
+    job = Buy(config=buy_config)
     status = "completed"
     confirmed: str | None = None
     payment: dict[str, Any] = {}
@@ -497,7 +503,8 @@ def handle_request(request: Any, engine: Any, emit: Callable[[dict], None]) -> d
         raise BridgeError("unknown_operation", "不支持的操作")
     params = require_object(request.get("params", {}), "params")
     if operation == "ping":
-        return {"version": VERSION, "bili_version": BILI_VERSION, "protocol": 1, "ready": True}
+        return {"version": VERSION, "bili_version": BILI_VERSION, "protocol": 1, "ready": True,
+                "supports_start_delay": True}
     if operation == "payment_qr":
         code = safe_payment_code(params.get("payment_code_url"))
         if set(params) != {"payment_code_url"} or code is None:
@@ -621,7 +628,6 @@ def main() -> int:
             os.environ["BTB_CONFIG_PATH"] = str(Path(temporary) / "config.json")
             os.environ["BTB_COOKIES_PATH"] = str(Path(temporary) / "cookies.json")
             os.environ["BTB_LOG_DIR"] = str(Path(temporary) / "logs")
-            os.environ["BTB_SKIP_INITIAL_TIME_SYNC"] = "1"
             logging.disable(logging.CRITICAL)
             with open(os.devnull, "w") as sink, redirect_stdout(sink), redirect_stderr(sink):
                 initialization_error = None

@@ -181,6 +181,7 @@ openTasks(
           name: '原任务名称',
           accountId: 'a',
           startAt: '2026-12-01T21:13:52',
+          startDelayMs: 123,
           requestIntervalMs: 725,
           summary: TaskSummary(
             projectName: '测试演出',
@@ -298,12 +299,21 @@ void main() {
       await choose<String>(tester, '场次日期', '2026-12-13');
       await choose<int>(tester, '场次 / 票档', '加演普通票');
       expect(buyerRow(tester, originalRow).value, isTrue);
+      final delay = input('开抢额外延迟（毫秒）');
+      expect(tester.widget<TextField>(delay).controller!.text, '123');
+      await tester.ensureVisible(delay);
+      await tester.enterText(delay, '0');
       await tapVisible(tester, inEditor(find.text('保存修改')));
       final task = f.store.state.tasks.first;
       expect(task.summary!.selectedDate, '2026-12-13');
       expect(task.summary!.screenName, '加演');
       expect(task.startAt, '2026-12-01T21:13:52');
       expect(task.requestIntervalMs, 725);
+      expect(task.startDelayMs, 0);
+      expect(await f.c.dispatch(task, [machine('worker')]), isEmpty);
+      final request = f.gateway.submitted['worker']!;
+      expect(request.hasStartDelayMs(), isTrue);
+      expect(request.startDelayMs, 0);
       expect(tester.takeException(), isNull);
     },
   );
@@ -368,6 +378,14 @@ void main() {
       expect(buyerRow(tester, newRow).value, isFalse);
       await choose<int>(tester, '场次 / 票档', '午场普通票');
       await tapVisible(tester, inEditor(find.text(newRow)));
+      final delay = input('开抢额外延迟（毫秒）');
+      await tester.ensureVisible(delay);
+      await tester.enterText(delay, '75');
+      await tapVisible(tester, inEditor(find.byTooltip('清除开售时间')));
+      expect(delay, findsNothing);
+      await tapVisible(tester, inEditor(find.byTooltip('选择开售时间')));
+      await tapVisible(tester, find.text('确认'));
+      expect(tester.widget<TextField>(delay).controller!.text, '75');
       await tapVisible(tester, inEditor(find.byTooltip('清除开售时间')));
       await tester.enterText(interval, '650');
       await tapVisible(tester, find.text('保存修改'));
@@ -379,6 +397,7 @@ void main() {
       expect(task.summary!.screenName, '午场');
       expect(task.summary!.quantity, 1);
       expect(task.startAt, isEmpty);
+      expect(task.startDelayMs, 75);
       expect(task.requestIntervalMs, 650);
       expect(await f.c.dispatch(task, [machine('worker')]), isEmpty);
       final sent = f.gateway.submitted['worker']!;
@@ -394,6 +413,7 @@ void main() {
       expect(config['tel'], phone);
       expect(config.containsKey('cookies'), isFalse);
       expect(sent.timeStart, '');
+      expect(sent.hasStartDelayMs(), isFalse);
       expect(sent.requestIntervalMs, 650);
       expect(tester.takeException(), isNull);
     },

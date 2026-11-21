@@ -196,8 +196,11 @@ func smoke(ctx context.Context, sisters, runtimeBinary, expectedPlatform string)
 			if expectedPlatform != "" && state.Platform != expectedPlatform {
 				return out, errors.New("packaged Sisters reports an unexpected target platform")
 			}
+			if !state.SupportsTimeStart || !state.SupportsStartDelay {
+				return out, errors.New("packaged Sisters and runtime do not support the scheduled task clock")
+			}
 			out.Version, out.BiliVersion, out.Platform = state.Version, state.BiliVersion, state.Platform
-			out.Checks = append(out.Checks, "mutual_tls_and_actual_runtime_readiness")
+			out.Checks = append(out.Checks, "mutual_tls_and_actual_runtime_readiness", "scheduled_task_clock_supported")
 			break
 		}
 		if err := pause(ctx); err != nil {

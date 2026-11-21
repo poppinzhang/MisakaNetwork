@@ -171,8 +171,11 @@ type TaskRequest struct {
 	// Ticket request interval in integer milliseconds, 100..60000.
 	// Zero uses the default of 500 ms.
 	RequestIntervalMs int32 `protobuf:"varint,6,opt,name=request_interval_ms,json=requestIntervalMs,proto3" json:"request_interval_ms,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// Extra delay after a scheduled start, in milliseconds (0..60000).
+	// Absence uses 30 ms. Ignored when time_start is empty.
+	StartDelayMs  *int32 `protobuf:"varint,7,opt,name=start_delay_ms,json=startDelayMs,proto3,oneof" json:"start_delay_ms,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *TaskRequest) Reset() {
@@ -243,6 +246,13 @@ func (x *TaskRequest) GetTimeStart() string {
 func (x *TaskRequest) GetRequestIntervalMs() int32 {
 	if x != nil {
 		return x.RequestIntervalMs
+	}
+	return 0
+}
+
+func (x *TaskRequest) GetStartDelayMs() int32 {
+	if x != nil && x.StartDelayMs != nil {
+		return *x.StartDelayMs
 	}
 	return 0
 }
@@ -487,8 +497,11 @@ type AgentStatus struct {
 	// Clients must not send tasks to agents that would ignore the configured
 	// request interval. Redeploy those agents before submitting tasks.
 	SupportsRequestInterval bool `protobuf:"varint,9,opt,name=supports_request_interval,json=supportsRequestInterval,proto3" json:"supports_request_interval,omitempty"`
-	unknownFields           protoimpl.UnknownFields
-	sizeCache               protoimpl.SizeCache
+	// Scheduled tasks require a task-specific NTP clock (local fallback) and
+	// support for TaskRequest.start_delay_ms, including an explicit zero.
+	SupportsStartDelay bool `protobuf:"varint,10,opt,name=supports_start_delay,json=supportsStartDelay,proto3" json:"supports_start_delay,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *AgentStatus) Reset() {
@@ -584,6 +597,13 @@ func (x *AgentStatus) GetSupportsRequestInterval() bool {
 	return false
 }
 
+func (x *AgentStatus) GetSupportsStartDelay() bool {
+	if x != nil {
+		return x.SupportsStartDelay
+	}
+	return false
+}
+
 var File_misaka_v1_sisters_proto protoreflect.FileDescriptor
 
 const file_misaka_v1_sisters_proto_rawDesc = "" +
@@ -591,7 +611,7 @@ const file_misaka_v1_sisters_proto_rawDesc = "" +
 	"\x17misaka/v1/sisters.proto\x12\tmisaka.v1\"\a\n" +
 	"\x05Empty\"\x18\n" +
 	"\x06TaskId\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\"\xc2\x01\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\"\x80\x02\n" +
 	"\vTaskRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1f\n" +
@@ -601,7 +621,9 @@ const file_misaka_v1_sisters_proto_rawDesc = "" +
 	"configJson\x12\x1d\n" +
 	"\n" +
 	"time_start\x18\x05 \x01(\tR\ttimeStart\x12.\n" +
-	"\x13request_interval_ms\x18\x06 \x01(\x05R\x11requestIntervalMs\"g\n" +
+	"\x13request_interval_ms\x18\x06 \x01(\x05R\x11requestIntervalMs\x12)\n" +
+	"\x0estart_delay_ms\x18\a \x01(\x05H\x00R\fstartDelayMs\x88\x01\x01B\x11\n" +
+	"\x0f_start_delay_ms\"g\n" +
 	"\tTaskEvent\x12*\n" +
 	"\x11timestamp_unix_ms\x18\x01 \x01(\x03R\x0ftimestampUnixMs\x12\x14\n" +
 	"\x05level\x18\x02 \x01(\tR\x05level\x12\x18\n" +
@@ -619,7 +641,7 @@ const file_misaka_v1_sisters_proto_rawDesc = "" +
 	"\amessage\x18\x04 \x01(\tR\amessage\x12&\n" +
 	"\x0fupdated_unix_ms\x18\x05 \x01(\x03R\rupdatedUnixMs\x12,\n" +
 	"\x06events\x18\x06 \x03(\v2\x14.misaka.v1.TaskEventR\x06events\x121\n" +
-	"\apayment\x18\a \x01(\v2\x17.misaka.v1.OrderPaymentR\apayment\"\xf5\x02\n" +
+	"\apayment\x18\a \x01(\v2\x17.misaka.v1.OrderPaymentR\apayment\"\xa7\x03\n" +
 	"\vAgentStatus\x12\x18\n" +
 	"\aversion\x18\x01 \x01(\tR\aversion\x12!\n" +
 	"\fbili_version\x18\x02 \x01(\tR\vbiliVersion\x12\x1a\n" +
@@ -629,7 +651,9 @@ const file_misaka_v1_sisters_proto_rawDesc = "" +
 	"\x0fmax_concurrency\x18\x06 \x01(\x05R\x0emaxConcurrency\x12#\n" +
 	"\rruntime_ready\x18\a \x01(\bR\fruntimeReady\x12.\n" +
 	"\x13supports_time_start\x18\b \x01(\bR\x11supportsTimeStart\x12:\n" +
-	"\x19supports_request_interval\x18\t \x01(\bR\x17supportsRequestInterval*\xa1\x01\n" +
+	"\x19supports_request_interval\x18\t \x01(\bR\x17supportsRequestInterval\x120\n" +
+	"\x14supports_start_delay\x18\n" +
+	" \x01(\bR\x12supportsStartDelay*\xa1\x01\n" +
 	"\tTaskState\x12\x1a\n" +
 	"\x16TASK_STATE_UNSPECIFIED\x10\x00\x12\x15\n" +
 	"\x11TASK_STATE_QUEUED\x10\x01\x12\x16\n" +
@@ -691,6 +715,7 @@ func file_misaka_v1_sisters_proto_init() {
 	if File_misaka_v1_sisters_proto != nil {
 		return
 	}
+	file_misaka_v1_sisters_proto_msgTypes[2].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

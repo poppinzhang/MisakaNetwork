@@ -303,6 +303,9 @@ const defaultRequestIntervalMs = 500;
 const minRequestIntervalMs = 100;
 const maxRequestIntervalMs = 60000;
 const requestIntervalError = '抢票请求间隔应为 100–60000 毫秒的整数。';
+const defaultStartDelayMs = 30;
+const maxStartDelayMs = 60000;
+const startDelayError = '开抢额外延迟应为 0–60000 毫秒的整数。';
 
 int validateRequestIntervalMs(int value) {
   if (value < minRequestIntervalMs || value > maxRequestIntervalMs) {
@@ -311,12 +314,25 @@ int validateRequestIntervalMs(int value) {
   return value;
 }
 
-int parseRequestIntervalMs(String value) {
+int _parseMilliseconds(String value, String error) {
   final text = value.trim();
   final parsed = RegExp(r'^[0-9]+$').hasMatch(text) ? int.tryParse(text) : null;
-  if (parsed == null) throw const UserError(requestIntervalError);
-  return validateRequestIntervalMs(parsed);
+  if (parsed == null) throw UserError(error);
+  return parsed;
 }
+
+int parseRequestIntervalMs(String value) =>
+    validateRequestIntervalMs(_parseMilliseconds(value, requestIntervalError));
+
+int validateStartDelayMs(int value) {
+  if (value < 0 || value > maxStartDelayMs) {
+    throw const UserError(startDelayError);
+  }
+  return value;
+}
+
+int parseStartDelayMs(String value) =>
+    validateStartDelayMs(_parseMilliseconds(value, startDelayError));
 
 int _storedRequestIntervalMs(Object? value) {
   // Tasks saved before the interval field existed used a fixed 1000 ms.
@@ -359,6 +375,7 @@ class TicketTask {
     required this.name,
     required this.accountId,
     this.startAt = '',
+    this.startDelayMs = defaultStartDelayMs,
     this.requestIntervalMs = defaultRequestIntervalMs,
     this.configRevision = 0,
     List<String> dispatchedTo = const [],
@@ -371,6 +388,7 @@ class TicketTask {
          ...dispatches,
        ]) {
     validateRequestIntervalMs(requestIntervalMs);
+    validateStartDelayMs(startDelayMs);
     if (configRevision < 0) throw const FormatException('任务配置修订号无效。');
   }
   final String id, name, accountId;
@@ -378,6 +396,7 @@ class TicketTask {
   /// Purchase start as Beijing time `YYYY-MM-DDTHH:MM:SS`; empty starts as
   /// soon as a machine accepts the task.
   final String startAt;
+  final int startDelayMs;
   final int requestIntervalMs;
   final int configRevision;
 
@@ -434,6 +453,7 @@ class TicketTask {
     name: name,
     accountId: accountId,
     startAt: startAt,
+    startDelayMs: startDelayMs,
     requestIntervalMs: requestIntervalMs,
     configRevision: configRevision,
     dispatches: next,
@@ -444,6 +464,7 @@ class TicketTask {
     'name': name,
     'accountId': accountId,
     'startAt': startAt,
+    'startDelayMs': startDelayMs,
     'requestIntervalMs': requestIntervalMs,
     if (configRevision != 0) 'configRevision': configRevision,
     'dispatches': dispatches.map((d) => d.toJson()).toList(),
@@ -454,6 +475,11 @@ class TicketTask {
     name: j['name'] as String,
     accountId: j['accountId'] as String,
     startAt: j['startAt'] as String? ?? '',
+    startDelayMs: switch (j['startDelayMs']) {
+      null when !j.containsKey('startDelayMs') => defaultStartDelayMs,
+      int delay when delay >= 0 && delay <= maxStartDelayMs => delay,
+      _ => throw const FormatException(startDelayError),
+    },
     requestIntervalMs: _storedRequestIntervalMs(j['requestIntervalMs']),
     configRevision: switch (j['configRevision']) {
       null when !j.containsKey('configRevision') => 0,

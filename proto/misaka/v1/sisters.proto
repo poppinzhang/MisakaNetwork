@@ -21,6 +21,9 @@ message TaskRequest {
   // Ticket request interval in integer milliseconds, 100..60000.
   // Zero uses the default of 500 ms.
   int32 request_interval_ms = 6;
+  // Extra delay after a scheduled start, in milliseconds (0..60000).
+  // Absence uses 30 ms. Ignored when time_start is empty.
+  optional int32 start_delay_ms = 7;
 }
 enum TaskState {
   TASK_STATE_UNSPECIFIED = 0;
@@ -69,4 +72,7 @@ message AgentStatus {
   // Clients must not send tasks to agents that would ignore the configured
   // request interval. Redeploy those agents before submitting tasks.
   bool supports_request_interval = 9;
+  // Scheduled tasks require a task-specific NTP clock (local fallback) and
+  // support for TaskRequest.start_delay_ms, including an explicit zero.
+  bool supports_start_delay = 10;
 }

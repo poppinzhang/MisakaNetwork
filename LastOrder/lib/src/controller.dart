@@ -1104,6 +1104,7 @@ class AppController extends ChangeNotifier {
     Account account,
     Map<String, dynamic> config, {
     String startAt = '',
+    int startDelayMs = defaultStartDelayMs,
     int requestIntervalMs = defaultRequestIntervalMs,
     TaskSummary? summary,
   }) async {
@@ -1114,6 +1115,7 @@ class AppController extends ChangeNotifier {
         name: name.trim(),
         accountId: account.id,
         startAt: normalizeStartAt(startAt),
+        startDelayMs: startDelayMs,
         requestIntervalMs: requestIntervalMs,
         summary: summary,
       ),
@@ -1129,6 +1131,7 @@ class AppController extends ChangeNotifier {
       name: current.name,
       accountId: current.accountId,
       startAt: current.startAt,
+      startDelayMs: current.startDelayMs,
       requestIntervalMs: current.requestIntervalMs,
       summary: current.summary,
     );
@@ -1148,6 +1151,7 @@ class AppController extends ChangeNotifier {
     Account account,
     Map<String, dynamic> config, {
     required String startAt,
+    int? startDelayMs,
     required int requestIntervalMs,
     required TaskSummary summary,
   }) => _changeTask(original, (current) async {
@@ -1187,6 +1191,7 @@ class AppController extends ChangeNotifier {
       name: current.name,
       accountId: account.id,
       startAt: normalizeStartAt(startAt),
+      startDelayMs: startDelayMs ?? current.startDelayMs,
       requestIntervalMs: requestIntervalMs,
       summary: summary,
       configRevision: current.configRevision + 1,
@@ -1359,6 +1364,9 @@ class AppController extends ChangeNotifier {
                 '该机器上的 Sisters 不支持开售时间，请重新部署后再分发，以免立即开始抢票。',
               );
             }
+            if (saved.startAt.isNotEmpty && !capabilities.supportsStartDelay) {
+              throw const UserError('该机器上的 Sisters 不支持定时校时与开抢额外延迟，请重新部署后再分发。');
+            }
             if (!capabilities.supportsRequestInterval) {
               throw const UserError('该机器上的 Sisters 不支持抢票请求间隔设置，请重新部署后再分发。');
             }
@@ -1402,6 +1410,7 @@ class AppController extends ChangeNotifier {
                 cookieJson: jsonEncode(cookie),
                 configJson: config,
                 timeStart: saved.startAt,
+                startDelayMs: saved.startAt.isEmpty ? null : saved.startDelayMs,
                 requestIntervalMs: saved.requestIntervalMs,
               ),
             );

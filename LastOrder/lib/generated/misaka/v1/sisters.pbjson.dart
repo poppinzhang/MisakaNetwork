@@ -71,6 +71,18 @@ const TaskRequest$json = {
       '5': 5,
       '10': 'requestIntervalMs'
     },
+    {
+      '1': 'start_delay_ms',
+      '3': 7,
+      '4': 1,
+      '5': 5,
+      '9': 0,
+      '10': 'startDelayMs',
+      '17': true
+    },
+  ],
+  '8': [
+    {'1': '_start_delay_ms'},
   ],
 };
 
@@ -79,7 +91,8 @@ final $typed_data.Uint8List taskRequestDescriptor = $convert.base64Decode(
     'CgtUYXNrUmVxdWVzdBIOCgJpZBgBIAEoCVICaWQSEgoEbmFtZRgCIAEoCVIEbmFtZRIfCgtjb2'
     '9raWVfanNvbhgDIAEoCVIKY29va2llSnNvbhIfCgtjb25maWdfanNvbhgEIAEoCVIKY29uZmln'
     'SnNvbhIdCgp0aW1lX3N0YXJ0GAUgASgJUgl0aW1lU3RhcnQSLgoTcmVxdWVzdF9pbnRlcnZhbF'
-    '9tcxgGIAEoBVIRcmVxdWVzdEludGVydmFsTXM=');
+    '9tcxgGIAEoBVIRcmVxdWVzdEludGVydmFsTXMSKQoOc3RhcnRfZGVsYXlfbXMYByABKAVIAFIM'
+    'c3RhcnREZWxheU1ziAEBQhEKD19zdGFydF9kZWxheV9tcw==');
 
 @$core.Deprecated('Use taskEventDescriptor instead')
 const TaskEvent$json = {
@@ -189,6 +202,13 @@ const AgentStatus$json = {
       '5': 8,
       '10': 'supportsRequestInterval'
     },
+    {
+      '1': 'supports_start_delay',
+      '3': 10,
+      '4': 1,
+      '5': 8,
+      '10': 'supportsStartDelay'
+    },
   ],
 };
 
@@ -200,4 +220,5 @@ final $typed_data.Uint8List agentStatusDescriptor = $convert.base64Decode(
     '52MS5UYXNrU3RhdHVzUgV0YXNrcxInCg9tYXhfY29uY3VycmVuY3kYBiABKAVSDm1heENvbmN1'
     'cnJlbmN5EiMKDXJ1bnRpbWVfcmVhZHkYByABKAhSDHJ1bnRpbWVSZWFkeRIuChNzdXBwb3J0c1'
     '90aW1lX3N0YXJ0GAggASgIUhFzdXBwb3J0c1RpbWVTdGFydBI6ChlzdXBwb3J0c19yZXF1ZXN0'
-    'X2ludGVydmFsGAkgASgIUhdzdXBwb3J0c1JlcXVlc3RJbnRlcnZhbA==');
+    'X2ludGVydmFsGAkgASgIUhdzdXBwb3J0c1JlcXVlc3RJbnRlcnZhbBIwChRzdXBwb3J0c19zdG'
+    'FydF9kZWxheRgKIAEoCFISc3VwcG9ydHNTdGFydERlbGF5');

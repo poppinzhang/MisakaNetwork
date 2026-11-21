@@ -14,6 +14,13 @@ import tomllib
 UPSTREAM_VERSION = "2.15.18"
 UPSTREAM_TAG = "v2.15.18"
 UPSTREAM_REVISION = "227ebf73f5af3eec0019984a7cbcb722977453e8"
+# Only these files come from #1143. In particular, interface/config.py and
+# the notification modules remain at the release revision preceding #1131.
+CLOCK_REVISION = "b77477c5e68d75cdab38dbc1bb672b6adb97b63b"
+CLOCK_FILES = (
+    "app_cmd/config/BuyConfig.py", "task/buy.py", "task/buy_helpers.py",
+    "util/Constant.py", "util/TimeUtil.py", "util/__init__.py",
+)
 # The upstream release tag advanced without updating its package metadata.
 UPSTREAM_PACKAGE_VERSION = "2.15.17"
 PACKAGES = ("interface", "task", "app_cmd/config", "util", "cptoken")
@@ -39,6 +46,33 @@ LINKED_PROJECT_REFRESH = """        # Linked goods use a child item ID that proj
         if not tickets_info.get("link_id"):
 """ + "".join("    " + line for line in PROJECT_REFRESH.splitlines(keepends=True))
 
+# The embedded bridge owns the time source. Never redirect NTP or skip it via
+# inherited environment variables. Unsynchronized servers and kiss-o'-death
+# replies (stratum 0) must fall through to another server or the system clock.
+CLOCK_REPLACEMENTS = (
+    ("import os\n", "import math\n"),
+    (
+        '    servers = os.environ.get("BTB_NTP_SERVERS")\n'
+        '    service = TimeUtil(ntp_servers=servers.split(",") if servers else None)\n'
+        '    if not use_local_time and os.environ.get("BTB_SKIP_INITIAL_TIME_SYNC") != "1":',
+        '    service = TimeUtil()\n    if not use_local_time:',
+    ),
+    (
+        "                    response = self.client.request(server, version=4, timeout=timeout)\n",
+        """                    response = self.client.request(server, version=4, timeout=timeout)
+                    if (
+                        response.mode != 4 or response.leap == 3
+                        or not 1 <= response.stratum <= 15
+                        or not all((response.orig_timestamp, response.recv_timestamp, response.tx_timestamp))
+                        or not math.isfinite(response.offset)
+                        or not math.isfinite(response.delay) or response.delay < 0
+                    ):
+                        continue
+""",
+    ),
+)
+
+
 def git(source: Path, *args: str) -> bytes:
     try:
         return subprocess.run(
@@ -49,12 +83,11 @@ def git(source: Path, *args: str) -> bytes:
         raise ValueError("Cannot read the pinned upstream Git revision") from None
 
 
-def read_snapshot(source: Path) -> dict[str, bytes]:
-    """Read original Git blobs, independent of worktree files and attributes."""
-    revision = git(source, "rev-parse", "--verify", UPSTREAM_REVISION + "^{commit}").decode().strip()
-    if revision != UPSTREAM_REVISION:
+def read_tree(source: Path, revision: str, *paths: str) -> dict[str, bytes]:
+    """Read allowlisted original Git blobs, independent of worktree and attributes."""
+    if git(source, "rev-parse", "--verify", revision + "^{commit}").decode().strip() != revision:
         raise ValueError("Upstream revision does not match the reviewed commit")
-    entries = git(source, "ls-tree", "-rz", "--full-tree", revision)
+    entries = git(source, "ls-tree", "-rz", "--full-tree", revision, "--", *paths)
     files: dict[str, bytes] = {}
     for entry in entries.split(b"\0"):
         if not entry:
@@ -70,6 +103,11 @@ def read_snapshot(source: Path) -> dict[str, bytes]:
         if mode not in {"100644", "100755"} or kind != "blob":
             raise ValueError("Upstream source files must be regular Git blobs")
         files[path] = git(source, "cat-file", "blob", object_id)
+    return files
+
+
+def read_snapshot(source: Path) -> dict[str, bytes]:
+    files = read_tree(source, UPSTREAM_REVISION)
     required = {*SINGLE_FILES, "pyproject.toml", "util/__init__.py", "interface/common.py", "task/buy.py"}
     if not required <= files.keys():
         raise ValueError("Pinned upstream source is missing required files")
@@ -79,6 +117,10 @@ def read_snapshot(source: Path) -> dict[str, bytes]:
         raise ValueError("Invalid upstream package metadata") from None
     if version != UPSTREAM_PACKAGE_VERSION:
         raise ValueError("Review the runtime integration before changing upstream version")
+    clock_files = read_tree(source, CLOCK_REVISION, *CLOCK_FILES)
+    if clock_files.keys() != set(CLOCK_FILES):
+        raise ValueError("Pinned clock backport is missing required files")
+    files.update(clock_files)
     return files
 
 
@@ -87,6 +129,8 @@ def vendor(source: Path, destination: Path) -> None:
     records = []
     for relative, content in sorted(files.items()):
         record = {"path": relative, "upstream_sha256": hashlib.sha256(content).hexdigest()}
+        if relative in CLOCK_FILES:
+            record["source_revision"] = CLOCK_REVISION
         if relative == "util/__init__.py":
             text = content.decode("utf-8")
             before = "def get_exec_path() -> str:\n"
@@ -114,6 +158,14 @@ def vendor(source: Path, destination: Path) -> None:
                 raise ValueError("Upstream project refresh hook changed")
             content = text.replace(PROJECT_REFRESH, LINKED_PROJECT_REFRESH).encode("utf-8")
             record["patch"] = "Use the saved parent hot status for linked tickets whose child IDs cannot be refreshed as projects."
+        elif relative == "util/TimeUtil.py":
+            text = content.decode("utf-8")
+            for before, after in CLOCK_REPLACEMENTS:
+                if text.count(before) != 1:
+                    raise ValueError("Upstream task clock hook changed")
+                text = text.replace(before, after)
+            content = text.encode("utf-8")
+            record["patch"] = "Use fixed NTP servers for scheduled tasks and discard unusable NTP samples."
         files[relative] = content
         record["sha256"] = hashlib.sha256(content).hexdigest()
         records.append(record)

@@ -2,6 +2,10 @@
 
 ## unstaged
 
+- 创建、编辑定时任务时可设置「开抢额外延迟（毫秒）」，范围 0–60000，默认 30。设为 0 即按开售时间开始；清除开售时间则在机器开始执行任务时立即开抢。复制任务会保留延迟，旧任务缺少该设置时按 30 毫秒读取。
+- Sisters 吸收 biliTickerBuy [#1143](https://github.com/mikumifa/biliTickerBuy/pull/1143) 的时钟修复。定时任务先通过 NTP 校准任务时钟，失败时使用节点系统时间。倒计时与订单请求时间戳使用同一时钟，省去原先读取会员购 HTTP `Date` 的请求。使用此功能前，先停止或等待已有任务结束，再重新部署 Sisters；LastOrder 会在提交定时任务前检查节点能力。
+- 离线验证覆盖定时与立即任务、NTP 成功与回退、旧节点及同版本旧运行时、请求幂等和任务设置的保存。已通过两套 Python 依赖集、Go 竞态测试与 vet、Flutter 分析与全量测试及 macOS arm64 本地运行时冒烟。[来源与验证范围](docs/biliTickerBuy运行时.md#定时任务时钟复核)
+
 ## 0.4.4 — 2026-11-21
 
 - **交付状态：发布准备完成，待构建。** 源码版本、更新记录与 [0.4.4 发布记录](docs/releases/0.4.4.md) 已准备；尚未执行 GitHub Actions 全平台构建，也未创建公开 Release。不预写 CI 通过或真实业务验收。当前公开安装包仍是 [0.4.3](https://github.com/poppinzhang/MisakaNetwork/releases/tag/0.4.3)。

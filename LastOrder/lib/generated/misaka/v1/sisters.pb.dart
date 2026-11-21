@@ -123,6 +123,7 @@ class TaskRequest extends $pb.GeneratedMessage {
     $core.String? configJson,
     $core.String? timeStart,
     $core.int? requestIntervalMs,
+    $core.int? startDelayMs,
   }) {
     final result = TaskRequest._();
     if (id != null) result.id = id;
@@ -131,6 +132,7 @@ class TaskRequest extends $pb.GeneratedMessage {
     if (configJson != null) result.configJson = configJson;
     if (timeStart != null) result.timeStart = timeStart;
     if (requestIntervalMs != null) result.requestIntervalMs = requestIntervalMs;
+    if (startDelayMs != null) result.startDelayMs = startDelayMs;
     return result;
   }
 
@@ -153,6 +155,7 @@ class TaskRequest extends $pb.GeneratedMessage {
     ..aOS(4, _omitFieldNames ? '' : 'configJson')
     ..aOS(5, _omitFieldNames ? '' : 'timeStart')
     ..aI(6, _omitFieldNames ? '' : 'requestIntervalMs')
+    ..aI(7, _omitFieldNames ? '' : 'startDelayMs')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -234,6 +237,17 @@ class TaskRequest extends $pb.GeneratedMessage {
   $core.bool hasRequestIntervalMs() => $_has(5);
   @$pb.TagNumber(6)
   void clearRequestIntervalMs() => $_clearField(6);
+
+  /// Extra delay after a scheduled start, in milliseconds (0..60000).
+  /// Absence uses 30 ms. Ignored when time_start is empty.
+  @$pb.TagNumber(7)
+  $core.int get startDelayMs => $_getIZ(6);
+  @$pb.TagNumber(7)
+  set startDelayMs($core.int value) => $_setSignedInt32(6, value);
+  @$pb.TagNumber(7)
+  $core.bool hasStartDelayMs() => $_has(6);
+  @$pb.TagNumber(7)
+  void clearStartDelayMs() => $_clearField(7);
 }
 
 class TaskEvent extends $pb.GeneratedMessage {
@@ -550,6 +564,7 @@ class AgentStatus extends $pb.GeneratedMessage {
     $core.bool? runtimeReady,
     $core.bool? supportsTimeStart,
     $core.bool? supportsRequestInterval,
+    $core.bool? supportsStartDelay,
   }) {
     final result = AgentStatus._();
     if (version != null) result.version = version;
@@ -562,6 +577,8 @@ class AgentStatus extends $pb.GeneratedMessage {
     if (supportsTimeStart != null) result.supportsTimeStart = supportsTimeStart;
     if (supportsRequestInterval != null)
       result.supportsRequestInterval = supportsRequestInterval;
+    if (supportsStartDelay != null)
+      result.supportsStartDelay = supportsStartDelay;
     return result;
   }
 
@@ -588,6 +605,7 @@ class AgentStatus extends $pb.GeneratedMessage {
     ..aOB(7, _omitFieldNames ? '' : 'runtimeReady')
     ..aOB(8, _omitFieldNames ? '' : 'supportsTimeStart')
     ..aOB(9, _omitFieldNames ? '' : 'supportsRequestInterval')
+    ..aOB(10, _omitFieldNames ? '' : 'supportsStartDelay')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -690,6 +708,17 @@ class AgentStatus extends $pb.GeneratedMessage {
   $core.bool hasSupportsRequestInterval() => $_has(8);
   @$pb.TagNumber(9)
   void clearSupportsRequestInterval() => $_clearField(9);
+
+  /// Scheduled tasks require a task-specific NTP clock (local fallback) and
+  /// support for TaskRequest.start_delay_ms, including an explicit zero.
+  @$pb.TagNumber(10)
+  $core.bool get supportsStartDelay => $_getBF(9);
+  @$pb.TagNumber(10)
+  set supportsStartDelay($core.bool value) => $_setBool(9, value);
+  @$pb.TagNumber(10)
+  $core.bool hasSupportsStartDelay() => $_has(9);
+  @$pb.TagNumber(10)
+  void clearSupportsStartDelay() => $_clearField(10);
 }
 
 const $core.bool _omitFieldNames =

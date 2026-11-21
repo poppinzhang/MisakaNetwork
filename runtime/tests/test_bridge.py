@@ -81,6 +81,7 @@ class BridgeTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(events[-1]["data"]["version"], "0.4.4")
         self.assertEqual(events[-1]["data"]["bili_version"], "2.15.18")
+        self.assertIs(events[-1]["data"]["supports_start_delay"], True)
 
     def test_cookie_formats(self):
         expected = [{"name": "session", "value": "synthetic"}]
@@ -367,9 +368,10 @@ class BridgeTests(unittest.TestCase):
 
     def run_stream(self, stream, rules=None, runtime_options=None):
         self.built_options = []
+        self.buy_config = SimpleNamespace()
         engine = SimpleNamespace(validate_config=lambda c: validation(True, c), build_runtime_options=lambda **kw: self.built_options.append(kw) or kw)
         modules = {
-            "app_cmd.config.BuyConfig": SimpleNamespace(BuyConfig=SimpleNamespace(from_runtime_options=lambda *a: {})),
+            "app_cmd.config.BuyConfig": SimpleNamespace(BuyConfig=SimpleNamespace(from_runtime_options=lambda *a: self.buy_config)),
             "task.buy": SimpleNamespace(Buy=lambda **kw: SimpleNamespace(stream=stream)),
             "task.buy_helpers": SimpleNamespace(CREATE_ORDER_TERMINAL_RULES={} if rules is None else rules),
         }
@@ -440,6 +442,28 @@ class BridgeTests(unittest.TestCase):
                 self.assertEqual(self.built_options[-1]["interval"], expected)
                 self.assertEqual(self.built_options[-1]["create_retry_limit"], 40)
                 self.assertEqual(self.built_options[-1]["create_request_batch_size"], 1)
+
+    def test_start_delay_is_independent_of_request_interval_and_clock_override(self):
+        for time_start in ("", "2030-01-01T00:00:00"):
+            for value in (None, 0, 200, 60000):
+                options = {"interval": 750, "time_start": time_start}
+                if value is not None:
+                    options["start_delay_ms"] = value
+                with self.subTest(options=options):
+                    code, _ = self.run_stream(lambda: iter([]), runtime_options=options)
+                    self.assertEqual(code, 0)
+                    self.assertEqual(self.buy_config.start_delay_ms, 30 if value is None else value)
+                    self.assertEqual(self.buy_config.use_local_time, not time_start)
+                    self.assertEqual(self.built_options[-1]["interval"], 750)
+
+    def test_invalid_delay_or_untrusted_clock_options_are_rejected_before_execution(self):
+        invalid = [{"start_delay_ms": value} for value in (None, False, True, "30", 30.0, 0.5, [], -1, 60001)]
+        for options in [*invalid, {"use_local_time": True}, {"ntp_servers": ["untrusted.invalid"]}, {"barkVolume": 5}]:
+            with self.subTest(options=options):
+                code, events = self.run_stream(lambda: iter([]), runtime_options=options)
+                self.assertEqual(code, 1)
+                self.assertEqual(events[-1]["error"]["code"], "invalid_request")
+                self.assertEqual(self.built_options, [])
 
     def test_run_rejects_invalid_interval_before_starting_task(self):
         for value in (True, False, None, "1000", [], {}, -1, 0, 99, 60001, 100.5, float("nan"), float("inf")):

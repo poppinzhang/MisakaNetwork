@@ -775,6 +775,10 @@ void main() {
         (w) => w is TextField && w.decoration?.labelText == '抢票请求间隔（毫秒）',
       );
       expect(tester.widget<TextField>(interval).controller!.text, '500');
+      final delay = find.byWidgetPredicate(
+        (w) => w is TextField && w.decoration?.labelText == '开抢额外延迟（毫秒）',
+      );
+      expect(tester.widget<TextField>(delay).controller!.text, '30');
       expect(
         tester.widget<TextField>(interval).keyboardType,
         TextInputType.number,
@@ -809,11 +813,20 @@ void main() {
       }
       await tester.ensureVisible(interval);
       await tester.enterText(interval, '750');
+      await tester.ensureVisible(delay);
+      await tester.enterText(delay, '-1');
+      await tester.tap(find.text('保存任务'));
+      await tester.pumpAndSettle();
+      expect(find.text(startDelayError), findsOneWidget);
+      expect(runtime.calls, isNot(contains('build_config')));
+      await tester.ensureVisible(delay);
+      await tester.enterText(delay, '123');
       await tester.tap(find.text('保存任务'));
       await tester.pumpAndSettle();
       expect(c.state.tasks.single.name, '测试演出');
       expect(c.state.tasks.single.startAt, '2026-11-21T21:01:38');
       expect(c.state.tasks.single.requestIntervalMs, 750);
+      expect(c.state.tasks.single.startDelayMs, 123);
       final summary = c.state.tasks.single.summary!;
       expect(summary.projectName, '测试演出');
       expect(summary.screenName, '周六晚场');

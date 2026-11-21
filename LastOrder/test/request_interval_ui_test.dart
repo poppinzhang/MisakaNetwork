@@ -101,10 +101,14 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('2026-11-20 19:15:46'), findsOneWidget);
       final clearStart = find.byTooltip('清除开售时间');
+      final delay = input('开抢额外延迟（毫秒）');
+      await tester.ensureVisible(delay);
+      await tester.enterText(delay, '');
       await tester.ensureVisible(clearStart);
       await tester.tap(clearStart);
       await tester.pumpAndSettle();
       expect(find.text('分发后立即开始'), findsOneWidget);
+      expect(delay, findsNothing);
 
       await tester.ensureVisible(find.text('测试购票人（身份证）'));
       await tester.tap(find.text('测试购票人（身份证）'));

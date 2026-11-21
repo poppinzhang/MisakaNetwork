@@ -20,10 +20,14 @@ type progress struct {
 	AttemptTotal     int    `json:"attempt_total"`
 	CountdownSeconds *int   `json:"countdown_seconds"`
 }
+type runtimeInfo struct {
+	BiliVersion        string `json:"bili_version"`
+	SupportsStartDelay bool   `json:"supports_start_delay"`
+}
 type result struct {
+	runtimeInfo
 	RuntimeVersion string `json:"version"`
 	Status         string `json:"status"`
-	Version        string `json:"bili_version"`
 	Protocol       int    `json:"protocol"`
 	Ready          bool   `json:"ready"`
 	OrderID        string `json:"order_id"`
@@ -37,25 +41,25 @@ type frame struct {
 	Data result `json:"data"`
 }
 type runner interface {
-	probe(context.Context) (string, error)
+	probe(context.Context) (runtimeInfo, error)
 	run(context.Context, []byte, func(progress)) (result, error)
 }
 type executableRunner struct{ path string }
 
 var safeVersion = regexp.MustCompile(`^[a-zA-Z0-9._+\-]{1,64}$`)
 
-func (r executableRunner) probe(ctx context.Context) (string, error) {
+func (r executableRunner) probe(ctx context.Context) (runtimeInfo, error) {
 	info, err := os.Stat(r.path)
 	if err != nil || !runtimeExecutable(info) {
-		return "", errors.New("runtime executable unavailable")
+		return runtimeInfo{}, errors.New("runtime executable unavailable")
 	}
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	data, err := r.invoke(ctx, []byte("{\"op\":\"ping\"}\n"), nil)
-	if err != nil || !data.Ready || data.Protocol != 1 || data.RuntimeVersion != Version || !safeVersion.MatchString(data.Version) {
-		return "", errors.New("runtime readiness check failed")
+	if err != nil || !data.Ready || data.Protocol != 1 || data.RuntimeVersion != Version || !safeVersion.MatchString(data.BiliVersion) {
+		return runtimeInfo{}, errors.New("runtime readiness check failed")
 	}
-	return data.Version, nil
+	return data.runtimeInfo, nil
 }
 
 func (r executableRunner) run(ctx context.Context, input []byte, emit func(progress)) (result, error) {

@@ -13,6 +13,7 @@ import (
 	pb "github.com/MisakaNetwork/MisakaNetwork/gen/misaka/v1"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 )
 
 type fakeRunner struct {
@@ -25,11 +26,11 @@ type fakeRunner struct {
 	err                 error
 }
 
-func (r *fakeRunner) probe(context.Context) (string, error) {
+func (r *fakeRunner) probe(context.Context) (runtimeInfo, error) {
 	if r.notReady {
-		return "", errors.New("unavailable")
+		return runtimeInfo{}, errors.New("unavailable")
 	}
-	return "2.15.18", nil
+	return runtimeInfo{BiliVersion: "2.15.18", SupportsStartDelay: true}, nil
 }
 func (r *fakeRunner) run(ctx context.Context, input []byte, emit func(progress)) (result, error) {
 	r.mu.Lock()
@@ -333,9 +334,117 @@ func TestRequestIntervalBoundToIdempotency(t *testing.T) {
 	}
 }
 
+func TestStartDelayIsValidatedAndForwardedOnlyForScheduledTasks(t *testing.T) {
+	for _, start := range []string{"", "2026-11-20T20:00:00"} {
+		for _, delay := range []*int32{nil, proto.Int32(0), proto.Int32(30), proto.Int32(245), proto.Int32(60000)} {
+			r := request("task")
+			r.TimeStart, r.StartDelayMs = start, delay
+			payload, _, err := validateRequest(r)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var decoded struct {
+				Params struct {
+					Options map[string]any `json:"runtime_options"`
+				}
+			}
+			if err = json.Unmarshal(payload, &decoded); err != nil {
+				t.Fatal(err)
+			}
+			got, present := decoded.Params.Options["start_delay_ms"]
+			if start == "" {
+				if present {
+					t.Fatalf("immediate task forwarded delay: %s", payload)
+				}
+				continue
+			}
+			want := int32(30)
+			if delay != nil {
+				want = *delay
+			}
+			if got != float64(want) || decoded.Params.Options["interval"] != float64(500) {
+				t.Fatalf("wanted scheduled delay %d ms, interval 500 ms: %s", want, payload)
+			}
+		}
+		for _, invalid := range []int32{-1, 60001} {
+			r := request("bad")
+			r.TimeStart, r.StartDelayMs = start, &invalid
+			if _, _, err := validateRequest(r); err == nil {
+				t.Fatalf("invalid start delay %d accepted for start %q", invalid, start)
+			}
+		}
+	}
+}
+
+func TestEffectiveStartDelayDeterminesIdempotency(t *testing.T) {
+	s := testService(t, &fakeRunner{}, 1, 4, 4)
+	ctx := context.Background()
+	if got, err := s.GetStatus(ctx, &pb.Empty{}); err != nil || !got.GetSupportsStartDelay() {
+		t.Fatalf("agent did not advertise scheduled clock and delay support: %v %v", got, err)
+	}
+	r := request("scheduled")
+	r.TimeStart = "2026-11-20T20:00:00"
+	if _, err := s.SubmitTask(ctx, r); err != nil {
+		t.Fatal(err)
+	}
+	r.StartDelayMs = proto.Int32(30)
+	if _, err := s.SubmitTask(ctx, r); err != nil {
+		t.Fatalf("explicit default must replay the same scheduled task: %v", err)
+	}
+	r.StartDelayMs = proto.Int32(0)
+	if _, err := s.SubmitTask(ctx, r); status.Code(err) != codes.AlreadyExists {
+		t.Fatalf("explicit zero must conflict with the scheduled 30 ms delay: %v", err)
+	}
+	r = request("immediate")
+	if _, err := s.SubmitTask(ctx, r); err != nil {
+		t.Fatal(err)
+	}
+	r.StartDelayMs = proto.Int32(60000)
+	if _, err := s.SubmitTask(ctx, r); err != nil {
+		t.Fatalf("inactive delay changed an immediate task's fingerprint: %v", err)
+	}
+}
+
+func TestScheduledClockCapabilityFollowsEmbeddedRuntime(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		field  string
+		clocks bool
+	}{
+		{"legacy", "", false},
+		{"current", `,"supports_start_delay":true`, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// A runtime from a different build may have the same version.
+			ping := `{"type":"result","ok":true,"data":{"version":"` + Version + `","protocol":1,"ready":true,"bili_version":"2.15.18"` + tc.field + `}}`
+			r := fixtureRunner(t, runtimeFixture{Frames: []string{ping}})
+			s := testService(t, r, 1, 4, 4)
+			ctx := context.Background()
+			info, err := s.GetStatus(ctx, &pb.Empty{})
+			if err != nil || !info.GetRuntimeReady() || info.GetSupportsStartDelay() != tc.clocks || info.GetSupportsTimeStart() != tc.clocks {
+				t.Fatalf("unexpected embedded runtime capabilities: %v %v", info, err)
+			}
+			for i, delay := range []*int32{nil, proto.Int32(0)} {
+				timed := request(fmt.Sprintf("scheduled-%d", i))
+				timed.TimeStart = "2026-11-20T20:00:00"
+				timed.StartDelayMs = delay
+				_, err := s.SubmitTask(ctx, timed)
+				if tc.clocks && err != nil || !tc.clocks && status.Code(err) != codes.FailedPrecondition {
+					t.Fatalf("unexpected timed task admission: %v", err)
+				}
+			}
+			if _, err := s.SubmitTask(ctx, request("immediate")); err != nil {
+				t.Fatalf("immediate task rejected: %v", err)
+			}
+		})
+	}
+}
+
 type scriptedRunner struct{ updates []progress }
 
-func (r scriptedRunner) probe(context.Context) (string, error) { return "2.15.18", nil }
+func (r scriptedRunner) probe(context.Context) (runtimeInfo, error) {
+	return runtimeInfo{BiliVersion: "2.15.18", SupportsStartDelay: true}, nil
+}
 func (r scriptedRunner) run(_ context.Context, _ []byte, emit func(progress)) (result, error) {
 	for _, p := range r.updates {
 		emit(p)

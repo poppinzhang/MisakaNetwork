@@ -20,8 +20,9 @@
     },
     {
       "path": "app_cmd/config/BuyConfig.py",
-      "upstream_sha256": "17d7b9589d7365ead57f85d56b72fc18a908eb1596a4f1e32ac1b057a0ca8410",
-      "sha256": "17d7b9589d7365ead57f85d56b72fc18a908eb1596a4f1e32ac1b057a0ca8410"
+      "upstream_sha256": "552d458f788345825b2aa1dc59e86e8c80cf8ad8eec5c11b79cd226af050a206",
+      "source_revision": "b77477c5e68d75cdab38dbc1bb672b6adb97b63b",
+      "sha256": "552d458f788345825b2aa1dc59e86e8c80cf8ad8eec5c11b79cd226af050a206"
     },
     {
       "path": "app_cmd/config/ConfigBasic.py",
@@ -101,14 +102,16 @@
     },
     {
       "path": "task/buy.py",
-      "upstream_sha256": "bd6c259b73bc03814192e0c685c14583490b2c05cb94491824598686a02573f5",
-      "sha256": "11ef4a5a6f9b7bd36b6a3fdfe9a5341c893772e391be45939d9f159c8f55bada",
-      "patch": "Use the saved parent hot status for linked tickets whose child IDs cannot be refreshed as projects."
+      "upstream_sha256": "2f25e6dc6a67ebfbb8e53c8bcae122722859d4be6a4ef454fc43327d3bcb7e97",
+      "source_revision": "b77477c5e68d75cdab38dbc1bb672b6adb97b63b",
+      "patch": "Use the saved parent hot status for linked tickets whose child IDs cannot be refreshed as projects.",
+      "sha256": "16dca386f5e2789dbf691080ffcc11c84d3c7dbbabbb9c1f5929e9c8b57e458a"
     },
     {
       "path": "task/buy_helpers.py",
-      "upstream_sha256": "0df9cc550176fc6efa71875bf6d35736d7dd232cfb4ebbbee8d962dab9a22a9a",
-      "sha256": "0df9cc550176fc6efa71875bf6d35736d7dd232cfb4ebbbee8d962dab9a22a9a"
+      "upstream_sha256": "fc0514c564966efe7965c3163549ccb4541b5b10c07a7bc6c99afaaabd3b2fda",
+      "source_revision": "b77477c5e68d75cdab38dbc1bb672b6adb97b63b",
+      "sha256": "fc0514c564966efe7965c3163549ccb4541b5b10c07a7bc6c99afaaabd3b2fda"
     },
     {
       "path": "task/buy_types.py",
@@ -122,8 +125,9 @@
     },
     {
       "path": "util/Constant.py",
-      "upstream_sha256": "c157a0072f4141c9a87b14d8523764d4c72523db2d6737172daef0f1cb26958d",
-      "sha256": "c157a0072f4141c9a87b14d8523764d4c72523db2d6737172daef0f1cb26958d"
+      "upstream_sha256": "acf3e606791a41ae45d2e48d6e9b4e46d532d8054e16502310684889b5529f56",
+      "source_revision": "b77477c5e68d75cdab38dbc1bb672b6adb97b63b",
+      "sha256": "acf3e606791a41ae45d2e48d6e9b4e46d532d8054e16502310684889b5529f56"
     },
     {
       "path": "util/ErrorCodes.py",
@@ -142,14 +146,17 @@
     },
     {
       "path": "util/TimeUtil.py",
-      "upstream_sha256": "24c4375ed78da48328477899ac0b892b61b3e82c34c858948b8a9a0ea9a52a18",
-      "sha256": "24c4375ed78da48328477899ac0b892b61b3e82c34c858948b8a9a0ea9a52a18"
+      "upstream_sha256": "0f5f72b37eadc21ba94ed8ac71e661bf89520818358e1ef47eef476c2dca1523",
+      "source_revision": "b77477c5e68d75cdab38dbc1bb672b6adb97b63b",
+      "patch": "Use fixed NTP servers for scheduled tasks and discard unusable NTP samples.",
+      "sha256": "76fd36825cfc1d5f28adf127cb24e55beb2eb2a35ba5e3902a5a5aed98a8a04f"
     },
     {
       "path": "util/__init__.py",
-      "upstream_sha256": "eebc690e75957e8fd4d9623ce6fe7aa06ffea2d3d00b1b24c853c8890424e4b6",
+      "upstream_sha256": "83e7ceb16555b22b209737046e5ac54bbe551c821b4793ce9160b2749aea09e5",
+      "source_revision": "b77477c5e68d75cdab38dbc1bb672b6adb97b63b",
       "patch": "Use process-private state directory and disable raw upstream logging when embedded.",
-      "sha256": "b1c388e541d48796910f7f47ab51e3dbd3a4681ab4786728328281a49e1946e0"
+      "sha256": "0f834d420e71643825534b3ffd3c7bcae42ca87e4c691b1d8093add07e04995d"
     },
     {
       "path": "util/h2client/abstract_h2_client.py",

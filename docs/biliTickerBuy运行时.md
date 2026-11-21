@@ -8,7 +8,7 @@
 
 升级核对发现，此前内嵌的 56 个上游文件已与此提交逐一匹配；本次同步版本标识并补齐固定提交导入与来源记录，核心 API、依赖锁定版本、Cookie 内存隔离和任务结果语义不变。既有配置无需迁移；安装包与已部署 Sisters 需重新构建、部署后才会回报新版本。
 
-重新导入时，从包含该提交的本地 Git 仓库导出固定提交的白名单文件（命令不会联网）：
+重新导入开发中的源码时，本地上游 Git 仓库须同时包含基线提交 `227ebf73f5af3eec0019984a7cbcb722977453e8` 与时钟修复提交 `b77477c5e68d75cdab38dbc1bb672b6adb97b63b`。下列命令只读取本地 Git 对象。
 
 ```sh
 python3.11 runtime/vendor_bili.py /path/to/biliTickerBuy
@@ -35,6 +35,27 @@ Docker 限制针对上游应用的运行与服务入口，不禁止本项目为�
 - `runtime/bridge.py` 的 `run_task` 仅接受明确的 `runtime_options` 白名单，不开放并发策略或通知参数。`BuyConfig.from_runtime_options` 从运行参数构建配置，不合并上游 `BTB_*` 买票与通知环境配置；当前 `RuntimeOptions` 的策略为 `standard`，通知配置为空。不得通过环境变量、配置文件、命令行或新增参数绕过这些限制。进程仍继承其他环境设置，HTTP 客户端也未统一禁用环境代理或 CA 配置，不能将当前隔离描述为完全忽略环境变量或强制所有请求直连。
 - `runtime/vendor_bili.py` 的导入白名单不包含上游 Web UI、Docker 启动文件和更新器；`runtime/build.py` 不打包 Gradio。独立运行时与 Android 内嵌客户端均不得新增这些服务入口。
 - 自制 TLS 和通知模块仍可能作为核心源码的一部分出现在内嵌目录中，当前结论是调用路径未启用，并非相关缺陷已修复或代码已全部移除。默认值、导入副作用或调用方式变化后必须重新核查。
+
+### 定时任务时钟复核
+
+开发中的运行时从 [biliTickerBuy #1143](https://github.com/mikumifa/biliTickerBuy/pull/1143) 回移每任务时钟与开抢延迟。六个源文件取自提交 [b77477c](https://github.com/mikumifa/biliTickerBuy/commit/b77477c5e68d75cdab38dbc1bb672b6adb97b63b)，分别是 `app_cmd/config/BuyConfig.py`、`task/buy.py`、`task/buy_helpers.py`、`util/Constant.py`、`util/TimeUtil.py` 和 `util/__init__.py`。其余文件取自 v2.15.18，文件来源和嵌入适配见 [MANIFEST.json](../runtime/vendor/biliTickerBuy/MANIFEST.json)。导入范围不含同一主干上的 Bark 音量改动、Docker 配置和 Gradio 设置。
+
+只有提供开售时间的 `run` 操作才尝试 NTP。每个任务使用独立时钟，查询固定的 `ntp.aliyun.com`、`ntp.tencent.com`、`cn.ntp.org.cn`、`time.cloudflare.com`（出站 UDP 123）。查询仅发送校时数据；Cookie、演出、购票人和支付资料均不进入校时请求。四个服务都取不到可用样本时，节点以零偏移继续使用系统时间。NTP 是普通 UDP 校时，允许的主机名限定了查询目标，不能认证时间来源。节点无需开放入站 NTP 端口。
+
+任务按「北京时间的开售时刻 + 额外延迟」计算倒计时，准备及创建订单时也使用本次任务的时钟。省略延迟时使用 30 毫秒，显式 0 有效；目标已过则继续执行。登录、查询、健康检查和立即任务均跳过 NTP，定时任务也不再读取会员购 HTTP `Date`。校时策略与服务器列表由内嵌运行时控制，外部参数仅能指定开售时间与额外延迟等白名单项。
+
+此次回移沿用已锁定的 `ntplib` 和既有依赖。订单仍走 `standard`，平台 HTTPS 验证证书链与域名。Bark 及其他第三方通知凭据和地址保持为空。关联票的 `link_id` 适配、内存 Cookie、进程私有状态目录、原始日志隔离及既有支付回报白名单继续生效。
+
+2026-11-22 本地离线验证结果如下。
+
+| 验证范围 | 结果 |
+| --- | --- |
+| 来源与许可 | 从两个固定提交重新导入，逐字节比较快照及清单一致。补充许可清单通过校验。 |
+| Python 运行时 | 桌面锁定依赖 114 项通过、9 项跳过；Android 锁定依赖 117 项通过、6 项跳过。桌面测试用真实引擎、模拟 NTP 响应与模拟订单验证开抢时间和订单时间戳；覆盖查询超时、未同步或拒绝校时的服务器、无效样本、延迟为 0 及立即任务。Android 客户端覆盖登录与查询过程中不会触发 NTP。 |
+| Go 与 Flutter | Go 全量竞态测试与 vet 通过。Flutter 静态分析通过，969 项测试通过、3 项可选截图测试跳过。涵盖保存与复制、旧任务默认值、旧节点/旧运行时拒绝定时任务、立即任务及执行 ID 幂等。 |
+| 本机打包 | 135 项打包脚本测试通过。本地构建 macOS arm64 运行时，通过 4 项包内检查，并与本地构建的 Sisters 通过 9 项回环 mTLS 冒烟检查，含打包后实际能力回报。 |
+
+以上为源码、模拟响应和本地单架构运行时验证。未测量公网 NTP 的可达性或实际精度，未使用真实账号下单，也未构建全平台发行包。
 
 ### 关联商品子项目复检适配复核（2026-11-20）
 
@@ -143,7 +164,7 @@ Windows Sisters 复用 Windows 管理端已有的原生内嵌运行时，固定�
 
 | op | params | data |
 | --- | --- | --- |
-| `ping` | 无 | `version`、`bili_version`、`protocol:1`、`ready:true`；导入真实引擎验证依赖，不访问网络 |
+| `ping` | 无 | `version`、`bili_version`、`protocol:1`、`ready:true`。开发中的运行时另回报 `supports_start_delay:true`，供 Sisters 判定定时任务支持情况。导入真实引擎验证依赖，全程离线。 |
 | `qr_start` | 无 | `login_url`、`qrcode_key`、`qr_png_base64`；PNG 在内存编码（有 Pillow 用 Pillow，否则用 PyPNG），不落盘 |
 | `payment_qr`（未发布） | `payment_code_url`，完整字符串须符合支付白名单 | `qr_png_base64`；仅本地内存生成，不请求平台或支付网站 |
 | `qr_poll` | 仅 `qrcode_key`，单次平台查询 | `status:pending/scanned/expired/transient_error/failed/confirmed`；非成功仅含固定 `message`；只有已验证的 confirmed 返回 `cookies`、`username`、`uid` |
@@ -159,7 +180,16 @@ Cookie 支持 `[{"name":"...","value":"..."}]`、`{"cookie":[...]}`、`{"cookies
 
 `selection` 包含从零起的 `ticket_index`、非空 `buyer_indices`、`address_index`，以及 `buyer`（联系人）、`tel`（联系电话），可选 `phone`。当前沿用上游校验：必须选择收货地址，即使活动提供电子票。场次、实名购票人或地址不完整会真实失败，不构造虚假的可执行配置。
 
-`runtime_options` 仅支持 `interval`（整数毫秒，100–60000，已发布 0.4.2 默认 500，已发布 0.4.1 默认 1000）、`time_start`（北京时间 `YYYY-MM-DDTHH:MM:SS`，只接受完整日期时间；只写时分的写法会按主机时区补全日期，因此拒绝）和 `wait_for_buy_button`。Sisters 将 `request_interval_ms` 校验后转交为 `interval`，并可同时转交 `time_start`。每轮下单尝试上限由 bridge 固定为 `create_retry_limit=40`，该选项不在输入白名单内，即使传入 40 也会被拒绝；未调整上游快照中的默认值。每轮上限不代表任务累计尝试上限，请求之间的实际时间还受响应耗时、重新准备与冷却逻辑影响。每个任务采用单请求创建订单批次，禁用声音、外部通知、自动打开浏览器与随机日志。上游按北京时间（UTC+8）倒计时，与 Sisters 主机时区无关；LastOrder 在界面标注北京时间。
+`runtime_options` 接受以下字段。
+
+| 字段 | 取值及作用 |
+| --- | --- |
+| `interval` | 整数毫秒，100–60000。0.4.2 起默认 500，0.4.1 默认 1000。Sisters 转交 `request_interval_ms` 的有效值。 |
+| `time_start` | 北京时间 `YYYY-MM-DDTHH:MM:SS`。提供完整日期和时间可避免执行机器的本地时区影响解析。空值表示立即执行。 |
+| `start_delay_ms`（开发中） | 定时任务的额外延迟，整数毫秒，0–60000。缺省 30，显式 0 表示到点开始。 |
+| `wait_for_buy_button` | 布尔值，控制是否等待购票页的「立即购票」。 |
+
+每轮下单尝试上限由 bridge 固定为 `create_retry_limit=40`，该选项不在输入白名单内，即使传入 40 也会被拒绝；未调整上游快照中的默认值。每轮上限不代表任务累计尝试上限，请求之间的实际时间还受响应耗时、重新准备与冷却逻辑影响。每个任务采用单请求创建订单批次，禁用声音、外部通知、自动打开浏览器与随机日志。上游按北京时间（UTC+8）倒计时，与 Sisters 主机时区无关；LastOrder 在界面标注北京时间。
 
 执行期间会输出 `{"type":"progress","status":"running","stage":"preparing","message":"抢票任务执行中","attempt_current":1,"attempt_total":40}`。`stage` 是稳定的协议代码，由上游阶段名翻译而来：`starting`（启动）、`waiting`（等待开票，可带 `countdown_seconds`）、`preparing`（订单准备）、`ordering`（创建订单）、`ordered`（抢票成功）、`page_timeout`（购票页校验超时）；其他上游阶段统一为 `working`。`status` 取 `running`、`cooldown`、`succeeded`、`duplicate_order`、`failed`、`cancelled`、`completed` 之一。消息与 stage 都不转发上游原文、HTTP 响应、代理信息或原始错误字符串。上游新增阶段名时测试会失败，提醒同步更新 bridge 与 Sisters 的词表。终态 `succeeded` 表示上游结构化状态确认创建订单；`duplicate_order` 表示检测到已有订单：上游在限购已有订单（100003）、存在未完成订单（100048）或重复订单（100079）时以 `completed` 停止，bridge 启动任务时把这三条停止规则改报为 `duplicate_order`。`completed` 表示结束但尚未确认创建订单，不能向用户展示抢票成功；`failed` / `cancelled` 返回 `ok:false`。一旦出现 `succeeded` 或 `duplicate_order`，之后的上游异常或取消只会停止任务，不再改变终态。
 
@@ -170,8 +200,9 @@ Cookie 支持 `[{"name":"...","value":"..."}]`、`{"cookie":[...]}`、`{"cookies
 `runtime/vendor_bili.py` 只复制明确白名单中的 Python 文件、失败提示资源和许可证，不复制上游工作目录、账户文件、配置、缓存、日志、备份或构建产物。`vendor/biliTickerBuy/MANIFEST.json` 记录每个文件的原始与实际 SHA-256，以及嵌入适配：
 
 1. 将原引擎的可写目录重定向至每进程独立的临时目录，并关闭原始 Loguru 文件/控制台输出。
-2. 接口 Cookie 存储改为内存；启动时跳过自动 NTP 查询，`ping` 与配置校验不会请求平台。
+2. 接口 Cookie 存储改为内存。导入引擎时使用本机时钟，`ping` 与配置校验无需联网。
 3. 关联商品（存在 `link_id`）使用子项目 ID 执行订单请求。作为上游缺陷的临时补丁，启动和复检时沿用任务配置中主项目的 `is_hot_project`，跳过对不支持子项目 ID 的普通详情接口的查询，仍执行原有的 HTTPS 预热；普通票档仍查询项目详情，待上游修复后可在升级时移除。此适配不新增网络目的地，也不改变 TLS 验证、数据传递、通知或启动入口。
+4. 定时任务从指定上游提交回移时钟逻辑并固定 NTP 目标。来源、参数与离线验证见[定时任务时钟复核](#定时任务时钟复核)。
 
 CLI 进程在删除临时目录之前关闭上游全局 `ConfigDB` 与 `main_request.cookieManager.db`。引擎导入中途失败时，同样从明确的上游模块与构造上下文释放已打开的数据库；一个句柄关闭失败不妨碍尝试关闭其余句柄。清理失败以非零退出码回报，不输出原始异常或临时路径，不追加第二条 result，不覆盖已确认订单结果；尚未输出结果时返回脱敏错误。此处理修复 Windows 不允许删除仍被打开文件而导致的正常请求退出失败。
 

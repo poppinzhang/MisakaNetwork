@@ -230,6 +230,7 @@ void main() {
           '2 张',
           '2026-12-01 20:00:00',
           '750 毫秒',
+          '开抢额外延迟  30 毫秒',
           '进行中',
         ]) {
           expect(inside(card, value), findsWidgets);

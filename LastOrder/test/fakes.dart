@@ -73,6 +73,7 @@ class FakeGateway implements AgentGateway {
   final remoteTasks = <TaskStatus>[];
   TaskState submitState = TaskState.TASK_STATE_QUEUED;
   bool timeStartSupported = true;
+  bool startDelaySupported = true;
   bool requestIntervalSupported = true;
   final statusRequests = <Machine>[];
   Future<AgentStatus> Function(Machine)? statusHandler;
@@ -88,6 +89,7 @@ class FakeGateway implements AgentGateway {
       maxConcurrency: 2,
       tasks: remoteTasks,
       supportsTimeStart: timeStartSupported,
+      supportsStartDelay: startDelaySupported,
       supportsRequestInterval: requestIntervalSupported,
     );
   }

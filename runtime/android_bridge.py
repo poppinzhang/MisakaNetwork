@@ -170,7 +170,6 @@ def invoke(raw: str, cache_directory: str) -> str:
                     "BTB_CONFIG_PATH": str(Path(state) / "config.json"),
                     "BTB_COOKIES_PATH": str(Path(state) / "cookies.json"),
                     "BTB_LOG_DIR": str(Path(state) / "logs"),
-                    "BTB_SKIP_INITIAL_TIME_SYNC": "1",
                     "GRADIO_TEMP_DIR": str(Path(state) / "tmp"),
                 }
                 previous = {key: os.environ.get(key) for key in keys}

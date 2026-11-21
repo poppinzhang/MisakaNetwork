@@ -7,9 +7,9 @@
     "runtime/requirements.lock": "1b193340e236b4383dcb72e0c22b4dd054a83515770ccd3c7d949f16650b1d4a",
     "runtime/requirements-android.lock": "c609e7f4d01b75c39b0b3227945c34a6627c983955b6b84fad2bede52d313477",
     "runtime/requirements-build.lock": "d5e172626b796fba0858b9effe3c21a8938434e9f782304f50e54924eccdd557",
-    "runtime/NOTICE.txt": "382fc6ee09b14cd2ae298d2e2067d771f4887a3d234b9fd7a872854821ee1f5b",
+    "runtime/NOTICE.txt": "cd053b869d9b2cd5965b3314fe0659440cf5f932612ded137f12a0e047a93be3",
     "runtime/vendor/biliTickerBuy/LICENSE": "a033a88e2c3b88c2aa261c237fe3009380f0cf7dccf907c3f210c430e99eb970",
-    "runtime/vendor/biliTickerBuy/MANIFEST.json": "fbb0398d991cd14dde3fc5ca52a41a29d8d45033c411af89d11c962043a3dde2",
+    "runtime/vendor/biliTickerBuy/MANIFEST.json": "e99bc54173b0fc6d130e640cf9fb0dfbb3bdb34fd443dbc24633f7afa73f9d7e",
     "LastOrder/android/settings.gradle.kts": "0dc60163828ddbb4cb9c1858ecd4f735ae17517b880c35de5640121e115bef1d",
     "scripts/license_sources/loguru-0.7.3-LICENSE.txt": "b35d026cc7aca9d5859a02eb87ddf7a386a24c986838651bd1f283f94e003327",
     "scripts/license_sources/chaquopy-17.1.0-LICENSE.txt": "345a9fdfeed355d37b18569ef277ba56eb0ab7c0b17a08a90163ce8d33d2b862"
@@ -18,5 +18,5 @@
     "loguru": "https://raw.githubusercontent.com/Delgan/loguru/0.7.3/LICENSE",
     "Chaquopy": "https://raw.githubusercontent.com/chaquo/chaquopy/17.1.0/LICENSE.txt"
   },
-  "asset_sha256": "46c8753ee73a196507cfdb693a966262777c20d609738d071a0672c4daff2872"
+  "asset_sha256": "8283bf3646e1eb0fdd3c6c6a622368669a52aaa940453df09a50f7a4baf8f98a"
 }

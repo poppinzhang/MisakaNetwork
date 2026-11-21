@@ -44,7 +44,7 @@ class PaymentTests(unittest.TestCase):
 
     def stream(self, *states):
         modules = {
-            "app_cmd.config.BuyConfig": SimpleNamespace(BuyConfig=SimpleNamespace(from_runtime_options=lambda *a: {})),
+            "app_cmd.config.BuyConfig": SimpleNamespace(BuyConfig=SimpleNamespace(from_runtime_options=lambda *a: SimpleNamespace())),
             "task.buy": SimpleNamespace(Buy=lambda **kw: SimpleNamespace(stream=lambda: iter(
                 SimpleNamespace(message="synthetic-secret", state=SimpleNamespace(**state)) for state in states
             ))),
