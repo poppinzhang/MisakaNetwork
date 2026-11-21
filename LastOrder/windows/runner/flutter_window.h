@@ -5,6 +5,7 @@
 #include <flutter/flutter_view_controller.h>
 
 #include <memory>
+#include <set>
 
 #include "win32_window.h"
 
@@ -23,6 +24,10 @@ class FlutterWindow : public Win32Window {
                          LPARAM const lparam) noexcept override;
 
  private:
+  void RegisterNotifications();
+  UINT next_notification_id_ = 1;
+  std::set<UINT> active_notification_ids_;
+
   // The project to run.
   flutter::DartProject project_;
 

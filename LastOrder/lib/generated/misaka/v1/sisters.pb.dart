@@ -436,6 +436,7 @@ class TaskStatus extends $pb.GeneratedMessage {
     $fixnum.Int64? updatedUnixMs,
     $core.Iterable<TaskEvent>? events,
     OrderPayment? payment,
+    $core.bool? orderCreated,
   }) {
     final result = TaskStatus._();
     if (id != null) result.id = id;
@@ -445,6 +446,7 @@ class TaskStatus extends $pb.GeneratedMessage {
     if (updatedUnixMs != null) result.updatedUnixMs = updatedUnixMs;
     if (events != null) result.events.addAll(events);
     if (payment != null) result.payment = payment;
+    if (orderCreated != null) result.orderCreated = orderCreated;
     return result;
   }
 
@@ -471,6 +473,7 @@ class TaskStatus extends $pb.GeneratedMessage {
         subBuilder: TaskEvent.$_createMessage)
     ..aOM<OrderPayment>(7, _omitFieldNames ? '' : 'payment',
         subBuilder: OrderPayment.$_createMessage)
+    ..aOB(8, _omitFieldNames ? '' : 'orderCreated')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -551,6 +554,17 @@ class TaskStatus extends $pb.GeneratedMessage {
   void clearPayment() => $_clearField(7);
   @$pb.TagNumber(7)
   OrderPayment ensurePayment() => $_ensure(6);
+
+  /// True only for a final successful order creation by this execution.
+  /// Existing orders also use TASK_STATE_SUCCEEDED but must not send an alert.
+  @$pb.TagNumber(8)
+  $core.bool get orderCreated => $_getBF(7);
+  @$pb.TagNumber(8)
+  set orderCreated($core.bool value) => $_setBool(7, value);
+  @$pb.TagNumber(8)
+  $core.bool hasOrderCreated() => $_has(7);
+  @$pb.TagNumber(8)
+  void clearOrderCreated() => $_clearField(8);
 }
 
 class AgentStatus extends $pb.GeneratedMessage {

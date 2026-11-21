@@ -123,6 +123,9 @@ func TestPaymentFallbackAndUnconfirmedResults(t *testing.T) {
 				t.Fatal(err)
 			}
 			got := waitState(t, s, "task", tc.state)
+			if got.OrderCreated != (tc.err == nil && tc.out.Status == "succeeded") {
+				t.Errorf("incorrect order creation signal: %v", got.OrderCreated)
+			}
 			if (got.Payment != nil) != tc.wantOrder || got.GetPayment().GetPaymentCodeUrl() != "" {
 				t.Fatalf("unexpected payment result: %v", got.Payment)
 			}
@@ -168,7 +171,7 @@ func TestCancellationRaceKeepsOnlyConfirmedFinalOrder(t *testing.T) {
 			}
 			waitStart(t, r.started)
 			before, _ := s.GetStatus(context.Background(), &pb.Empty{})
-			if before.Tasks[0].State != pb.TaskState_TASK_STATE_RUNNING || before.Tasks[0].Payment != nil {
+			if before.Tasks[0].State != pb.TaskState_TASK_STATE_RUNNING || before.Tasks[0].Payment != nil || before.Tasks[0].OrderCreated {
 				t.Fatal("progress exposed an unconfirmed order")
 			}
 			cancelled, err := s.CancelTask(context.Background(), &pb.TaskId{Id: "race"})
@@ -178,6 +181,9 @@ func TestCancellationRaceKeepsOnlyConfirmedFinalOrder(t *testing.T) {
 			close(r.release)
 			s.Close() // Wait for the worker to process the late final result.
 			got := waitState(t, s, "race", tc.want)
+			if got.OrderCreated != (tc.err == nil && tc.status == "succeeded") {
+				t.Errorf("incorrect late order creation signal: %v", got.OrderCreated)
+			}
 			if (got.Payment != nil) != (tc.want == pb.TaskState_TASK_STATE_SUCCEEDED) {
 				t.Fatalf("late result payment mismatch: %v", got.Payment)
 			}

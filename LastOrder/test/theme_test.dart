@@ -25,13 +25,32 @@ void configureView(
 ThemeData appTheme(WidgetTester tester) =>
     Theme.of(tester.element(find.byType(ControlCenter)));
 
-Future<void> selectTheme(WidgetTester tester, String label) async {
-  final button = find.byKey(const ValueKey('theme-mode-button'));
+Future<void> selectTheme(
+  WidgetTester tester,
+  String label, {
+  bool closeSettings = true,
+}) async {
+  if (find.byType(AlertDialog).evaluate().isEmpty) {
+    final settings = find.byTooltip('配置');
+    expect(
+      tester.getCenter(find.byTooltip('立即刷新')).dx,
+      lessThan(tester.getCenter(settings).dx),
+    );
+    await tester.tap(settings);
+    await tester.pumpAndSettle();
+  }
+  final button = find.byTooltip('选择外观主题');
   expect(button.hitTestable(), findsOneWidget);
   await tester.tap(button);
   await tester.pumpAndSettle();
   for (final option in ['跟随系统', '浅色', '深色']) {
-    expect(find.text(option), findsOneWidget);
+    expect(
+      find.ancestor(
+        of: find.text(option),
+        matching: find.byType(CheckedPopupMenuItem<AppThemeMode>),
+      ),
+      findsOneWidget,
+    );
   }
   await tester.tap(
     find.ancestor(
@@ -40,6 +59,10 @@ Future<void> selectTheme(WidgetTester tester, String label) async {
     ),
   );
   await tester.pumpAndSettle();
+  if (closeSettings) {
+    await tester.tap(find.text('关闭'));
+    await tester.pumpAndSettle();
+  }
 }
 
 double contrast(Color foreground, Color background) {
@@ -163,20 +186,18 @@ void main() {
       await tester.pumpWidget(LastOrderApp(controller: c));
       await tester.pumpAndSettle();
 
-      await selectTheme(tester, '深色');
+      await selectTheme(tester, '深色', closeSettings: false);
       expect(c.state.themeMode, AppThemeMode.system);
       expect(store.state.themeMode, AppThemeMode.system);
       expect(appTheme(tester).brightness, Brightness.light);
       expect(find.textContaining('写入失败'), findsOneWidget);
-      expect(find.byType(SnackBar), findsOneWidget);
+      expect(find.byType(AlertDialog), findsOneWidget);
       expect(tester.takeException(), isNull);
 
       store.failSave = false;
       await selectTheme(tester, '深色');
       expect(appTheme(tester).brightness, Brightness.dark);
       expect(store.state.themeMode, AppThemeMode.dark);
-      await tester.pump(const Duration(seconds: 7));
-      await tester.pumpAndSettle();
     },
   );
 

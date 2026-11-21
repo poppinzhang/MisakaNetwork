@@ -22,6 +22,7 @@ import 'payment_ui.dart';
 import 'sale_start_picker.dart';
 import 'task_edit_selection.dart';
 import 'services.dart';
+import 'settings_dialog.dart';
 import 'task_messages.dart';
 import 'theme.dart';
 
@@ -39,10 +40,19 @@ class _LastOrderAppState extends State<LastOrderApp> {
   final _navigator = GlobalKey<NavigatorState>();
   final _lightTheme = buildAppTheme(Brightness.light);
   final _darkTheme = buildAppTheme(Brightness.dark);
+
+  void _updateMonitoringVisibility(AppLifecycleState? state) {
+    widget.controller.setMonitoringAppVisible(
+      state == AppLifecycleState.resumed || state == AppLifecycleState.inactive,
+    );
+  }
+
   @override
   void initState() {
     super.initState();
+    _updateMonitoringVisibility(WidgetsBinding.instance.lifecycleState);
     _lifecycle = AppLifecycleListener(
+      onStateChange: _updateMonitoringVisibility,
       onResume: () {
         unawaited(widget.controller.refresh());
         unawaited(widget.controller.checkAccounts());
@@ -118,7 +128,6 @@ class ControlCenter extends StatefulWidget {
 class _ControlCenterState extends State<ControlCenter> {
   AppController get c => widget.controller;
   ColorScheme get colors => Theme.of(context).colorScheme;
-  bool savingTheme = false;
   int page = 0;
   bool busy = false;
   CloudProvider? credentialProvider;
@@ -163,43 +172,6 @@ class _ControlCenterState extends State<ControlCenter> {
   Future<void> showProjectAbout() => showDialog<void>(
     context: context,
     builder: (context) => const ProjectAboutDialog(),
-  );
-
-  Future<void> changeTheme(AppThemeMode mode) async {
-    if (savingTheme || mode == c.state.themeMode) return;
-    setState(() => savingTheme = true);
-    try {
-      await c.setThemeMode(mode);
-    } catch (e) {
-      message('无法保存外观设置：${readableError(e)}', error: true);
-    } finally {
-      if (mounted) setState(() => savingTheme = false);
-    }
-  }
-
-  Widget themeButton() => PopupMenuButton<AppThemeMode>(
-    key: const ValueKey('theme-mode-button'),
-    tooltip: '外观主题',
-    enabled: c.initialized && !savingTheme,
-    initialValue: c.state.themeMode,
-    icon: Icon(
-      switch (c.state.themeMode) {
-        AppThemeMode.system => LucideIcons.monitor,
-        AppThemeMode.light => LucideIcons.sun,
-        AppThemeMode.dark => LucideIcons.moon,
-      },
-      size: 19,
-      semanticLabel: '外观主题：${themeModeLabel(c.state.themeMode)}',
-    ),
-    onSelected: changeTheme,
-    itemBuilder: (context) => [
-      for (final mode in AppThemeMode.values)
-        CheckedPopupMenuItem(
-          value: mode,
-          checked: c.state.themeMode == mode,
-          child: Text(themeModeLabel(mode)),
-        ),
-    ],
   );
 
   Widget aboutVersion({bool inHeader = false}) => Tooltip(
@@ -471,7 +443,6 @@ class _ControlCenterState extends State<ControlCenter> {
                                 ),
                               ),
                             const SizedBox(width: 14),
-                            themeButton(),
                             IconButton(
                               tooltip: '立即刷新',
                               onPressed: c.polling ? null : () => c.refresh(),
@@ -481,6 +452,17 @@ class _ControlCenterState extends State<ControlCenter> {
                                     : LucideIcons.refreshCw,
                                 size: 19,
                               ),
+                            ),
+                            IconButton(
+                              tooltip: '配置',
+                              onPressed: c.initialized
+                                  ? () => showDialog<void>(
+                                      context: context,
+                                      builder: (_) =>
+                                          SettingsDialog(controller: c),
+                                    )
+                                  : null,
+                              icon: const Icon(LucideIcons.settings, size: 19),
                             ),
                           ],
                         ),
@@ -1790,11 +1772,7 @@ class _ControlCenterState extends State<ControlCenter> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        heading(
-          'LIVE ACTIVITY',
-          '实时任务监控',
-          '查看各节点执行进度与订单入口；断连时保留最后一次状态。',
-        ),
+        heading('LIVE ACTIVITY', '实时任务监控', '查看各节点执行进度与订单入口；断连时保留最后一次状态。'),
         Padding(
           padding: const EdgeInsets.only(bottom: 16),
           child: Align(
@@ -3025,9 +3003,7 @@ class _TaskDialogState extends State<TaskDialog> {
             ],
           ),
           Text(
-            editing
-                ? '可重新选择或清除；清除后将在分发时立即开始。'
-                : '默认跟随所选票档的开售时间；清除后将在分发时立即开始。',
+            editing ? '可重新选择或清除；清除后将在分发时立即开始。' : '默认跟随所选票档的开售时间；清除后将在分发时立即开始。',
             style: TextStyle(
               color: Theme.of(context).colorScheme.onSurfaceVariant,
               fontSize: 12,

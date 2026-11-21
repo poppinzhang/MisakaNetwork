@@ -57,6 +57,9 @@ message TaskStatus {
   int64 updated_unix_ms = 5;
   repeated TaskEvent events = 6;
   OrderPayment payment = 7;
+  // True only for a final successful order creation by this execution.
+  // Existing orders also use TASK_STATE_SUCCEEDED but must not send an alert.
+  bool order_created = 8;
 }
 message AgentStatus {
   string version = 1;

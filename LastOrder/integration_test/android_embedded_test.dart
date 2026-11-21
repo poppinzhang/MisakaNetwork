@@ -12,6 +12,48 @@ void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
   const channel = MethodChannel('misaka/embedded');
 
+  const notifications = MethodChannel('misaka/notifications');
+  testWidgets('Android embedded notifications reject incomplete messages', (
+    tester,
+  ) async {
+    for (final field in ['id', 'title', 'body']) {
+      final args = {'id': 'test', 'title': 'Test', 'body': 'Test'}
+        ..remove(field);
+      await expectLater(
+        notifications.invokeMethod<bool>('showSuccess', args),
+        throwsA(
+          isA<PlatformException>().having(
+            (error) => error.code,
+            'code',
+            'invalid_arguments',
+          ),
+        ),
+      );
+    }
+  });
+
+  // On a dedicated emulator, set the system permission first, then pass
+  // --dart-define=MISAKA_TEST_NOTIFICATIONS_GRANTED=true (or false).
+  const permissionSet = bool.hasEnvironment(
+    'MISAKA_TEST_NOTIFICATIONS_GRANTED',
+  );
+  testWidgets('Android embedded notifications respect system permission', (
+    tester,
+  ) async {
+    const granted = bool.fromEnvironment('MISAKA_TEST_NOTIFICATIONS_GRANTED');
+    if (granted) {
+      expect(await notifications.invokeMethod<bool>('requestPermission'), true);
+    }
+    expect(
+      await notifications.invokeMethod<bool>('showSuccess', {
+        'id': 'synthetic-notification',
+        'title': '测试通知',
+        'body': '这是一条模拟抢票结果。',
+      }),
+      granted,
+    );
+  }, skip: !permissionSet);
+
   testWidgets('Android embedded client uses the shared protocol', (
     tester,
   ) async {

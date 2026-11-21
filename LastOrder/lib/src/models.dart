@@ -533,9 +533,14 @@ class SavedState {
     List<TicketTask>? tasks,
     List<ClearedExecution>? clearedExecutions,
     this.themeMode = AppThemeMode.system,
+    this.successNotificationsEnabled = false,
+    Set<String> observedOrderNotifications = const {},
   }) : machines = machines ?? [],
        accounts = accounts ?? [],
        tasks = tasks ?? [],
+       observedOrderNotifications = Set.unmodifiable(
+         observedOrderNotifications,
+       ),
        clearedExecutions = List.unmodifiable(clearedExecutions ?? []);
   final List<Machine> machines;
   final List<Account> accounts;
@@ -548,9 +553,14 @@ class SavedState {
   bool isExecutionCleared(String machineId, String executionId, String state) =>
       _clearedExecutionKeys.contains((machineId, executionId, state));
   final AppThemeMode themeMode;
+  final bool successNotificationsEnabled;
+  // Opaque IDs for results already observed, including while alerts were off.
+  final Set<String> observedOrderNotifications;
   String encode() => jsonEncode({
     'schema': schemaVersion,
     'theme_mode': themeMode.name,
+    'success_notifications_enabled': successNotificationsEnabled,
+    'observed_order_notifications': observedOrderNotifications.toList(),
     'machines': machines.map((e) => e.toJson()).toList(),
     'accounts': accounts.map((e) => e.toJson()).toList(),
     'tasks': tasks.map((e) => e.toJson()).toList(),
@@ -560,6 +570,11 @@ class SavedState {
     final j = jsonDecode(data) as Map<String, dynamic>;
     if (j['schema'] != schemaVersion) throw const FormatException('不支持的本地配置版本');
     return SavedState(
+      successNotificationsEnabled: j['success_notifications_enabled'] == true,
+      observedOrderNotifications: {
+        for (final id in j['observed_order_notifications'] as List? ?? const [])
+          id as String,
+      },
       themeMode:
           AppThemeMode.values
               .where((mode) => mode.name == j['theme_mode'])

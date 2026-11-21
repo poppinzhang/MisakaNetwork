@@ -159,6 +159,7 @@ const TaskStatus$json = {
       '6': '.misaka.v1.OrderPayment',
       '10': 'payment'
     },
+    {'1': 'order_created', '3': 8, '4': 1, '5': 8, '10': 'orderCreated'},
   ],
 };
 
@@ -168,7 +169,8 @@ final $typed_data.Uint8List taskStatusDescriptor = $convert.base64Decode(
     'RlGAMgASgOMhQubWlzYWthLnYxLlRhc2tTdGF0ZVIFc3RhdGUSGAoHbWVzc2FnZRgEIAEoCVIH'
     'bWVzc2FnZRImCg91cGRhdGVkX3VuaXhfbXMYBSABKANSDXVwZGF0ZWRVbml4TXMSLAoGZXZlbn'
     'RzGAYgAygLMhQubWlzYWthLnYxLlRhc2tFdmVudFIGZXZlbnRzEjEKB3BheW1lbnQYByABKAsy'
-    'Fy5taXNha2EudjEuT3JkZXJQYXltZW50UgdwYXltZW50');
+    'Fy5taXNha2EudjEuT3JkZXJQYXltZW50UgdwYXltZW50EiMKDW9yZGVyX2NyZWF0ZWQYCCABKA'
+    'hSDG9yZGVyQ3JlYXRlZA==');
 
 @$core.Deprecated('Use agentStatusDescriptor instead')
 const AgentStatus$json = {

@@ -399,6 +399,9 @@ type TaskStatus struct {
 	UpdatedUnixMs int64                  `protobuf:"varint,5,opt,name=updated_unix_ms,json=updatedUnixMs,proto3" json:"updated_unix_ms,omitempty"`
 	Events        []*TaskEvent           `protobuf:"bytes,6,rep,name=events,proto3" json:"events,omitempty"`
 	Payment       *OrderPayment          `protobuf:"bytes,7,opt,name=payment,proto3" json:"payment,omitempty"`
+	// True only for a final successful order creation by this execution.
+	// Existing orders also use TASK_STATE_SUCCEEDED but must not send an alert.
+	OrderCreated  bool `protobuf:"varint,8,opt,name=order_created,json=orderCreated,proto3" json:"order_created,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -480,6 +483,13 @@ func (x *TaskStatus) GetPayment() *OrderPayment {
 		return x.Payment
 	}
 	return nil
+}
+
+func (x *TaskStatus) GetOrderCreated() bool {
+	if x != nil {
+		return x.OrderCreated
+	}
+	return false
 }
 
 type AgentStatus struct {
@@ -632,7 +642,7 @@ const file_misaka_v1_sisters_proto_rawDesc = "" +
 	"\border_id\x18\x01 \x01(\tR\aorderId\x12(\n" +
 	"\x10order_detail_url\x18\x02 \x01(\tR\x0eorderDetailUrl\x12(\n" +
 	"\x10payment_code_url\x18\x03 \x01(\tR\x0epaymentCodeUrl\x12(\n" +
-	"\x10captured_unix_ms\x18\x04 \x01(\x03R\x0ecapturedUnixMs\"\xff\x01\n" +
+	"\x10captured_unix_ms\x18\x04 \x01(\x03R\x0ecapturedUnixMs\"\xa4\x02\n" +
 	"\n" +
 	"TaskStatus\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
@@ -641,7 +651,8 @@ const file_misaka_v1_sisters_proto_rawDesc = "" +
 	"\amessage\x18\x04 \x01(\tR\amessage\x12&\n" +
 	"\x0fupdated_unix_ms\x18\x05 \x01(\x03R\rupdatedUnixMs\x12,\n" +
 	"\x06events\x18\x06 \x03(\v2\x14.misaka.v1.TaskEventR\x06events\x121\n" +
-	"\apayment\x18\a \x01(\v2\x17.misaka.v1.OrderPaymentR\apayment\"\xa7\x03\n" +
+	"\apayment\x18\a \x01(\v2\x17.misaka.v1.OrderPaymentR\apayment\x12#\n" +
+	"\rorder_created\x18\b \x01(\bR\forderCreated\"\xa7\x03\n" +
 	"\vAgentStatus\x12\x18\n" +
 	"\aversion\x18\x01 \x01(\tR\aversion\x12!\n" +
 	"\fbili_version\x18\x02 \x01(\tR\vbiliVersion\x12\x1a\n" +

@@ -7,7 +7,9 @@ import 'package:path/path.dart' as p;
 import 'package:uuid/uuid.dart';
 
 import '../generated/misaka/v1/sisters.pbgrpc.dart';
+import 'android_order_monitor.dart';
 import 'models.dart';
+import 'order_notifications.dart';
 import 'services.dart';
 import 'cloud_controller.dart';
 import 'cloud_models.dart';
@@ -73,7 +75,14 @@ class AppController extends ChangeNotifier {
     Future<List<CloudTemplate>> Function()? volcengineTemplateLoader,
     Future<List<CloudTemplate>> Function()? aliyunTemplateLoader,
     DateTime Function()? accountCheckClock,
+    Future<bool> Function(bool)? setAndroidBackgroundMonitoring,
   }) : _accountCheckClock = accountCheckClock ?? DateTime.now {
+    final setActive =
+        setAndroidBackgroundMonitoring ??
+        (Platform.isAndroid ? setNativeAndroidBackgroundMonitoring : null);
+    _androidMonitor = setActive == null
+        ? null
+        : AndroidOrderMonitor(setActive, _notify);
     cloud = CloudController(
       store: store,
       helper: helper,
@@ -104,6 +113,10 @@ class AppController extends ChangeNotifier {
   Future<void> _credentialPrune = Future<void>.value();
   int _credentialImportHolds = 0;
   String? startupError;
+  String? notificationDeliveryError;
+  late final AndroidOrderMonitor? _androidMonitor;
+  String? get backgroundMonitoringError => _androidMonitor?.error;
+  int _pendingCancellations = 0;
   Timer? _timer, _accountTimer;
   final DateTime Function() _accountCheckClock;
   static const _accountCheckInterval = Duration(minutes: 5);
@@ -338,7 +351,48 @@ class AppController extends ChangeNotifier {
   }
 
   void _notify() {
-    if (!disposed) notifyListeners();
+    if (disposed) return;
+    _syncBackgroundMonitoring();
+    notifyListeners();
+  }
+
+  void setMonitoringAppVisible(bool visible) =>
+      _syncBackgroundMonitoring(visible: visible);
+
+  bool _canPoll(Machine machine) =>
+      machine.canConnect &&
+      cloudMachineUsable(machine) &&
+      !isDeploying(machine.id);
+
+  bool _hasMonitoredDispatch() {
+    final machines = state.machines.where(_canPoll).map((m) => m.id).toSet();
+    final accounts = state.accounts.map((a) => a.id).toSet();
+    return state.tasks.any(
+      (task) =>
+          accounts.contains(task.accountId) &&
+          (task.dispatches.any(
+                (d) => !d.finished && machines.contains(d.machineId),
+              ) ||
+              _dispatching.any(
+                (d) => d.$1 == task.id && machines.contains(d.$2),
+              )),
+    );
+  }
+
+  void _syncBackgroundMonitoring({bool? visible}) {
+    final monitor = _androidMonitor;
+    if (monitor == null) return;
+    // Keep a started service until this poll has handed a new order to the OS,
+    // including the immediate reconciliation of a cancellation racing an order.
+    final finishing = monitor.wanted && (polling || _pendingCancellations > 0);
+    monitor.update(
+      wanted:
+          !disposed &&
+          initialized &&
+          state.successNotificationsEnabled &&
+          (finishing || _hasMonitoredDispatch()),
+      visible: visible,
+    );
   }
 
   void _cloudChanged() {
@@ -420,16 +474,42 @@ class AppController extends ChangeNotifier {
     List<TicketTask>? tasks,
     List<ClearedExecution>? clearedExecutions,
     AppThemeMode? themeMode,
+    bool? successNotificationsEnabled,
+    Set<String>? observedOrderNotifications,
   }) => SavedState(
     machines: machines ?? state.machines,
     accounts: accounts ?? state.accounts,
     tasks: tasks ?? state.tasks,
     clearedExecutions: clearedExecutions ?? state.clearedExecutions,
     themeMode: themeMode ?? state.themeMode,
+    successNotificationsEnabled:
+        successNotificationsEnabled ?? state.successNotificationsEnabled,
+    observedOrderNotifications:
+        observedOrderNotifications ?? state.observedOrderNotifications,
   );
 
   Future<void> setThemeMode(AppThemeMode mode) =>
       _save(() => _next(themeMode: mode));
+
+  Future<void> setSuccessNotificationsEnabled(bool enabled) async {
+    if (!initialized || disposed) throw const UserError('配置尚未加载，无法保存。');
+    if (enabled == state.successNotificationsEnabled) return;
+    if (enabled) await requestSuccessNotificationPermission();
+    await _save(
+      () => _next(
+        successNotificationsEnabled: enabled,
+        // A result already on screen when the switch is turned on is history.
+        observedOrderNotifications: {
+          ...state.observedOrderNotifications,
+          ...createdOrderNotificationIds(state, statuses),
+        },
+      ),
+    );
+    if (notificationDeliveryError != null) {
+      notificationDeliveryError = null;
+      _notify();
+    }
+  }
 
   /// Rejects a name another machine uses. Check it before deploying: a
   /// deployment restarts the remote service and cancels its running tasks.
@@ -570,30 +650,25 @@ class AppController extends ChangeNotifier {
   Future<void> _refresh() async {
     try {
       await Future.wait(
-        state.machines
-            .where(
-              (m) =>
-                  m.canConnect && cloudMachineUsable(m) && !isDeploying(m.id),
-            )
-            .map((m) async {
-              try {
-                final s = await gateway.status(m);
-                if (!state.machines.any((v) => identical(v, m)) ||
-                    isDeploying(m.id) ||
-                    !cloudMachineUsable(m)) {
-                  return;
-                }
-                _cacheStatus(m.id, s);
-                connectionErrors.remove(m.id);
-                lastSeen[m.id] = DateTime.now();
-              } catch (e) {
-                if (state.machines.any((v) => identical(v, m)) &&
-                    !isDeploying(m.id) &&
-                    cloudMachineUsable(m)) {
-                  connectionErrors[m.id] = readableError(e);
-                }
-              }
-            }),
+        state.machines.where(_canPoll).map((m) async {
+          try {
+            final s = await gateway.status(m);
+            if (!state.machines.any((v) => identical(v, m)) ||
+                isDeploying(m.id) ||
+                !cloudMachineUsable(m)) {
+              return;
+            }
+            _cacheStatus(m.id, s);
+            connectionErrors.remove(m.id);
+            lastSeen[m.id] = DateTime.now();
+          } catch (e) {
+            if (state.machines.any((v) => identical(v, m)) &&
+                !isDeploying(m.id) &&
+                cloudMachineUsable(m)) {
+              connectionErrors[m.id] = readableError(e);
+            }
+          }
+        }),
       );
       // Also covers submissions whose response was lost before it was recorded.
       try {
@@ -630,15 +705,43 @@ class AppController extends ChangeNotifier {
     // Capture acknowledgements now: a different poll may omit the record
     // while this save waits behind another local state operation.
     final observed = {for (final task in state.tasks) task.id: updates(task)};
-    if (!observed.values.any((value) => value.isNotEmpty)) return;
-    await _save(
-      () => _next(
+    final created = createdOrderNotificationIds(
+      state,
+      statuses,
+    ).difference(state.observedOrderNotifications);
+    if (created.isEmpty && !observed.values.any((value) => value.isNotEmpty)) {
+      return;
+    }
+    final enabledWhenObserved = state.successNotificationsEnabled;
+    final toNotify = <String>{};
+    await _save(() {
+      // A submission reply, cancellation reply and a poll can overlap. Claim
+      // the receipt in the same serialized save as the terminal acknowledgement.
+      if (enabledWhenObserved && state.successNotificationsEnabled) {
+        toNotify.addAll(created.difference(state.observedOrderNotifications));
+      }
+      return _next(
         tasks: [
           for (final t in state.tasks)
             t.withDispatches(observed[t.id] ?? const []),
         ],
-      ),
-    );
+        observedOrderNotifications: {
+          ...state.observedOrderNotifications,
+          ...created,
+        },
+      );
+    });
+    for (final id in toNotify) {
+      if (disposed || !state.successNotificationsEnabled) break;
+      try {
+        notificationDeliveryError = await showSuccessNotification(id)
+            ? null
+            : notificationPermissionHint;
+      } catch (_) {
+        notificationDeliveryError = '上一次抢票成功通知未能发送，请检查系统通知设置。';
+      }
+      _notify();
+    }
   }
 
   Future<Account> addAccount(
@@ -1462,18 +1565,24 @@ class AppController extends ChangeNotifier {
       throw const UserError('关联云服务器不可用或正在释放，请先核对云端状态。');
     }
     final revision = _deploymentRevisions[m.id] ?? 0;
-    final result = await gateway.cancel(m, id);
-    if (revision != (_deploymentRevisions[m.id] ?? 0) ||
-        isDeploying(m.id) ||
-        !cloudMachineUsable(m)) {
-      return;
+    _pendingCancellations++;
+    try {
+      final result = await gateway.cancel(m, id);
+      if (revision != (_deploymentRevisions[m.id] ?? 0) ||
+          isDeploying(m.id) ||
+          !cloudMachineUsable(m)) {
+        return;
+      }
+      if (result.id != id) {
+        throw const UserError('Sisters 返回了不匹配的执行记录，请刷新并核对任务状态。');
+      }
+      _cacheTaskStatus(m.id, result);
+      await _recordDispatches();
+      await refresh();
+    } finally {
+      _pendingCancellations--;
+      _syncBackgroundMonitoring();
     }
-    if (result.id != id) {
-      throw const UserError('Sisters 返回了不匹配的执行记录，请刷新并核对任务状态。');
-    }
-    _cacheTaskStatus(m.id, result);
-    await _recordDispatches();
-    await refresh();
   }
 
   /// The stable ID binds the cloud resource to its saved Sisters connection,
@@ -1949,6 +2058,7 @@ class AppController extends ChangeNotifier {
   @override
   void dispose() {
     disposed = true;
+    _syncBackgroundMonitoring();
     cloud.removeListener(_cloudChanged);
     cloud.dispose();
     _timer?.cancel();

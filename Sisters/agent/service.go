@@ -339,6 +339,7 @@ func (s *Service) worker() {
 				s.update(t, pb.TaskState_TASK_STATE_FAILED, "执行失败，请检查运行环境或任务配置")
 			case out.Status == "succeeded":
 				s.update(t, pb.TaskState_TASK_STATE_SUCCEEDED, "已下单，请到哔哩哔哩订单页确认并支付")
+				t.status.OrderCreated = true
 				t.status.Payment = orderPayment(out, t.status.UpdatedUnixMs)
 			case out.Status == "duplicate_order":
 				s.update(t, pb.TaskState_TASK_STATE_SUCCEEDED, "检测到已有订单，请到哔哩哔哩订单页确认并支付")
