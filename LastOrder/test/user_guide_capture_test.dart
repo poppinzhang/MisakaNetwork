@@ -191,7 +191,7 @@ void main() {
         }
       }
       return AgentStatus(
-        version: '0.4.4',
+        version: '0.5.0',
         biliVersion: '2.15.18',
         runtimeReady: true,
         platform: isLocal ? 'macos/arm64' : 'linux/amd64',
@@ -554,7 +554,7 @@ void main() {
 
     final cloudGateway = FakeGateway()
       ..statusHandler = (_) async => AgentStatus(
-        version: '0.4.4',
+        version: '0.5.0',
         biliVersion: '2.15.18',
         runtimeReady: true,
         platform: 'linux/amd64',

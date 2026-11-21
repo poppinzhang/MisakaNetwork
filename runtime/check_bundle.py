@@ -24,7 +24,7 @@ def check(binary: Path) -> None:
         if error:
             assert not event["ok"] and event["error"]["code"] == error
         elif request["op"] == "ping":
-            assert event["data"] == {"version": "0.4.4", "bili_version": "2.15.18", "protocol": 1,
+            assert event["data"] == {"version": "0.5.0", "bili_version": "2.15.18", "protocol": 1,
                                      "ready": True, "supports_start_delay": True}
         else:
             assert not event["data"]["ok"] and event["data"]["errors"]

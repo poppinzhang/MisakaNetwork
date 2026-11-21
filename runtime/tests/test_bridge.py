@@ -79,7 +79,7 @@ class BridgeTests(unittest.TestCase):
     def test_ping_has_real_version(self):
         code, events = self.invoke({"op": "ping"})
         self.assertEqual(code, 0)
-        self.assertEqual(events[-1]["data"]["version"], "0.4.4")
+        self.assertEqual(events[-1]["data"]["version"], "0.5.0")
         self.assertEqual(events[-1]["data"]["bili_version"], "2.15.18")
         self.assertIs(events[-1]["data"]["supports_start_delay"], True)
 

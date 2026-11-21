@@ -8,7 +8,7 @@ Windows 管理台最低 Windows 10，目标 x64；Android 最低 Android 16（AP
 
 0.4.0 新增 Windows 10+ x64 Sisters 及 Windows SCM 服务部署，三端完整安装包均携带 Linux/macOS x64/arm64 与 Windows x64 五种同版本 Sisters 包；机器准备、权限与验收边界见 [Windows Sisters](../Sisters/Windows支持.md)。Android 后台状态同步由系统调度限制，不承诺后台常驻；部署在后台线程执行，切换应用不会中断，但系统回收进程时无法拦截，部署可能中断且无法回滚；切换应用或关闭 LastOrder 不会停止远程 Sisters 已接受的任务。
 
-开发中的 Android 管理端可在「配置」开启「抢票成功通知」。跟踪已分发的任务时会启用前台服务，切换应用或锁屏后继续尝试同步，到期或任务结束时停止。运行状态和成功提醒分别使用静默渠道与订单通知渠道。[Android 切后台与锁屏](抢票成功通知.md#android-切后台与锁屏)
+从 0.5.0 起，Android 管理端可在「配置」开启「抢票成功通知」。跟踪已分发的任务时会启用前台服务，切换应用或锁屏后继续尝试同步，到期或任务结束时停止。运行状态和成功提醒分别使用静默渠道与订单通知渠道。[Android 切后台与锁屏](抢票成功通知.md#android-切后台与锁屏)
 
 ## Windows
 

@@ -2,16 +2,20 @@
 
 ## unstaged
 
+## 0.5.0 — 2026-11-22
+
 - LastOrder 顶栏现在从左到右为「立即刷新」「配置」。外观主题和新增的「抢票成功通知」开关集中在「配置」中。
 - 开启通知后，LastOrder 同步到本次成功创建的新订单时，通过 Android 手机通知或 macOS、Windows 系统通知提醒核对付款。默认关闭，已有订单、进度、失败和取消均保持静默。请等任务结束后重新部署 Sisters，以便回报新订单标记。[抢票成功通知](docs/LastOrder/抢票成功通知.md)
 - Android 开启「抢票成功通知」后，等待已分发任务结果期间会启动前台服务，按 Home 或锁屏后继续尝试同步。系统通知栏以静默状态显示监控正在运行，任务结束或关闭通知开关后自动停止监控服务。
 - 创建、编辑定时任务时可设置「开抢额外延迟（毫秒）」，范围 0–60000，默认 30。设为 0 即按开售时间开始；清除开售时间则在机器开始执行任务时立即开抢。复制任务会保留延迟，旧任务缺少该设置时按 30 毫秒读取。
 - Sisters 吸收 biliTickerBuy [#1143](https://github.com/mikumifa/biliTickerBuy/pull/1143) 的时钟修复。定时任务先通过 NTP 校准任务时钟，失败时使用节点系统时间。倒计时与订单请求时间戳使用同一时钟，省去原先读取会员购 HTTP `Date` 的请求。使用此功能前，先停止或等待已有任务结束，再重新部署 Sisters；LastOrder 会在提交定时任务前检查节点能力。
 - 离线验证覆盖定时与立即任务、NTP 成功与回退、旧节点及同版本旧运行时、请求幂等和任务设置的保存。已通过两套 Python 依赖集、Go 竞态测试与 vet、Flutter 分析与全量测试及 macOS arm64 本地运行时冒烟。[来源与验证范围](docs/biliTickerBuy运行时.md#定时任务时钟复核)
+- 统一版本为 **0.5.0+18**，Android 两种安装包的构建号分别为 `2018`（arm64）和 `4018`（x64）。升级后可继续使用已保存的账号、任务与云资源记录。核对订单并等当前任务结束后，在「机器管理」重新部署所有 Sisters。重部署会清空节点上的任务历史和付款入口。
+- Android 深度休眠或后台同步达到系统时限时，提醒可能延迟，打开 LastOrder 可立即同步。Android 16 模拟器已验证按 Home 和熄屏后的通知投递，使用合成结果。[验证和已知限制](docs/releases/0.5.0.md)
 
 ## 0.4.4 — 2026-11-21
 
-- **交付状态：发布准备完成，待构建。** 源码版本、更新记录与 [0.4.4 发布记录](docs/releases/0.4.4.md) 已准备；尚未执行 GitHub Actions 全平台构建，也未创建公开 Release。不预写 CI 通过或真实业务验收。当前公开安装包仍是 [0.4.3](https://github.com/poppinzhang/MisakaNetwork/releases/tag/0.4.3)。
+- **交付状态：0.4.4+17 已公开发布。** 正式构建覆盖五种 LastOrder 安装包和五种 Sisters 部署包，Release 包含 12 项资产。[发布记录](docs/releases/0.4.4.md) · [正式 CI](https://github.com/poppinzhang/MisakaNetwork/actions/runs/44773366152)
 - 各组件、平台版本声明与构建号统一更新为 **0.4.4+17**（Sisters、control/helper、Python runtime、LastOrder、Windows PE 资源与测试基线同步更新），Android `arm64` / `amd64` 的 `versionCode` 递增为 `2017` / `4017`；五种 LastOrder 与五种 Sisters 目标须按本版本全部重新构建。内嵌 biliTickerBuy 继续固定为 `2.15.18`（`227ebf73f5af3eec0019984a7cbcb722977453e8`）。本版不改变上游版本、固定提交、依赖锁定、导入白名单或运行参数；运行时更新统一版本号、调整少量面向用户的中文提示词，并包含关联商品子项目详情复检的临时缺陷补丁。标准 HTTPS 验证、`standard` 下单策略、默认请求间隔（500 毫秒）、空通知配置与禁止 Web UI/Gradio 的约束不变。复核见 [0.4.4 统一版本复核](docs/biliTickerBuy运行时.md#044-统一版本复核2026-11-21) 与 [关联商品子项目复检适配复核](docs/biliTickerBuy运行时.md#关联商品子项目复检适配复核2026-11-20)。
 - 修复关联商品票档在开始等待前因子项目详情查询失败而退出。关联票沿用建任务时记录的主项目状态，并继续预热连接。
 - 修复公有云机器列表已无该云厂商的未释放或待核实服务器卡片后，仍提示「仍有未释放或待核实的云资源，不能移除管理凭证。」导致无法解绑云账号的问题：已手动清理/隐藏的待核实卡片与遗留的待确认共享网络记录不再阻止移除凭证或更换访问密钥；移除凭证或切换旧未验证凭证的访问密钥 ID 时，会同步清理该厂商已隐藏的待核实卡片记录并取消其后台轮询（已释放历史记录和共享网络账本仍保留，若使用同一访问密钥重新绑定仍避免重复建网）；机器列表中仍可见的未释放或待核实云服务器继续阻止移除凭证。
@@ -22,7 +26,7 @@
 - 新增图文并茂的 [新手使用指南](docs/使用指南.md)（含 11 张 LastOrder 界面实截与可选截图回归用例 `LastOrder/test/user_guide_capture_test.dart`），覆盖软件安装、本机/远程部署 Sisters、扫码与 Cookie 登录、创建与分发任务、核对订单付款，以及腾讯云、阿里云、火山引擎凭证配置与按量创建云服务器全流程，并在 `README.md` 顶部导航与快速上手提供入口。
 - 修复 Windows CI 高并发执行 Flutter 测试时，`process_windows_test.dart` 子进程树清理用例因首次加载 PowerShell `ConvertFrom-Json` / `Get-Process` 模块与二次启动 `powershell.exe` 超过 3 秒超时阈值而未写出子进程 PID 的问题，改用已加载的 .NET `Process.Start('ping.exe', ...)` 与 `File.WriteAllText` 直接启动并记录子进程。
 - 升级影响：安装 0.4.4 LastOrder 后，须在无活跃任务时将全部 Sisters（含 Linux/macOS/Windows）重新部署为 `0.4.4`，避免统一版本校验拒绝旧包。重部署会停止当前任务并清空远程任务记录。账号、任务配置、云资源记录与本地存储格式不变，无需重新登录或重建。
-- 验证范围：本地 macOS 全量 Go race（10 个包，含 `-count=1` 非缓存复跑）与宿主及 Windows x64 `go vet` 通过，Windows x64 测试程序仅交叉编译、未在本机执行；135 项脚本测试通过；`flutter analyze` 无问题，967 项 Flutter 测试通过、3 项可选测试跳过；runtime 在系统 Python 为 97 项通过、21 项跳过，桌面锁定依赖 109 项通过、9 项跳过，Android 锁定依赖 114 项通过、4 项跳过。许可检查、`release_ci.py preflight --ref refs/tags/0.4.4` 与 `git diff --check` 通过。全平台安装包、公开 Release、Windows 10 真机 SSH 部署与真实账号业务验收均未执行。详见 [0.4.4 发布记录](docs/releases/0.4.4.md)。
+- 验证范围：本地 macOS 全量 Go race（10 个包，含 `-count=1` 非缓存复跑）与宿主及 Windows x64 `go vet` 通过，Windows x64 测试程序仅交叉编译、未在本机执行；135 项脚本测试通过；`flutter analyze` 无问题，967 项 Flutter 测试通过、3 项可选测试跳过；runtime 在系统 Python 为 97 项通过、21 项跳过，桌面锁定依赖 109 项通过、9 项跳过，Android 锁定依赖 114 项通过、4 项跳过。许可检查、`release_ci.py preflight --ref refs/tags/0.4.4` 与 `git diff --check` 通过。随后全平台安装包通过正式 CI 并公开发布。Windows 10 真机 SSH 部署与真实账号业务尚待验证。详见 [0.4.4 发布记录](docs/releases/0.4.4.md)。
 
 ## 0.4.3 — 2026-11-19
 
